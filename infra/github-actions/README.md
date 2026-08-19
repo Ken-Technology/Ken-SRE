@@ -2,11 +2,11 @@
 
 This directory holds the inventory, host setup, runner configuration, and cutover records for Ken's self-hosted GitHub Actions platform.
 
-## Current host blocker
+## Live host gate
 
-Do not run host provisioning until `devws` has at least 25 GiB free on `/`. The latest readback found about 923 MiB free. `provision-host.sh` checks this before it opens the SSH apply phase, so it will not run `apt-get update` or install packages in the current state.
+The fresh root-filesystem readback found about 165 GiB free after the Grok process owner cleaned its transient worktrees. Treat that number as dated evidence. Always run the live preflight immediately before apply. `provision-host.sh` requires at least 25 GiB free on `/` before it opens the SSH apply phase, so a later drop in free space stops the run before `apt-get update` or package installation.
 
-The script reports root consumers and an `apt-get -s autoremove` simulation during preflight. It does not delete logs, caches, containers, volumes, application data, runner data, or user files. Root-disk remediation needs a separate readback and approval.
+The script reports root consumers and an `apt-get -s autoremove` simulation during preflight. It does not delete logs, caches, containers, volumes, application data, runner data, or user files. If the live gate fails again, root-disk remediation needs a separate readback and approval.
 
 ## Host provisioning
 

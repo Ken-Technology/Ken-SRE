@@ -240,6 +240,10 @@ SH
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'df %s\n' "$*" >>"${FAKE_COMMAND_LOG:?}"
+if [[ " $* " == *' -P '* && "$*" == *--output=* ]]; then
+  echo 'df: options -P and --output are mutually exclusive' >&2
+  exit 1
+fi
 path="${*: -1}"
 if [[ "$*" == *iavail* ]]; then
   value=4000000
@@ -674,6 +678,13 @@ SH
   else
     fail "dry run did not preserve the no-mutation boundary"
     printf '%s\n' "${output}"
+  fi
+  if (( status == 0 )) &&
+    grep -Fxq 'df --output=iavail /' "${command_log}" &&
+    grep -Fxq "df --output=iavail ${data_root}" "${command_log}"; then
+    pass "embedded inode metric uses GNU-compatible df options"
+  else
+    fail "embedded inode metric used incompatible df options"
   fi
 
   echo "== host apply readback =="

@@ -85,7 +85,7 @@ root_free_bytes() {
 }
 
 free_inodes() {
-  df --output=iavail -P "$1" | awk 'NR == 2 { gsub(/[[:space:]]/, ""); print }'
+  df --output=iavail "$1" | awk 'NR == 2 { gsub(/[[:space:]]/, ""); print }'
 }
 
 data_mount() {
