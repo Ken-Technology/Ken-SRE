@@ -461,8 +461,17 @@ net_xml() {
   else
     address=192.168.211.1; netmask=255.255.255.0; bridge=virbr-deploy; start=192.168.211.10; end=192.168.211.254
   fi
+  extra=''
+  case "${FAKE_SSH_PROFILE:-good}:${name}" in
+    extra-network-ip:ken-ci-net)
+      extra="<ip address='172.30.0.1' netmask='255.255.255.0'/>"
+      ;;
+    extra-network-route:ken-ci-net)
+      extra="<route address='172.31.0.0' prefix='16' gateway='192.168.210.2'/>"
+      ;;
+  esac
   cat <<EOF
-<network><name>${name}</name><forward mode='nat'/><bridge name='${bridge}' stp='on' delay='0'/><ip address='${address}' netmask='${netmask}'><dhcp><range start='${start}' end='${end}'/></dhcp></ip></network>
+<network><name>${name}</name><forward mode='nat'/><bridge name='${bridge}' stp='on' delay='0'/><ip address='${address}' netmask='${netmask}'><dhcp><range start='${start}' end='${end}'/></dhcp></ip>${extra}</network>
 EOF
 }
 case "${1:-}" in
@@ -481,8 +490,14 @@ case "${1:-}" in
     [[ "$(flag pool "$2" active)" == 0 ]] || { echo 'already active' >&2; exit 1; }
     set_flag pool "$2" active 1
     ;;
-  pool-destroy) set_flag pool "$2" active 0 ;;
-  pool-undefine) rm -f "${state}/pool.$2."* ;;
+  pool-destroy)
+    [[ "${FAKE_SSH_PROFILE:-good}" != rollback-pool-destroy-fails ]] || { echo 'injected pool-destroy failure' >&2; exit 1; }
+    set_flag pool "$2" active 0
+    ;;
+  pool-undefine)
+    [[ "${FAKE_SSH_PROFILE:-good}" != rollback-pool-undefine-fails ]] || { echo 'injected pool-undefine failure' >&2; exit 1; }
+    rm -f "${state}/pool.$2."*
+    ;;
   net-info) net_info "$2" ;;
   net-dumpxml) net_xml "$2" ;;
   net-list)
@@ -495,7 +510,11 @@ case "${1:-}" in
   net-define)
     name="$(sed -n "s:.*<name>\([^<]*\)</name>.*:\1:p" "$2")"
     if [[ "${FAKE_SSH_PROFILE:-good}" == partial-failure && "${name}" == ken-deploy-net ]] ||
-       [[ "${FAKE_SSH_PROFILE:-good}" == partial-preexisting && "${name}" == ken-deploy-net ]]; then
+       [[ "${FAKE_SSH_PROFILE:-good}" == partial-preexisting && "${name}" == ken-deploy-net ]] ||
+       [[ "${FAKE_SSH_PROFILE:-good}" == rollback-net-destroy-fails && "${name}" == ken-deploy-net ]] ||
+       [[ "${FAKE_SSH_PROFILE:-good}" == rollback-net-undefine-fails && "${name}" == ken-deploy-net ]] ||
+       [[ "${FAKE_SSH_PROFILE:-good}" == rollback-pool-destroy-fails && "${name}" == ken-deploy-net ]] ||
+       [[ "${FAKE_SSH_PROFILE:-good}" == rollback-pool-undefine-fails && "${name}" == ken-deploy-net ]]; then
       echo 'injected deploy network failure' >&2
       exit 1
     fi
@@ -511,8 +530,14 @@ case "${1:-}" in
     [[ "$(flag net "$2" active)" == 0 ]] || { echo 'already active' >&2; exit 1; }
     set_flag net "$2" active 1
     ;;
-  net-destroy) set_flag net "$2" active 0 ;;
-  net-undefine) rm -f "${state}/net.$2."* ;;
+  net-destroy)
+    [[ "${FAKE_SSH_PROFILE:-good}" != rollback-net-destroy-fails || "$2" != ken-ci-net ]] || { echo 'injected net-destroy failure' >&2; exit 1; }
+    set_flag net "$2" active 0
+    ;;
+  net-undefine)
+    [[ "${FAKE_SSH_PROFILE:-good}" != rollback-net-undefine-fails || "$2" != ken-ci-net ]] || { echo 'injected net-undefine failure' >&2; exit 1; }
+    rm -f "${state}/net.$2."*
+    ;;
   nodeinfo) echo 'CPU model: fake' ;;
   *) echo "unsupported virsh invocation: $*" >&2; exit 64 ;;
 esac
@@ -579,7 +604,7 @@ SH
     shift
     reset_fixture
     case "${profile}" in
-      existing-running|wrong-prefix) seed_existing_resources 1 1 ;;
+      existing-running|wrong-prefix|extra-network-ip|extra-network-route) seed_existing_resources 1 1 ;;
       preexisting-inactive) seed_existing_resources 0 0 ;;
       partial-preexisting)
         seed_existing_resources 0 0
@@ -619,7 +644,7 @@ SH
     fail "storage symlink escape was not rejected before mutation"
   fi
 
-  for profile in route-conflict bridge-conflict docker-conflict wrong-prefix; do
+  for profile in route-conflict bridge-conflict docker-conflict wrong-prefix extra-network-ip extra-network-route; do
     exercise "${profile}" root@167.235.8.250
     if (( status != 0 )) && grep -Fq "network" <<<"${output}" && ! grep -Fq 'apt-get update' "${command_log}"; then
       pass "${profile} fails before package mutation"
@@ -733,6 +758,20 @@ SH
     fail "partial failure did not restore preexisting resource state"
     printf '%s\n' "${output}"
   fi
+
+  for profile in rollback-net-destroy-fails rollback-net-undefine-fails rollback-pool-destroy-fails rollback-pool-undefine-fails; do
+    exercise "${profile}" root@167.235.8.250
+    retained_state="$(find "${state_root}" -maxdepth 1 -type d -name 'ken-actions-host.*' -print -quit)"
+    if (( status != 0 )) &&
+      grep -Fq 'AUTO_ROLLBACK_STATUS=failed' <<<"${output}" &&
+      ! grep -Fq 'AUTO_ROLLBACK_STATUS=ok' <<<"${output}" &&
+      [[ -n "${retained_state}" && -d "${retained_state}" ]]; then
+      pass "${profile} is reported and retains rollback state"
+    else
+      fail "${profile} was hidden or lost rollback evidence"
+      printf '%s\n' "${output}"
+    fi
+  done
 
   echo "== host shell syntax =="
   embedded="${test_dir}/embedded.sh"

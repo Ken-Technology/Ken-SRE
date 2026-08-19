@@ -279,21 +279,113 @@ network_exists() {
 }
 
 network_contract() {
-  local name="$1" bridge="$2" address="$3" netmask="$4" start="$5" end="$6" xml actual
+  local name="$1" bridge="$2" address="$3" netmask="$4" start="$5" end="$6" xml contract_error
   network_exists "${name}" || return 0
   xml="$(virsh net-dumpxml "${name}")"
-  for field in \
-    "bridge:$(xml_attribute "${xml}" bridge name):${bridge}" \
-    "bridge-stp:$(xml_attribute "${xml}" bridge stp):on" \
-    "bridge-delay:$(xml_attribute "${xml}" bridge delay):0" \
-    "address:$(xml_attribute "${xml}" ip address):${address}" \
-    "netmask:$(xml_attribute "${xml}" ip netmask):${netmask}" \
-    "dhcp-start:$(xml_attribute "${xml}" range start):${start}" \
-    "dhcp-end:$(xml_attribute "${xml}" range end):${end}" \
-    "forward:$(xml_attribute "${xml}" forward mode):nat"; do
-    actual="${field#*:}"
-    [[ "${actual%%:*}" == "${field##*:}" ]] || die "existing ${name} network has an unexpected ${field%%:*}"
-  done
+  command -v python3 >/dev/null 2>&1 || die "python3 is required to validate the full ${name} network contract"
+  if ! contract_error="$(python3 - "${name}" "${bridge}" "${address}" "${netmask}" "${start}" "${end}" "${xml}" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+name, bridge, address, netmask, start, end, xml = sys.argv[1:]
+
+
+def reject(message):
+    print(message)
+    raise SystemExit(1)
+
+
+def exact_attributes(element, expected):
+    if element.attrib != expected:
+        reject(f"{element.tag} attributes are {element.attrib!r}, expected {expected!r}")
+
+
+def no_content(element):
+    if list(element) or (element.text or "").strip():
+        reject(f"{element.tag} contains unexpected nested or text content")
+
+
+try:
+    root = ET.fromstring(xml)
+except ET.ParseError as exc:
+    reject(f"XML is not parseable: {exc}")
+
+if root.tag != "network":
+    reject(f"root element is {root.tag!r}, expected 'network'")
+unexpected_root_attributes = set(root.attrib) - {"connections"}
+if unexpected_root_attributes:
+    reject(f"network has functional attributes {sorted(unexpected_root_attributes)!r}")
+if "connections" in root.attrib and not root.attrib["connections"].isdigit():
+    reject("network connections metadata is not an unsigned integer")
+
+children = list(root)
+allowed = {"name", "uuid", "forward", "bridge", "mac", "ip"}
+unexpected = [child.tag for child in children if child.tag not in allowed]
+if unexpected:
+    reject(f"network contains unexpected elements {unexpected!r}")
+
+
+def elements(tag, required=1, maximum=1):
+    matches = [child for child in children if child.tag == tag]
+    if not (required <= len(matches) <= maximum):
+        reject(f"network has {len(matches)} {tag} elements, expected {required}..{maximum}")
+    return matches
+
+
+name_element = elements("name")[0]
+exact_attributes(name_element, {})
+if list(name_element) or (name_element.text or "").strip() != name:
+    reject("name element does not exactly match the approved network name")
+
+uuid_elements = elements("uuid", required=0)
+if uuid_elements:
+    uuid_element = uuid_elements[0]
+    exact_attributes(uuid_element, {})
+    if list(uuid_element) or not re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        (uuid_element.text or "").strip(),
+    ):
+        reject("uuid metadata is not a single canonical UUID")
+
+forward = elements("forward")[0]
+exact_attributes(forward, {"mode": "nat"})
+no_content(forward)
+
+bridge_element = elements("bridge")[0]
+exact_attributes(bridge_element, {"name": bridge, "stp": "on", "delay": "0"})
+no_content(bridge_element)
+
+mac_elements = elements("mac", required=0)
+if mac_elements:
+    mac = mac_elements[0]
+    if set(mac.attrib) != {"address"} or not re.fullmatch(
+        r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", mac.attrib["address"]
+    ):
+        reject("mac metadata is not a single canonical address")
+    no_content(mac)
+
+ip = elements("ip")[0]
+exact_attributes(ip, {"address": address, "netmask": netmask})
+if (ip.text or "").strip():
+    reject("ip contains unexpected text content")
+if [child.tag for child in ip] != ["dhcp"]:
+    reject("ip must contain exactly one dhcp element and no other functional elements")
+
+dhcp = ip[0]
+exact_attributes(dhcp, {})
+if (dhcp.text or "").strip():
+    reject("dhcp contains unexpected text content")
+if [child.tag for child in dhcp] != ["range"]:
+    reject("dhcp must contain exactly one range element and no other functional elements")
+
+dhcp_range = dhcp[0]
+exact_attributes(dhcp_range, {"start": start, "end": end})
+no_content(dhcp_range)
+PY
+)"; then
+    die "existing ${name} network does not match the full approved contract: ${contract_error}"
+  fi
   [[ "$(virsh net-info "${name}" | awk -F: '/^Persistent:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }')" == yes ]] || die "existing ${name} network is transient and cannot be converged safely"
 }
 
@@ -511,66 +603,159 @@ capture_resource_state() {
 }
 
 restore_pool_state() {
-  local file="$1" existed active autostart current_info current_state
+  local file="$1" existed active autostart current_info current_state current_autostart failed=0
   existed="$(state_value "${file}" EXISTED)"
   active="$(state_value "${file}" ACTIVE)"
   autostart="$(state_value "${file}" AUTOSTART)"
-  if [[ "${existed}" == 0 ]]; then
-    if virsh pool-info "${POOL_NAME}" >/dev/null 2>&1; then
-      current_state="$(virsh pool-info "${POOL_NAME}" | awk -F: '/^State:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }')"
-      [[ "${current_state}" != running ]] || virsh pool-destroy "${POOL_NAME}" >/dev/null
-      virsh pool-undefine "${POOL_NAME}" >/dev/null
-    fi
-    return
+  if [[ ! "${existed}" =~ ^[01]$ || ! "${active}" =~ ^[01]$ || ! "${autostart}" =~ ^[01]$ ]]; then
+    echo "ROLLBACK_ERROR=pool:${POOL_NAME}:recorded state is invalid" >&2
+    return 1
   fi
-  virsh pool-info "${POOL_NAME}" >/dev/null 2>&1 || die "cannot restore missing preexisting ${POOL_NAME} pool"
-  current_info="$(virsh pool-info "${POOL_NAME}")"
+  if [[ "${existed}" == 0 ]]; then
+    if current_info="$(virsh pool-info "${POOL_NAME}" 2>/dev/null)"; then
+      current_state="$(awk -F: '/^State:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }' <<<"${current_info}")"
+      if [[ "${current_state}" == running ]] && ! virsh pool-destroy "${POOL_NAME}" >/dev/null; then
+        echo "ROLLBACK_ERROR=pool:${POOL_NAME}:pool-destroy failed" >&2
+        failed=1
+      fi
+      if ! virsh pool-undefine "${POOL_NAME}" >/dev/null; then
+        echo "ROLLBACK_ERROR=pool:${POOL_NAME}:pool-undefine failed" >&2
+        failed=1
+      fi
+    fi
+    if virsh pool-info "${POOL_NAME}" >/dev/null 2>&1; then
+      echo "ROLLBACK_ERROR=pool:${POOL_NAME}:expected resource to be absent" >&2
+      failed=1
+    fi
+    return "${failed}"
+  fi
+  if ! current_info="$(virsh pool-info "${POOL_NAME}" 2>/dev/null)"; then
+    echo "ROLLBACK_ERROR=pool:${POOL_NAME}:preexisting resource is missing" >&2
+    return 1
+  fi
   current_state="$(awk -F: '/^State:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }' <<<"${current_info}")"
   if [[ "${active}" == 1 && "${current_state}" != running ]]; then
-    virsh pool-start "${POOL_NAME}" >/dev/null
+    if ! virsh pool-start "${POOL_NAME}" >/dev/null; then
+      echo "ROLLBACK_ERROR=pool:${POOL_NAME}:pool-start failed" >&2
+      failed=1
+    fi
   elif [[ "${active}" == 0 && "${current_state}" == running ]]; then
-    virsh pool-destroy "${POOL_NAME}" >/dev/null
+    if ! virsh pool-destroy "${POOL_NAME}" >/dev/null; then
+      echo "ROLLBACK_ERROR=pool:${POOL_NAME}:pool-destroy failed" >&2
+      failed=1
+    fi
   fi
   if [[ "${autostart}" == 1 ]]; then
-    virsh pool-autostart "${POOL_NAME}" >/dev/null
+    if ! virsh pool-autostart "${POOL_NAME}" >/dev/null; then
+      echo "ROLLBACK_ERROR=pool:${POOL_NAME}:pool-autostart failed" >&2
+      failed=1
+    fi
   else
-    virsh pool-autostart "${POOL_NAME}" --disable >/dev/null
+    if ! virsh pool-autostart "${POOL_NAME}" --disable >/dev/null; then
+      echo "ROLLBACK_ERROR=pool:${POOL_NAME}:pool-autostart disable failed" >&2
+      failed=1
+    fi
   fi
+  if ! current_info="$(virsh pool-info "${POOL_NAME}" 2>/dev/null)"; then
+    echo "ROLLBACK_ERROR=pool:${POOL_NAME}:resource disappeared during restore" >&2
+    return 1
+  fi
+  current_state="$(awk -F: '/^State:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }' <<<"${current_info}")"
+  current_autostart="$(awk -F: '/^Autostart:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }' <<<"${current_info}")"
+  if [[ ( "${active}" == 1 && "${current_state}" != running ) || ( "${active}" == 0 && "${current_state}" == running ) ]]; then
+    echo "ROLLBACK_ERROR=pool:${POOL_NAME}:active-state verification failed" >&2
+    failed=1
+  fi
+  if [[ ( "${autostart}" == 1 && "${current_autostart}" != yes ) || ( "${autostart}" == 0 && "${current_autostart}" != no ) ]]; then
+    echo "ROLLBACK_ERROR=pool:${POOL_NAME}:autostart verification failed" >&2
+    failed=1
+  fi
+  return "${failed}"
 }
 
 restore_network_state() {
-  local name="$1" file="$2" existed active autostart current_info current_active
+  local name="$1" file="$2" existed active autostart current_info current_active current_autostart failed=0
   existed="$(state_value "${file}" EXISTED)"
   active="$(state_value "${file}" ACTIVE)"
   autostart="$(state_value "${file}" AUTOSTART)"
-  if [[ "${existed}" == 0 ]]; then
-    if virsh net-info "${name}" >/dev/null 2>&1; then
-      current_active="$(virsh net-info "${name}" | awk -F: '/^Active:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }')"
-      [[ "${current_active}" != yes ]] || virsh net-destroy "${name}" >/dev/null
-      virsh net-undefine "${name}" >/dev/null
-    fi
-    return
+  if [[ ! "${existed}" =~ ^[01]$ || ! "${active}" =~ ^[01]$ || ! "${autostart}" =~ ^[01]$ ]]; then
+    echo "ROLLBACK_ERROR=network:${name}:recorded state is invalid" >&2
+    return 1
   fi
-  virsh net-info "${name}" >/dev/null 2>&1 || die "cannot restore missing preexisting ${name} network"
-  current_info="$(virsh net-info "${name}")"
+  if [[ "${existed}" == 0 ]]; then
+    if current_info="$(virsh net-info "${name}" 2>/dev/null)"; then
+      current_active="$(awk -F: '/^Active:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }' <<<"${current_info}")"
+      if [[ "${current_active}" == yes ]] && ! virsh net-destroy "${name}" >/dev/null; then
+        echo "ROLLBACK_ERROR=network:${name}:net-destroy failed" >&2
+        failed=1
+      fi
+      if ! virsh net-undefine "${name}" >/dev/null; then
+        echo "ROLLBACK_ERROR=network:${name}:net-undefine failed" >&2
+        failed=1
+      fi
+    fi
+    if virsh net-info "${name}" >/dev/null 2>&1; then
+      echo "ROLLBACK_ERROR=network:${name}:expected resource to be absent" >&2
+      failed=1
+    fi
+    return "${failed}"
+  fi
+  if ! current_info="$(virsh net-info "${name}" 2>/dev/null)"; then
+    echo "ROLLBACK_ERROR=network:${name}:preexisting resource is missing" >&2
+    return 1
+  fi
   current_active="$(awk -F: '/^Active:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }' <<<"${current_info}")"
   if [[ "${active}" == 1 && "${current_active}" != yes ]]; then
-    virsh net-start "${name}" >/dev/null
+    if ! virsh net-start "${name}" >/dev/null; then
+      echo "ROLLBACK_ERROR=network:${name}:net-start failed" >&2
+      failed=1
+    fi
   elif [[ "${active}" == 0 && "${current_active}" == yes ]]; then
-    virsh net-destroy "${name}" >/dev/null
+    if ! virsh net-destroy "${name}" >/dev/null; then
+      echo "ROLLBACK_ERROR=network:${name}:net-destroy failed" >&2
+      failed=1
+    fi
   fi
   if [[ "${autostart}" == 1 ]]; then
-    virsh net-autostart "${name}" >/dev/null
+    if ! virsh net-autostart "${name}" >/dev/null; then
+      echo "ROLLBACK_ERROR=network:${name}:net-autostart failed" >&2
+      failed=1
+    fi
   else
-    virsh net-autostart "${name}" --disable >/dev/null
+    if ! virsh net-autostart "${name}" --disable >/dev/null; then
+      echo "ROLLBACK_ERROR=network:${name}:net-autostart disable failed" >&2
+      failed=1
+    fi
   fi
+  if ! current_info="$(virsh net-info "${name}" 2>/dev/null)"; then
+    echo "ROLLBACK_ERROR=network:${name}:resource disappeared during restore" >&2
+    return 1
+  fi
+  current_active="$(awk -F: '/^Active:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }' <<<"${current_info}")"
+  current_autostart="$(awk -F: '/^Autostart:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }' <<<"${current_info}")"
+  if [[ ( "${active}" == 1 && "${current_active}" != yes ) || ( "${active}" == 0 && "${current_active}" != no ) ]]; then
+    echo "ROLLBACK_ERROR=network:${name}:active-state verification failed" >&2
+    failed=1
+  fi
+  if [[ ( "${autostart}" == 1 && "${current_autostart}" != yes ) || ( "${autostart}" == 0 && "${current_autostart}" != no ) ]]; then
+    echo "ROLLBACK_ERROR=network:${name}:autostart verification failed" >&2
+    failed=1
+  fi
+  return "${failed}"
 }
 
 restore_resource_state() {
-  local destination="$1"
-  restore_network_state ken-deploy-net "${destination}/net-ken-deploy-net.state"
-  restore_network_state ken-ci-net "${destination}/net-ken-ci-net.state"
-  restore_pool_state "${destination}/pool-ken-actions.state"
+  local destination="$1" failed=0
+  if ! restore_network_state ken-deploy-net "${destination}/net-ken-deploy-net.state"; then
+    failed=1
+  fi
+  if ! restore_network_state ken-ci-net "${destination}/net-ken-ci-net.state"; then
+    failed=1
+  fi
+  if ! restore_pool_state "${destination}/pool-ken-actions.state"; then
+    failed=1
+  fi
+  return "${failed}"
 }
 
 validate_state_directory() {
@@ -673,7 +858,9 @@ case "${phase}" in
   rollback)
     state_root="${2:-}"
     validate_state_directory "${state_root}"
-    restore_resource_state "${state_root}"
+    if ! restore_resource_state "${state_root}"; then
+      die "rollback failed; state retained at ${state_root}"
+    fi
     echo 'ROLLBACK_STATUS=ok'
     ;;
   *)
