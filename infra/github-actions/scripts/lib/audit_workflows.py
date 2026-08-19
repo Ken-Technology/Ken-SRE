@@ -448,11 +448,30 @@ def assert_private_hosted_flag(repo: dict[str, Any]) -> None:
                     )
 
 
-def build_input_manifest(collect_dir: Path, repositories: list[dict[str, Any]], collected_at: str) -> dict[str, Any]:
-    hasher = hashlib.sha256()
-    repos_out: list[dict[str, Any]] = []
-    for repo in repositories:
-        repo_dir = collect_dir / "repos" / repo["name"]
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+
+
+def _secret_names(payload: Any) -> list[str]:
+    names: list[str] = []
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict) and item.get("name"):
+                names.append(str(item["name"]))
+            elif isinstance(item, str):
+                names.append(item)
+    return sorted(set(names))
+
+
+def collect_input_snapshot(collect_dir: Path) -> dict[str, Any]:
+    repos_index = load_json(collect_dir / "repos.json", [])
+    repo_snapshots: list[dict[str, Any]] = []
+    for repo_info in repos_index:
+        name = repo_info.get("name")
+        if not name:
+            continue
+        repo_dir = collect_dir / "repos" / name
+        meta = load_json(repo_dir / "meta.json", {})
         tree = load_json(repo_dir / "tree.json", {})
         sha_by_path = {
             item.get("path"): item.get("sha")
@@ -460,28 +479,150 @@ def build_input_manifest(collect_dir: Path, repositories: list[dict[str, Any]], 
             if isinstance(item, dict) and item.get("path")
         }
         workflows: list[dict[str, Any]] = []
-        for workflow in repo.get("workflows") or []:
-            path = workflow["path"]
-            sha = sha_by_path.get(path)
-            file_path = repo_dir / "workflows" / Path(path).name
-            if not sha and file_path.exists():
-                sha = hashlib.sha256(file_path.read_bytes()).hexdigest()
-            workflows.append({"path": path, "sha": sha})
-            hasher.update(f"{repo['name']}|{repo.get('default_sha')}|{path}|{sha}\n".encode())
-        repos_out.append(
+        wf_dir = repo_dir / "workflows"
+        if wf_dir.exists():
+            for wf_path in sorted(wf_dir.rglob("*")):
+                if wf_path.suffix.lower() not in {".yml", ".yaml"}:
+                    continue
+                rel = ".github/workflows/" + wf_path.relative_to(wf_dir).as_posix()
+                sha = sha_by_path.get(rel) or hashlib.sha256(wf_path.read_bytes()).hexdigest()
+                workflows.append({"path": rel, "sha": sha})
+        environments: list[dict[str, Any]] = []
+        env_dir = repo_dir / "environments"
+        if env_dir.exists():
+            for env_file in sorted(env_dir.glob("*.json")):
+                if env_file.name.endswith(".branches.json"):
+                    continue
+                record = load_json(env_file, {})
+                branch_file = env_dir / f"{env_file.stem}.branches.json"
+                branches = load_json(branch_file, None) if branch_file.exists() else record.get("deployment_branch_policies")
+                environments.append(
+                    {
+                        "name": record.get("name") or env_file.stem,
+                        "protection_rules": record.get("protection_rules") or [],
+                        "prevent_self_review": record.get("prevent_self_review"),
+                        "wait_timer": record.get("wait_timer"),
+                        "deployment_branch_policy": record.get("deployment_branch_policy"),
+                        "deployment_branches": normalize_deployment_branch_policies(branches),
+                    }
+                )
+        env_secret_names: list[str] = []
+        env_secret_dir = repo_dir / "environment-secrets"
+        if env_secret_dir.exists():
+            for secret_file in sorted(env_secret_dir.glob("*.json")):
+                env_secret_names.extend(_secret_names(load_json(secret_file, [])))
+        repo_snapshots.append(
             {
-                "name": repo["name"],
-                "default_branch": repo.get("default_branch"),
-                "default_sha": repo.get("default_sha"),
+                "name": name,
+                "visibility": meta.get("visibility") or repo_info.get("visibility"),
+                "default_branch": meta.get("default_branch") or (repo_info.get("defaultBranchRef") or {}).get("name"),
+                "default_sha": meta.get("default_sha") or meta.get("sha"),
                 "workflows": workflows,
+                "environments": environments,
+                "repository_secret_names": _secret_names(load_json(repo_dir / "secrets.json", [])),
+                "repository_variable_names": _secret_names(load_json(repo_dir / "variables.json", [])),
+                "environment_secret_names": sorted(set(env_secret_names)),
             }
         )
     return {
+        "org": load_json(collect_dir / "org.json", {}),
+        "repos_index": repos_index,
+        "runners": load_json(collect_dir / "runners.json", {}),
+        "runner_groups": load_json(collect_dir / "runner-groups.json", {}),
+        "org_secret_names": _secret_names(load_json(collect_dir / "org-secrets.json", [])),
+        "org_variable_names": _secret_names(load_json(collect_dir / "org-variables.json", [])),
+        "budgets": load_json(collect_dir / "budgets.json", {}),
+        "billing": load_json(collect_dir / "blacksmith-billing.json", {}),
+        "hosts": load_json(collect_dir / "hosts.json", {}),
+        "grok_runners": load_json(collect_dir / "grok-runners.json", {}),
+        "worldstream_runners": load_json(collect_dir / "worldstream-runners.json", {}),
+        "collection_meta": load_json(collect_dir / "collection-meta.json", {}),
+        "repositories": repo_snapshots,
+    }
+
+
+def build_input_manifest(collect_dir: Path, repositories: list[dict[str, Any]], collected_at: str) -> dict[str, Any]:
+    snapshot = collect_input_snapshot(collect_dir)
+    repos_out = [
+        {
+            "name": repo["name"],
+            "default_branch": repo.get("default_branch"),
+            "default_sha": repo.get("default_sha"),
+            "workflows": repo.get("workflows") or [],
+        }
+        for repo in snapshot["repositories"]
+    ]
+    return {
         "schema_version": 1,
         "collected_at": collected_at,
-        "input_hash": hasher.hexdigest(),
+        "input_hash": hashlib.sha256(_stable_json(snapshot).encode("utf-8")).hexdigest(),
+        "covered_inputs": [
+            "org",
+            "repos_index",
+            "repository_default_and_workflow_shas",
+            "environments_and_branch_policies",
+            "org_and_repo_secret_and_variable_names",
+            "runners_and_groups",
+            "budgets_and_plan",
+            "billing_evidence",
+            "host_evidence",
+            "grok_runners",
+            "worldstream_runners",
+            "collection_meta",
+        ],
         "repositories": repos_out,
     }
+
+
+def semantic_output_digest(output_dir: Path) -> str:
+    docs: dict[str, Any] = {}
+    for name in ("repositories.yaml", "runners.yaml", "secrets.yaml", "input-manifest.yaml"):
+        path = output_dir / name
+        if not path.exists():
+            continue
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data.pop("generated_at", None)
+        docs[name] = data
+    return hashlib.sha256(_stable_json(docs).encode("utf-8")).hexdigest()
+
+
+def jobs_diverging_from_classifier(collect_dir: Path, repos_doc: dict[str, Any]) -> list[str]:
+    mismatches: list[str] = []
+    for repo in repos_doc.get("repositories") or []:
+        repo_dir = collect_dir / "repos" / repo["name"]
+        visibility = str(repo.get("visibility") or "")
+        for workflow in repo.get("workflows") or []:
+            wf_file = repo_dir / "workflows" / Path(workflow["path"]).name
+            if not wf_file.exists():
+                mismatches.append(f"{repo['name']}:{workflow['path']}:missing-source")
+                continue
+            parsed = parse_workflow(workflow["path"], wf_file.read_text(encoding="utf-8"))
+            by_id = {job["id"]: job for job in parsed["jobs"]}
+            for job in workflow.get("jobs") or []:
+                source = by_id.get(job["id"])
+                if not source:
+                    mismatches.append(f"{repo['name']}:{workflow['path']}#{job['id']}:missing-parsed-job")
+                    continue
+                classified = classify_job(
+                    repo["name"],
+                    visibility,
+                    workflow["path"],
+                    source["id"],
+                    source["runs_on"],
+                    source["resolved_runs_on"],
+                    source["environment_name"],
+                    source["raw_text"],
+                    source["uses"],
+                    parsed["triggers"],
+                    source["secret_names"],
+                )
+                for field in ("classification", "target_runner_class", "deploys_or_publishes", "production_impact"):
+                    if job.get(field) != classified.get(field):
+                        mismatches.append(
+                            f"{repo['name']}:{workflow['path']}#{job['id']}:{field} inventory={job.get(field)!r} classifier={classified.get(field)!r}"
+                        )
+    return mismatches
 
 
 def resolve_matrix_runs_on(job: dict[str, Any], runs_on: Any) -> list[str]:
@@ -533,7 +674,7 @@ def production_impact(
 def is_deploy_or_publish(job_id: str, workflow_path: str, text: str, uses: list[str], env_name: str) -> bool:
     path = workflow_path.lower()
     joined_uses = " ".join(uses)
-    if job_id in {"should-deploy", "test", "ci", "security", "validate", "lint", "guardrails", "secrets-guard", "static"}:
+    if job_id in {"should-deploy", "test", "ci", "security", "validate", "lint", "guardrails", "secrets-guard", "static", "no_stack_yet"}:
         return False
     if any(hint in text.lower() or hint in joined_uses for hint in DEPLOY_HINTS):
         return True
@@ -658,7 +799,7 @@ def classify_job(
             ),
             "secret_class": "deploy-production" if scheduled_prod else "deploy-nonproduction",
             "production_impact": bool(scheduled_prod),
-            "deploys_or_publishes": bool(deploys or scheduled),
+            "deploys_or_publishes": bool(deploys),
             "combined_build_and_deploy": combined,
             "flags": flags,
         }
@@ -805,6 +946,32 @@ def parse_workflow(path: str, text: str) -> dict[str, Any]:
     }
 
 
+def normalize_deployment_branch_policies(payload: Any) -> list[dict[str, Any]] | None:
+    if payload is None:
+        return None
+    if isinstance(payload, dict) and "branch_policies" in payload:
+        items = payload.get("branch_policies") or []
+    elif isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict) and (payload.get("name") or payload.get("id") or payload.get("node_id")):
+        items = [payload]
+    else:
+        return None
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        entry: dict[str, Any] = {
+            "id": item.get("id"),
+            "node_id": item.get("node_id"),
+            "name": item.get("name"),
+        }
+        if item.get("type"):
+            entry["type"] = item.get("type")
+        normalized.append(entry)
+    return normalized
+
+
 def env_protection(record: dict[str, Any] | None) -> dict[str, Any]:
     if not record:
         return {
@@ -840,7 +1007,7 @@ def env_protection(record: dict[str, Any] | None) -> dict[str, Any]:
         if branch_policy.get("protected_branches"):
             branches: Any = "protected_branches"
         elif branch_policy.get("custom_branch_policies"):
-            branches = record.get("deployment_branch_policies")
+            branches = normalize_deployment_branch_policies(record.get("deployment_branch_policies"))
             if not branches:
                 branches = None
                 note = "custom_branch_policies enabled but policy list was not collected"
@@ -1078,8 +1245,8 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
                     env_record_raw = load_json(env_file, None) if env_file and env_file.exists() else None
                     if isinstance(env_record_raw, dict):
                         branch_file = repo_dir / "environments" / f"{env_name}.branches.json"
-                        if branch_file.exists() and "deployment_branch_policies" not in env_record_raw:
-                            env_record_raw["deployment_branch_policies"] = load_json(branch_file, [])
+                        if branch_file.exists():
+                            env_record_raw["deployment_branch_policies"] = load_json(branch_file, None)
                     protection = env_protection(env_record_raw) if env_name else {
                         "available": False,
                         "required_reviewers": [],

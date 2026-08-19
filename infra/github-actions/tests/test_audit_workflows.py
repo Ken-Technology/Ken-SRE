@@ -47,6 +47,7 @@ class ScheduledSecretRoutingTests(unittest.TestCase):
         )
         self.assertTrue(str(result["target_runner_class"]).startswith("ken-deploy"))
         self.assertNotIn("ken-ci", result["target_runner_class"])
+        self.assertFalse(result["deploys_or_publishes"])
 
     def test_ken_agents_prompt_parity_goes_to_ken_deploy(self):
         result = classify(
@@ -58,6 +59,7 @@ class ScheduledSecretRoutingTests(unittest.TestCase):
             text="langfuse prompt parity\n",
         )
         self.assertTrue(str(result["target_runner_class"]).startswith("ken-deploy"))
+        self.assertFalse(result["deploys_or_publishes"])
 
     def test_ken_ai_mcp_contract_drift_goes_to_ken_deploy(self):
         result = classify(
@@ -69,6 +71,7 @@ class ScheduledSecretRoutingTests(unittest.TestCase):
             text="compare live backend contracts\n",
         )
         self.assertTrue(str(result["target_runner_class"]).startswith("ken-deploy"))
+        self.assertFalse(result["deploys_or_publishes"])
 
     def test_ken_website_beehiiv_sync_goes_to_ken_deploy(self):
         result = classify(
@@ -81,6 +84,7 @@ class ScheduledSecretRoutingTests(unittest.TestCase):
         )
         self.assertEqual(result["target_runner_class"], "ken-deploy-production")
         self.assertTrue(result["production_impact"])
+        self.assertFalse(result["deploys_or_publishes"])
 
     def test_op_bootstrap_token_never_targets_ken_ci(self):
         result = classify(
@@ -172,20 +176,58 @@ class EnvironmentProtectionTests(unittest.TestCase):
         self.assertEqual(got["required_reviewers"], ["other-human"])
         self.assertTrue(got["external_hard_stop"])
 
-    def test_custom_deployment_branch_policies_are_recorded(self):
+    def test_custom_deployment_branch_envelope_is_normalized(self):
+        envelope = {
+            "total_count": 2,
+            "branch_policies": [
+                {"id": 361199, "node_id": "MDE2OkRlcGxveW1lbnRCcmFuY2hQb2xpY3kzNjExOTk=", "name": "main"},
+                {"id": 361200, "node_id": "MDE2OkRlcGxveW1lbnRCcmFuY2hQb2xpY3kzNjEyMDA=", "name": "release/*"},
+            ],
+        }
         record = {
             "name": "production",
             "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
-            "deployment_branch_policies": [
-                {"name": "main", "type": "branch"},
-                {"name": "release/*", "type": "tag"},
-            ],
+            "deployment_branch_policies": envelope,
         }
         got = aw.env_protection(record)
         self.assertEqual(
             got["deployment_branches"],
-            [{"name": "main", "type": "branch"}, {"name": "release/*", "type": "tag"}],
+            [
+                {"id": 361199, "node_id": "MDE2OkRlcGxveW1lbnRCcmFuY2hQb2xpY3kzNjExOTk=", "name": "main"},
+                {"id": 361200, "node_id": "MDE2OkRlcGxveW1lbnRCcmFuY2hQb2xpY3kzNjEyMDA=", "name": "release/*"},
+            ],
         )
+        self.assertNotIn("total_count", got["deployment_branches"][0] if got["deployment_branches"] else {})
+        self.assertIsNone(
+            aw.env_protection(
+                {
+                    "name": "production",
+                    "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
+                }
+            )["deployment_branches"]
+        )
+
+    def test_branches_json_fixture_uses_github_envelope(self):
+        import yaml
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            aw.generate(FIXTURE_DIR, out)
+            repos = yaml.safe_load((out / "repositories.yaml").read_text())
+            env_job = next(
+                job
+                for r in repos["repositories"]
+                for wf in r["workflows"]
+                for job in wf["jobs"]
+                if job.get("environment") and job["environment"].get("name") == "production-protected"
+            )
+            branches = env_job["environment"]["deployment_branches"]
+            self.assertIsInstance(branches, list)
+            self.assertEqual(branches[0]["name"], "main")
+            self.assertEqual(branches[0]["id"], 361199)
+            self.assertTrue(branches[0]["node_id"])
+            self.assertNotIn("total_count", branches[0])
+            self.assertNotIn("branch_policies", env_job["environment"])
 
 
 class BillingEvidenceTests(unittest.TestCase):
@@ -406,6 +448,50 @@ class RegenerationAndManifestTests(unittest.TestCase):
 
             second_manifest = yaml.safe_load((second / "input-manifest.yaml").read_text())
             self.assertEqual(manifest["input_hash"], second_manifest["input_hash"])
+            self.assertJobsMatchClassifier(FIXTURE_DIR, a)
+            expected = json.loads((FIXTURE_DIR / "expected-digests.json").read_text())
+            self.assertEqual(aw.semantic_output_digest(first), expected["semantic_digest"])
+            self.assertEqual(manifest["input_hash"], expected["input_hash"])
+
+    def test_non_workflow_input_change_changes_input_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            collect = Path(tmp) / "collect"
+            out_a = Path(tmp) / "a"
+            out_b = Path(tmp) / "b"
+            self._copy_fixture(collect)
+            aw.generate(collect, out_a)
+            hosts = json.loads((collect / "hosts.json").read_text())
+            hosts["devws"] = {"kvm": False, "note": "hash-probe"}
+            (collect / "hosts.json").write_text(json.dumps(hosts))
+            aw.generate(collect, out_b)
+            import yaml
+
+            hash_a = yaml.safe_load((out_a / "input-manifest.yaml").read_text())["input_hash"]
+            hash_b = yaml.safe_load((out_b / "input-manifest.yaml").read_text())["input_hash"]
+            self.assertNotEqual(hash_a, hash_b)
+
+    def test_no_stack_yet_is_not_a_deploy(self):
+        result = classify(
+            repo="ken-analytics",
+            workflow_path=".github/workflows/deploy-production.yml",
+            job_id="no_stack_yet",
+            triggers=["push", "workflow_dispatch"],
+            secrets=[],
+            uses=[],
+            text='echo "docker-compose.yml is not present yet."\necho "production deploy is intentionally skipped"\n',
+        )
+        self.assertEqual(result["classification"], "standard-ci")
+        self.assertEqual(result["target_runner_class"], "ken-ci-standard")
+        self.assertFalse(result["deploys_or_publishes"])
+
+    def _copy_fixture(self, dest: Path) -> None:
+        import shutil
+
+        shutil.copytree(FIXTURE_DIR, dest)
+
+    def assertJobsMatchClassifier(self, collect_dir: Path, repos_doc: dict) -> None:
+        mismatches = aw.jobs_diverging_from_classifier(collect_dir, repos_doc)
+        self.assertEqual(mismatches, [])
 
     def _semantic(self, doc: dict) -> dict:
         copy = json.loads(json.dumps(doc))

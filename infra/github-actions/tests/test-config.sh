@@ -98,6 +98,8 @@ for repo in repos["repositories"]:
                 seen.add(key)
                 if not str(job.get("target_runner_class") or "").startswith("ken-deploy"):
                     failed.append(f"{key} not routed to ken-deploy")
+                if job.get("deploys_or_publishes"):
+                    failed.append(f"{key} schedule marked deploys_or_publishes")
             if vis == "private":
                 runs = str(job.get("runs_on") or "")
                 if re.search(r"(^|[,\s\[])ubuntu-(latest|[0-9]{2}\.[0-9]{2})($|[,\s\]])", runs) and "blacksmith" not in runs.lower() and "self-hosted" not in runs:
@@ -114,9 +116,9 @@ for repo in repos["repositories"]:
                     or target.get("unknown_reason")
                 ):
                     failed.append(f"{key} deploy/publish missing structured target")
-            if repo["name"] == "ken-analytics" and wf["path"].endswith("deploy-production.yml") and job["id"] == "validate":
-                if job.get("classification") != "standard-ci":
-                    failed.append("ken-analytics validate is not standard-ci")
+            if repo["name"] == "ken-analytics" and wf["path"].endswith("deploy-production.yml") and job["id"] in {"validate", "no_stack_yet"}:
+                if job.get("classification") != "standard-ci" or job.get("deploys_or_publishes"):
+                    failed.append(f"ken-analytics {job['id']} is not standard-ci")
             if repo["name"] == "ken-backend" and str(wf["path"]).endswith("deploy.yml") and job["id"] == "deploy":
                 env = job.get("environment") or {}
                 if env.get("name") != "Preprod" or job.get("production_impact") is not True:

@@ -321,7 +321,7 @@ repositories:
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
       secret_class: deploy-production
       production_impact: true
-      deploys_or_publishes: true
+      deploys_or_publishes: false
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
@@ -462,7 +462,7 @@ repositories:
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
       secret_class: deploy-production
       production_impact: true
-      deploys_or_publishes: true
+      deploys_or_publishes: false
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
@@ -520,7 +520,7 @@ repositories:
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
       secret_class: deploy-production
       production_impact: true
-      deploys_or_publishes: true
+      deploys_or_publishes: false
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
@@ -1194,12 +1194,12 @@ repositories:
         host_variable_names: []
         registry_or_package: null
         unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy-production.yml#no_stack_yet
-      classification: production-impact-deploy
-      target_runner_class: ken-deploy-production
-      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
-      secret_class: deploy-production
-      production_impact: true
-      deploys_or_publishes: true
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
@@ -6186,7 +6186,7 @@ repositories:
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
       secret_class: deploy-production
       production_impact: true
-      deploys_or_publishes: true
+      deploys_or_publishes: false
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
@@ -6263,4 +6263,4 @@ repositories:
       - COMBINED_BUILD_AND_DEPLOY
       - SCHEDULED_LONG_LIVED_SECRET
       - OP_BOOTSTRAP_TOKEN
-input_hash: bc7d3fd9a8286b3ff4efce54028a31fc7d27b4c25acdea2713d482c68d50a05d
+input_hash: ea038a7abafab2f3f4b41ab3ca4e7a85e41244e602fae802b5ef574cbbd35f72
