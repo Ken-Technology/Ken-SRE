@@ -498,6 +498,34 @@ jobs:
 
 
 class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
+    @staticmethod
+    def _production_action(evidence):
+        return next(
+            row
+            for row in evidence["broker_actions"]
+            if row["action_id"] == "ken-frontend-production-release"
+        )
+
+    @staticmethod
+    def _set_path(target, path, value):
+        current = target
+        for segment in path[:-1]:
+            current = current[segment]
+        current[path[-1]] = value
+
+    def _assert_full_generation_rejects(self, evidence, message):
+        import shutil
+
+        with tempfile.TemporaryDirectory() as temp:
+            collect = Path(temp) / "collect"
+            output = Path(temp) / "output"
+            shutil.copytree(FIXTURE_DIR, collect)
+            (collect / "authority-evidence.json").write_text(
+                json.dumps(evidence), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, message):
+                aw.generate(collect, output)
+
     def test_duplicate_json_keys_fail_before_inventory_hashing(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "authority-evidence.json"
@@ -581,6 +609,213 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(ValueError, "production build contract"):
                     aw.validate_authority_evidence(evidence)
+
+    def test_production_build_security_constants_fail_closed(self):
+        import build_task6_authority_evidence as builder
+
+        mutations = (
+            (("trust_class",), "nonproduction"),
+            (("authorization", "github_token_use"), "unrestricted"),
+            (("authorization", "checks"), [
+                "unix-peer", "class-oidc", "live-job", "workflow",
+                "protected-ref", "environment", "durable-replay", "unix-peer",
+            ]),
+            (("source_contract", "owner"), "attacker"),
+            (("source_contract", "repository"), "attacker"),
+            (("source_contract", "default_ref"), "refs/heads/unreviewed"),
+            (("source_contract", "source_addendum"), "unreviewed.md"),
+            (("identity_boundary", "runner_uid"), "unreviewed-runner"),
+            (("identity_boundary", "broker_uid"), "unreviewed-broker"),
+            (("identity_boundary", "builder_uid"), "unreviewed-builder"),
+            (("identity_boundary", "post_build_uid"), "unreviewed-post"),
+            (("identity_boundary", "deploy_uid"), "unreviewed-deploy"),
+            (("build_contract", "builder_socket"), "/tmp/buildkit.sock"),
+            (("build_contract", "builder_state"), "/tmp/buildkit-state"),
+            (("build_contract", "wrapper_path"), "/tmp/build"),
+            (("build_contract", "base_image"), "attacker/image:latest"),
+            (("build_contract", "base_image_digest"), "sha256:unreviewed"),
+            (("build_contract", "buildkit_version"), "unreviewed"),
+            (("build_contract", "wrapper_sha256"), "unreviewed"),
+            (("build_contract", "dependency_network_profile"), "allow-anywhere"),
+            (("build_contract", "dependency_endpoints"), ["attacker.invalid:443"]),
+            (("build_contract", "reviewed_github_variables"), ["NEXT_PUBLIC_UNREVIEWED"]),
+            (("build_contract", "forbidden_build_fields"), [
+                "POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID",
+                "POSTHOG_PERSONAL_API_KEY",
+            ]),
+            (("build_contract", "resource_limits", "cpu_quota"), "999%"),
+            (("build_contract", "resource_limits", "memory_max"), "1T"),
+            (("build_contract", "resource_limits", "tasks_max"), -1),
+            (("build_contract", "resource_limits", "timeout_seconds"), -1),
+            (("build_contract", "resource_limits", "context_bytes_max"), -1),
+            (("build_contract", "resource_limits", "output_bytes_max"), -1),
+            (("build_contract", "output", "format"), "local"),
+            (("build_contract", "output", "registry"), "attacker.invalid/repo"),
+            (("build_contract", "output", "canary_variants"), [
+                "raw", "base64", "hex", "raw",
+            ]),
+            (("post_build_contract", "executor_uid"), "unreviewed-post"),
+            (("post_build_contract", "fields"), ["NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"]),
+            (("post_build_contract", "target"), "https://attacker.invalid"),
+            (("post_build_contract", "input"), "runner-output"),
+            (("post_build_contract", "release"), "unreviewed-ref"),
+            (("deploy_contract", "executor_uid"), "unreviewed-deploy"),
+            (("deploy_contract", "input"), "runner-image-digest"),
+            (("durable_state", "fields"), ["run_id"]),
+            (("risk_acceptance", "scope"), "any-source"),
+            (("pin_gate", "required_exact_pins"), ["source_commit_sha"]),
+        )
+        for path, value in mutations:
+            evidence = copy.deepcopy(builder.build_evidence())
+            self._set_path(self._production_action(evidence), path, value)
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, "production build contract"):
+                    aw.validate_authority_evidence(evidence)
+
+    def test_fixed_actions_reject_semantic_and_field_set_mutations(self):
+        import build_task6_authority_evidence as builder
+
+        action_ids = {
+            "ken-vexa-mcp-auth-production-deploy",
+            "ken-website-beehiiv-production-sync",
+            "ken-website-production-deploy",
+        }
+        mutations = (
+            ("repository", "unreviewed-repository"),
+            ("workflow", ".github/workflows/unreviewed.yml"),
+            ("job", "unreviewed-job"),
+            ("executor_uid", "unreviewed-executor"),
+            ("template_path", "/etc/ken-op-broker/templates/unreviewed.env.op"),
+            ("wrapper_path", "/usr/local/libexec/ken-actions/unreviewed"),
+            ("target_profile", "unreviewed-target"),
+            ("network_profile", "allow-internet-anywhere"),
+        )
+        for action_id in action_ids:
+            for field, value in mutations:
+                evidence = copy.deepcopy(builder.build_evidence())
+                action = next(row for row in evidence["broker_actions"] if row["action_id"] == action_id)
+                action[field] = value
+                with self.subTest(action=action_id, field=field):
+                    with self.assertRaisesRegex(ValueError, "fixed broker action contract"):
+                        aw.validate_authority_evidence(evidence)
+
+            for field_mutation in ("extra", "duplicate"):
+                evidence = copy.deepcopy(builder.build_evidence())
+                action = next(row for row in evidence["broker_actions"] if row["action_id"] == action_id)
+                if field_mutation == "extra":
+                    action["required_fields"].append(
+                        {
+                            "target_item": "unreviewed",
+                            "target_field": "UNREVIEWED_FIELD",
+                            "field_type": "concealed",
+                        }
+                    )
+                else:
+                    action["required_fields"].append(copy.deepcopy(action["required_fields"][0]))
+                with self.subTest(action=action_id, fields=field_mutation):
+                    with self.assertRaisesRegex(ValueError, "fixed broker action contract"):
+                        aw.validate_authority_evidence(evidence)
+
+    def test_fixed_action_fields_equal_assigned_direct_mappings(self):
+        import build_task6_authority_evidence as builder
+
+        built = builder.build_evidence()
+        action = copy.deepcopy(
+            next(
+                row
+                for row in built["broker_actions"]
+                if row["action_id"] == "ken-website-production-deploy"
+            )
+        )
+        mappings = [
+            copy.deepcopy(row)
+            for row in built["direct_onepassword_mappings"]
+            if row["broker_action_id"] == action["action_id"]
+        ]
+        action["required_fields"].append(
+            {
+                "target_item": "unreviewed",
+                "target_field": "UNREVIEWED_FIELD",
+                "field_type": "concealed",
+            }
+        )
+        evidence = {
+            "mappings": [],
+            "unresolved_annotations": [],
+            "secretless_migrations": [],
+            "workflow_variable_migrations": [],
+            "direct_onepassword_mappings": mappings,
+            "broker_actions": [action],
+        }
+        direct_entries = [
+            {
+                "mapping_id": row["mapping_id"],
+                "broker_action_id": row["broker_action_id"],
+            }
+            for row in mappings
+        ]
+        with self.assertRaisesRegex(ValueError, "required fields mismatch"):
+            aw.validate_authority_mapping_coverage(evidence, [], direct_entries)
+
+    def test_frontend_action_phase_and_variable_mismatches_fail_full_generation(self):
+        import build_task6_authority_evidence as builder
+
+        cases = []
+        wrong_phase = builder.build_evidence()
+        next(
+            row
+            for row in wrong_phase["unresolved_annotations"]
+            if row["github_secret_name"] == "POSTHOG_PERSONAL_API_KEY"
+            and row["repository"] == "ken-frontend"
+        )["action_phase"] = "offline-buildkit-secret-phase"
+        cases.append(("posthog-phase", wrong_phase))
+
+        missing_post_field = builder.build_evidence()
+        self._production_action(missing_post_field)["post_build_contract"]["fields"].remove(
+            "POSTHOG_PERSONAL_API_KEY"
+        )
+        cases.append(("posthog-field", missing_post_field))
+
+        encryption_in_post = builder.build_evidence()
+        self._production_action(encryption_in_post)["post_build_contract"]["fields"].append(
+            "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
+        )
+        cases.append(("encryption-field", encryption_in_post))
+
+        missing_variable = builder.build_evidence()
+        self._production_action(missing_variable)["build_contract"]["reviewed_github_variables"].remove(
+            "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"
+        )
+        cases.append(("reviewed-variable", missing_variable))
+
+        wrong_action = builder.build_evidence()
+        next(
+            row
+            for row in wrong_action["unresolved_annotations"]
+            if row["github_secret_name"] == "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
+            and row["repository"] == "ken-frontend"
+        )["broker_action_id"] = "ken-website-production-deploy"
+        cases.append(("encryption-action", wrong_action))
+
+        extra_offline_phase = builder.build_evidence()
+        next(
+            row
+            for row in extra_offline_phase["unresolved_annotations"]
+            if row["repository"] == "ken-frontend"
+            and row["github_secret_name"] not in {
+                "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+                "POSTHOG_PERSONAL_API_KEY",
+                "POSTHOG_PROJECT_ID",
+            }
+        )["action_phase"] = "offline-buildkit-secret-phase"
+        cases.append(("extra-offline-field", extra_offline_phase))
+
+        for name, evidence in cases:
+            with self.subTest(name=name):
+                self._assert_full_generation_rejects(
+                    evidence,
+                    "production build contract|frontend broker semantic mismatch",
+                )
 
 
 class ConnectionMetadataTests(unittest.TestCase):

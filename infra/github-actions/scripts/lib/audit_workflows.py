@@ -31,6 +31,78 @@ DIRECT_OP_REFERENCE_RE = re.compile(
     rf"^op://(?P<vault>{OP_REFERENCE_SEGMENT})/(?P<item>{OP_REFERENCE_SEGMENT})/(?P<field>{OP_REFERENCE_SEGMENT})$"
 )
 
+BROKER_REQUEST_KEYS = ("version", "action_id", "oidc_jwt", "github_token")
+FRONTEND_POST_BUILD_FIELDS = frozenset(
+    {"POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID"}
+)
+FRONTEND_VARIABLE_MIGRATIONS = frozenset(
+    {"NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"}
+)
+FRONTEND_EXPLICIT_REVIEWED_VARIABLES = frozenset(
+    {
+        "NEXT_PUBLIC_CLERK_SIGN_IN_URL",
+        "NEXT_PUBLIC_CLERK_SIGN_UP_URL",
+        "NEXT_PUBLIC_TECHNOLOGY_FILTER_ENABLED",
+        "NEXT_PUBLIC_TECHNOLOGY_FILTER_ALLOWED_CLIENT_IDS",
+        "NEXT_PUBLIC_EXPERIMENTS_ALLOWED_CLIENT_IDS",
+    }
+)
+FIXED_BROKER_ACTION_POLICIES: dict[str, dict[str, Any]] = {
+    "ken-vexa-mcp-auth-production-deploy": {
+        "repository": "ken-vexa-mcp-auth",
+        "workflow": ".github/workflows/deploy.yml",
+        "job": "deploy",
+        "executor_uid": "ken-action-vexa-deploy",
+        "template_path": "/etc/ken-op-broker/templates/ken-vexa-mcp-auth-production-deploy.env.op",
+        "wrapper_path": "/usr/local/libexec/ken-actions/ken-vexa-mcp-auth-production-deploy",
+        "target_profile": "vexa-mcp-auth-production-ssh-and-public-health",
+        "network_profile": "github-source-vexa-production-ssh-mcp-recordings",
+        "required_fields": frozenset(
+            {
+                ("ken-vexa-mcp-auth", "SERVER_HOST", "string"),
+                ("ken-vexa-mcp-auth", "SERVER_PORT", "string"),
+                ("ken-vexa-mcp-auth", "SERVER_SSH_KEY", "concealed"),
+            }
+        ),
+    },
+    "ken-website-beehiiv-production-sync": {
+        "repository": "ken-website",
+        "workflow": ".github/workflows/beehiiv-sync.yml",
+        "job": "sync",
+        "executor_uid": "ken-action-website-beehiiv",
+        "template_path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.env.op",
+        "wrapper_path": "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync",
+        "target_profile": "ken-website-main-beehiiv-sync",
+        "network_profile": "github-source-beehiiv-api-and-ken-website-push",
+        "required_fields": frozenset(
+            {
+                ("ken-website", "DEPLOY_SSH_KEY", "concealed"),
+                ("ken-website", "BEEHIIV_API_KEY", "concealed"),
+                ("ken-website", "BEEHIIV_PUBLICATION_ID", "string"),
+            }
+        ),
+    },
+    "ken-website-production-deploy": {
+        "repository": "ken-website",
+        "workflow": ".github/workflows/deploy.yml",
+        "job": "deploy",
+        "executor_uid": "ken-action-website-deploy",
+        "template_path": "/etc/ken-op-broker/templates/ken-website-production-deploy.env.op",
+        "wrapper_path": "/usr/local/libexec/ken-actions/ken-website-production-deploy",
+        "target_profile": "ken-website-production-ssh-and-public-health",
+        "network_profile": "github-source-website-production-ssh-and-public-health",
+        "required_fields": frozenset(
+            {
+                ("ken-website", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "string"),
+                ("ken-website", "POSTHOG_PERSONAL_API_KEY", "concealed"),
+                ("ken-website", "WEBSITE_HOST", "string"),
+                ("ken-website", "WEBSITE_PORT", "string"),
+                ("ken-website", "WEBSITE_SSH_KEY", "concealed"),
+            }
+        ),
+    },
+}
+
 BUILD_HINTS = (
     "docker build",
     "docker/build-push-action",
@@ -814,17 +886,28 @@ def _validate_fixed_broker_action(action: dict[str, Any]) -> None:
             _authority_string_list(value)
         else:
             _authority_type(value, str)
+    policy = FIXED_BROKER_ACTION_POLICIES.get(action["action_id"])
+    field_coordinates = [
+        (field["target_item"], field["target_field"], field["field_type"])
+        for field in action["required_fields"]
+    ]
     if (
-        action["trust_class"] != "production"
+        policy is None
+        or action["trust_class"] != "production"
         or action["runner_class"] != "ken-deploy-production"
         or action["target_vault"] != "Ken Deploy Production"
         or action["template_owner"] != "root"
         or action["wrapper_owner"] != "root"
         or not action["template_path"].startswith("/etc/ken-op-broker/")
         or not action["wrapper_path"].startswith("/usr/local/libexec/")
-        or action["request_allowed_keys"]
-        != ["version", "action_id", "oidc_jwt", "github_token"]
+        or tuple(action["request_allowed_keys"]) != BROKER_REQUEST_KEYS
         or action["result_contract"] != "stable-code-only"
+        or any(action.get(field) != policy.get(field) for field in (
+            "repository", "workflow", "job", "executor_uid", "template_path",
+            "wrapper_path", "target_profile", "network_profile",
+        ))
+        or len(field_coordinates) != len(set(field_coordinates))
+        or frozenset(field_coordinates) != policy["required_fields"]
         or any(
             action[key]
             for key in {
@@ -985,6 +1068,10 @@ def _validate_production_build_action(action: dict[str, Any]) -> None:
         "environment", "durable-replay",
     }
     expected_source = {
+        "owner": "Ken-Technology",
+        "repository": "ken-frontend",
+        "default_ref": "refs/heads/main",
+        "source_addendum": "task-6-broker-source-contract-addendum.md",
         "source_commit_sha": "0952ac075f658acd1bc15a3253032507581e1f0d",
         "workflow_blob_sha": "21b01bbfeb3db512a42080ea21dff5276f3fa28b",
         "dockerfile_blob_sha": "6860679d7e023ac3d7828fa97cb32ed0e04bce53",
@@ -1002,28 +1089,77 @@ def _validate_production_build_action(action: dict[str, Any]) -> None:
         identities["runner_uid"], identities["broker_uid"], identities["builder_uid"],
         identities["post_build_uid"], identities["deploy_uid"],
     }
+    expected_identity_values = {
+        "runner_uid": "ken-deploy-production-runner",
+        "broker_uid": "root",
+        "builder_uid": "ken-action-frontend-builder",
+        "post_build_uid": "ken-action-frontend-posthog",
+        "deploy_uid": "ken-action-frontend-deploy",
+    }
+    expected_build_strings = {
+        "builder_socket": "/run/ken-op-broker/production/builders/ken-frontend-production-release/buildkitd.sock",
+        "builder_state": "/run/ken-op-broker/production/builders/ken-frontend-production-release/state",
+        "wrapper_path": "/usr/local/libexec/ken-actions/ken-frontend-production-release-build",
+        "base_image": "node:22-alpine",
+        "base_image_digest": "task7-exact-sha256-required",
+        "buildkit_version": "task7-exact-version-required",
+        "wrapper_sha256": "task7-exact-sha256-required",
+        "dependency_network_profile": "ken-frontend-secretless-dependency-fetch",
+    }
+    expected_dependency_endpoints = {
+        "auth.docker.io:443",
+        "registry-1.docker.io:443",
+        "registry.npmjs.org:443",
+    }
+    expected_reviewed_variables = (
+        FRONTEND_VARIABLE_MIGRATIONS | FRONTEND_EXPLICIT_REVIEWED_VARIABLES
+    )
+    expected_resource_limits = {
+        "cpu_quota": "400%",
+        "memory_max": "16G",
+        "tasks_max": 512,
+        "timeout_seconds": 1800,
+        "context_bytes_max": 1073741824,
+        "output_bytes_max": 2147483648,
+    }
+    expected_durable_fields = {
+        "repository_id", "run_id", "run_attempt", "check_run_id", "action_id",
+        "source_commit_sha", "image_digest", "result_code",
+    }
+    expected_exact_pins = {
+        "base_image_digest", "pnpm_lock_blob_sha", "source_commit_sha",
+        "workflow_blob_sha", "wrapper_sha256", "buildkit_version",
+        "resource_limits",
+    }
     if (
         action["action_id"] != "ken-frontend-production-release"
         or action["mode"] != "production_build"
         or action["status"] != "blocked-until-task7-pins-and-mutations-pass"
+        or action["trust_class"] != "production"
         or action["repository"] != "ken-frontend"
         or action["workflow"] != ".github/workflows/deploy.yml"
         or action["job"] != "build-image"
         or action["environment"] != "production"
         or action["runner_class"] != "ken-deploy-production"
-        or request["allowed_keys"]
-        != ["version", "action_id", "oidc_jwt", "github_token"]
+        or tuple(request["allowed_keys"]) != BROKER_REQUEST_KEYS
         or request["accepts_artifact"]
         or request["accepts_descriptor"]
         or request["result"] != "stable-code-only"
         or any(runner.values())
+        or len(authorization["checks"]) != len(expected_auth_checks)
         or set(authorization["checks"]) != expected_auth_checks
         or not authorization["all_before_onepassword"]
+        or authorization["github_token_use"]
+        != "fixed-github-read-and-ghcr-write-only"
         or source["mode"] != "broker-fetched-exact-commit"
         or not source["fetch_before_onepassword"]
         or source["fallback"]
         or any(source[key] != value for key, value in expected_source.items())
         or len(expected_uids) != 5
+        or any(
+            identities[key] != value
+            for key, value in expected_identity_values.items()
+        )
         or not identities["pairwise_distinct"]
         or identities["runner_can_access_builder_socket"]
         or identities["runner_can_access_builder_state"]
@@ -1031,31 +1167,155 @@ def _validate_production_build_action(action: dict[str, Any]) -> None:
         or identities["deploy_executor_can_access_builder"]
         or not build["rootless_buildkit"]
         or not build["dependencies_and_base_images_secretless"]
+        or any(
+            build[key] != value for key, value in expected_build_strings.items()
+        )
+        or len(build["dependency_endpoints"])
+        != len(expected_dependency_endpoints)
+        or set(build["dependency_endpoints"]) != expected_dependency_endpoints
+        or len(build["reviewed_github_variables"])
+        != len(expected_reviewed_variables)
+        or set(build["reviewed_github_variables"])
+        != expected_reviewed_variables
+        or limits != expected_resource_limits
         or phase["command"] != "pnpm build"
         or phase["network"] != "none"
         or phase["delivery"] != "buildkit-secret-mount"
         or phase["field"] != "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
         or any(phase[key] for key in {"arg", "env", "cache_metadata", "logs", "layers"})
+        or len(build["forbidden_build_fields"]) != 2
         or set(build["forbidden_build_fields"])
         != {"POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID"}
+        or output["format"] != "OCI"
+        or output["registry"] != "ghcr.io/ken-technology/ken-frontend"
         or not output["scan_config_history"]
         or not output["scan_uncompressed_layers"]
+        or len(output["canary_variants"]) != 3
         or set(output["canary_variants"]) != {"raw", "base64", "hex"}
         or not output["push_by_digest"]
         or not output["verified_short_lived_token"]
         or post["can_read_build_field"]
         or post["result"] != "stable-code-only"
+        or post["executor_uid"] != "ken-action-frontend-posthog"
+        or len(post["fields"]) != len(FRONTEND_POST_BUILD_FIELDS)
+        or set(post["fields"]) != FRONTEND_POST_BUILD_FIELDS
+        or post["target"] != "https://us.posthog.com"
+        or post["input"] != "broker-owned-sourcemap-set-from-scanned-image"
+        or post["release"] != "exact-source-commit-sha"
         or deploy["accepts_runner_digest"]
         or not deploy["deploy_by_digest"]
+        or deploy["executor_uid"] != "ken-action-frontend-deploy"
+        or deploy["input"] != "broker-recorded-image-digest"
         or not durable["source_run_digest_binding"]
+        or len(durable["fields"]) != len(expected_durable_fields)
+        or set(durable["fields"]) != expected_durable_fields
         or not all(cleanup.values())
         or not risk["merged_protected_code_may_consume_build_field"]
         or not risk["transformed_embedding_residual_accepted_only_for_reviewed_source"]
+        or risk["scope"] != "exact-source-workflow-wrapper-and-lock-pins-only"
         or not gate["cutover_blocked_until_all_exact"]
-        or not expected_mutations.issubset(set(action["required_mutation_tests"]))
+        or len(gate["required_exact_pins"]) != len(expected_exact_pins)
+        or set(gate["required_exact_pins"]) != expected_exact_pins
+        or len(action["required_mutation_tests"]) != len(expected_mutations)
+        or set(action["required_mutation_tests"]) != expected_mutations
         or not action["no_fallback_or_rebuild_elsewhere"]
     ):
         raise ValueError("invalid production build contract")
+
+
+def _validate_frontend_broker_semantics(
+    evidence: dict[str, Any], action_by_id: dict[str, dict[str, Any]]
+) -> None:
+    action_id = "ken-frontend-production-release"
+    action = action_by_id.get(action_id)
+    if action is None:
+        return
+    expected_phases = {
+        "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": "offline-buildkit-secret-phase",
+        "POSTHOG_PERSONAL_API_KEY": "post-build-sourcemap-upload",
+        "POSTHOG_PROJECT_ID": "post-build-sourcemap-upload",
+    }
+    annotations = [
+        row
+        for row in evidence["unresolved_annotations"]
+        if row.get("repository") == "ken-frontend"
+        and row.get("github_secret_name") in expected_phases
+    ]
+    annotations_by_name: dict[str, list[dict[str, Any]]] = {}
+    for annotation in annotations:
+        annotations_by_name.setdefault(annotation["github_secret_name"], []).append(
+            annotation
+        )
+    if set(annotations_by_name) != set(expected_phases) or any(
+        len(rows) != 1 for rows in annotations_by_name.values()
+    ):
+        raise ValueError("frontend broker semantic mismatch")
+    for name, phase in expected_phases.items():
+        annotation = annotations_by_name[name][0]
+        if (
+            annotation.get("broker_action_id") != action_id
+            or annotation.get("action_phase") != phase
+        ):
+            raise ValueError("frontend broker semantic mismatch")
+    expected_names_by_phase = {
+        "offline-buildkit-secret-phase": {
+            "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
+        },
+        "post-build-sourcemap-upload": set(FRONTEND_POST_BUILD_FIELDS),
+    }
+    for phase, expected_names in expected_names_by_phase.items():
+        phase_names = [
+            row.get("github_secret_name")
+            for row in evidence["unresolved_annotations"]
+            if row.get("repository") == "ken-frontend"
+            and row.get("action_phase") == phase
+        ]
+        if (
+            len(phase_names) != len(expected_names)
+            or set(phase_names) != expected_names
+        ):
+            raise ValueError("frontend broker semantic mismatch")
+    action_annotations = {
+        row.get("github_secret_name")
+        for row in evidence["unresolved_annotations"]
+        if row.get("broker_action_id") == action_id
+    }
+    if action_annotations != set(expected_phases):
+        raise ValueError("frontend broker semantic mismatch")
+    post_fields = action["post_build_contract"]["fields"]
+    if (
+        len(post_fields) != len(FRONTEND_POST_BUILD_FIELDS)
+        or set(post_fields) != FRONTEND_POST_BUILD_FIELDS
+        or action["build_contract"]["secret_phase"]["field"]
+        != "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
+    ):
+        raise ValueError("frontend broker semantic mismatch")
+
+    migrations = [
+        row
+        for row in evidence["workflow_variable_migrations"]
+        if row.get("repository") == "ken-frontend"
+        and row.get("workflow") == ".github/workflows/deploy.yml"
+    ]
+    migration_names = [row.get("github_secret_name") for row in migrations]
+    if (
+        len(migration_names) != len(FRONTEND_VARIABLE_MIGRATIONS)
+        or set(migration_names) != FRONTEND_VARIABLE_MIGRATIONS
+        or any(
+            row.get("target_variable_name") != row.get("github_secret_name")
+            for row in migrations
+        )
+    ):
+        raise ValueError("frontend broker semantic mismatch")
+    reviewed_variables = action["build_contract"]["reviewed_github_variables"]
+    expected_reviewed = (
+        set(migration_names) | FRONTEND_EXPLICIT_REVIEWED_VARIABLES
+    )
+    if (
+        len(reviewed_variables) != len(expected_reviewed)
+        or set(reviewed_variables) != expected_reviewed
+    ):
+        raise ValueError("frontend broker semantic mismatch")
 
 
 def validate_authority_evidence(evidence: Any) -> None:
@@ -1207,6 +1467,10 @@ def validate_authority_evidence(evidence: Any) -> None:
         "ken-website-production-deploy",
     }:
         raise ValueError("incomplete authority broker action set")
+    _validate_frontend_broker_semantics(
+        root,
+        {str(action["action_id"]): action for action in root["broker_actions"]},
+    )
     for mapping in root["direct_onepassword_mappings"]:
         if mapping["broker_action_id"] not in action_ids:
             raise ValueError("invalid direct broker action cross-reference")
@@ -1775,6 +2039,32 @@ def validate_authority_mapping_coverage(
     if len(action_ids) != len(set(action_ids)):
         raise ValueError("duplicate broker action_id")
     action_by_id = {str(action["action_id"]): action for action in broker_actions}
+    for action_id, action in action_by_id.items():
+        if action.get("mode") != "fixed_secret_action":
+            continue
+        action_fields = [
+            (
+                field.get("target_item"),
+                field.get("target_field"),
+                field.get("field_type"),
+            )
+            for field in action.get("required_fields") or []
+        ]
+        mapping_fields = [
+            (
+                mapping.get("target_item"),
+                mapping.get("target_field"),
+                mapping.get("field_type"),
+            )
+            for mapping in direct_mappings
+            if mapping.get("broker_action_id") == action_id
+        ]
+        if (
+            len(action_fields) != len(set(action_fields))
+            or len(mapping_fields) != len(set(mapping_fields))
+            or set(action_fields) != set(mapping_fields)
+        ):
+            raise ValueError("fixed broker action required fields mismatch")
     for entry in entries:
         action_id = entry.get("broker_action_id")
         if not action_id:
