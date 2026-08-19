@@ -1616,6 +1616,522 @@ SH
   return 1
 }
 
+run_runners() {
+  local platform register verify runner_service docker_service slice_template cleanup path
+  platform="${GA_ROOT}/inventory/runner-platform.yaml"
+  register="${GA_ROOT}/scripts/register-runners.sh"
+  verify="${GA_ROOT}/scripts/verify-platform.sh"
+  runner_service="${GA_ROOT}/systemd/ken-runner@.service"
+  docker_service="${GA_ROOT}/systemd/ken-runner-docker@.service"
+  slice_template="${GA_ROOT}/systemd/ken-runner@.slice"
+  cleanup="${GA_ROOT}/systemd/ken-runner-cleanup"
+
+  echo "== runner platform files =="
+  for path in "${platform}" "${register}" "${verify}" "${runner_service}" "${docker_service}" "${slice_template}" "${cleanup}"; do
+    require_file "${path}"
+  done
+
+  echo "== runner desired-state and unit security =="
+  if [[ -f "${platform}" && -f "${register}" && -f "${verify}" && -f "${runner_service}" && -f "${docker_service}" && -f "${slice_template}" && -f "${cleanup}" ]] &&
+    python3 - "${GA_ROOT}" <<'PY'
+import hashlib
+import re
+import sys
+from pathlib import Path
+
+import yaml
+
+root = Path(sys.argv[1])
+platform = yaml.safe_load((root / "inventory/runner-platform.yaml").read_text())
+repositories = yaml.safe_load((root / "inventory/repositories.yaml").read_text())
+failures = []
+
+
+def check(condition, message):
+    if not condition:
+        failures.append(message)
+
+
+expected_ids = {
+    "ken-agents": 1283261362,
+    "ken-ai-mcp": 1197124361,
+    "ken-ai-public-mcp": 1219183688,
+    "ken-analytics": 1246327615,
+    "ken-backend": 986095345,
+    "ken-brain": 1301483993,
+    "ken-cms": 1297432707,
+    "ken-daily": 1297306483,
+    "ken-frontend": 1141163204,
+    "ken-help": 1284009844,
+    "ken-hermes-clickup": 1302468525,
+    "ken-scraping": 1214880132,
+    "ken-search": 1156281101,
+    "ken-vexa-mcp-auth": 1318316509,
+    "ken-website": 1215913301,
+}
+expected_names = [f"ken-ci-standard-{i:02d}" for i in range(1, 11)] + [
+    "ken-ci-heavy-01",
+    "ken-ci-heavy-02",
+    "ken-deploy-nonproduction-01",
+    "ken-deploy-production-01",
+]
+expected_identity = {
+    **{f"ken-ci-standard-{i:02d}": (f"ghr-ci-s{i:02d}", 21000 + i, 1000000 + (i - 1) * 65536) for i in range(1, 11)},
+    "ken-ci-heavy-01": ("ghr-ci-h01", 21011, 1655360),
+    "ken-ci-heavy-02": ("ghr-ci-h02", 21012, 1720896),
+    "ken-deploy-nonproduction-01": ("ghr-deploy-np01", 21013, 1786432),
+    "ken-deploy-production-01": ("ghr-deploy-p01", 21014, 1851968),
+}
+labels = {
+    "standard": ["self-hosted", "linux", "x64", "ken-ci", "standard"],
+    "heavy": ["self-hosted", "linux", "x64", "ken-ci", "heavy"],
+    "nonproduction": ["self-hosted", "linux", "x64", "ken-deploy", "nonproduction"],
+    "production": ["self-hosted", "linux", "x64", "ken-deploy", "production"],
+}
+classes = {
+    "standard": {"cpu_quota": "200%", "memory_max": "8G", "memory_swap_max": 0, "tasks_max": 4096},
+    "heavy": {"cpu_quota": "400%", "memory_max": "16G", "memory_swap_max": 0, "tasks_max": 8192},
+    "deploy": {"cpu_quota": "200%", "memory_max": "5G", "memory_swap_max": 0, "tasks_max": 4096},
+}
+
+check(platform.get("schema_version") == 1, "schema version")
+check(platform.get("organization") == "Ken-Technology", "organization")
+distribution = platform.get("runner_distribution") or {}
+check(distribution.get("version") == "2.336.0", "pinned runner version")
+check(distribution.get("archive_url") == "https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-linux-x64-2.336.0.tar.gz", "pinned Linux x64 URL")
+check(distribution.get("sha256") == "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d", "official Linux x64 SHA-256")
+check(distribution.get("asset_id") == 483731096 and distribution.get("release_id") == 356901421, "official release provenance IDs")
+
+source = platform.get("source_inventory") or {}
+check(source.get("generated_at") == repositories.get("generated_at"), "fresh inventory generation contract")
+repo_contract = {r["name"]: r for r in repositories.get("repositories") or []}
+for group_key, group_name in (("ci", "Ken Private CI"), ("deploy", "Ken Private Deploy")):
+    group = (platform.get("groups") or {}).get(group_key) or {}
+    check(group.get("name") == group_name, f"{group_key} group name")
+    check(group.get("visibility") == "selected" and group.get("allows_public_repositories") is False, f"{group_key} selected/private policy")
+    actual = {r.get("name"): r.get("repository_id") for r in group.get("repositories") or []}
+    check(actual == expected_ids, f"{group_key} exact selected repository IDs")
+    check(all(repo_contract.get(name, {}).get("visibility") == "private" for name in actual), f"{group_key} repositories remain private in fresh inventory")
+
+check(platform.get("classes") == classes, "exact runner resource classes")
+runners = platform.get("runners") or []
+check([r.get("name") for r in runners] == expected_names, "exact 14 reserved runner names")
+check(len(runners) == 14 and sum(bool(r.get("enabled")) for r in runners) == 12, "14 reserved and 12 enabled")
+check(sum(r.get("enabled") and r.get("vm") == "ken-ci" for r in runners) == 10, "ten enabled CI identities")
+check(sum(r.get("enabled") and r.get("vm") == "ken-deploy" for r in runners) == 2, "two enabled deploy identities")
+check(all(not r.get("enabled") for r in runners if r.get("name") in {"ken-ci-standard-09", "ken-ci-standard-10"}), "reserved standard 09/10 disabled")
+
+unique_fields = ["user", "uid", "gid", "home", "runner_root", "work_root", "subuid_start", "subgid_start", "systemd_instance", "slice"]
+for field in unique_fields:
+    values = [r.get(field) for r in runners]
+    check(None not in values and len(set(values)) == len(values), f"unique {field}")
+docker_data = [r.get("docker", {}).get("data_root") for r in runners]
+docker_runtime = [r.get("docker", {}).get("runtime_root") for r in runners]
+check(None not in docker_data and len(set(docker_data)) == 14, "unique Docker data roots")
+check(None not in docker_runtime and len(set(docker_runtime)) == 14, "unique Docker runtime roots")
+
+required_keys = {
+    "name", "enabled", "vm", "class", "runner_group", "labels", "user", "uid", "gid", "home",
+    "runner_root", "work_root", "docker", "subuid_start", "subgid_start", "subid_count",
+    "systemd_instance", "slice", "credential_profile", "credential_delivery",
+}
+ranges = []
+for runner in runners:
+    name = runner.get("name")
+    check(set(runner) == required_keys, f"{name}: exact schema")
+    user, uid, start = expected_identity.get(name, (None, None, None))
+    check((runner.get("user"), runner.get("uid"), runner.get("gid"), runner.get("subuid_start"), runner.get("subgid_start")) == (user, uid, uid, start, start), f"{name}: identity allocation")
+    check(runner.get("subid_count") == 65536, f"{name}: subordinate range size")
+    ranges.append((start, start + 65536, name))
+    base = f"/var/lib/ken-runners/{name}"
+    check(runner.get("home") == f"{base}/home" and runner.get("runner_root") == f"{base}/runner" and runner.get("work_root") == f"{base}/work", f"{name}: canonical runner paths")
+    check(runner.get("docker") == {"enabled": runner.get("vm") == "ken-ci", "data_root": f"{base}/docker", "runtime_root": f"/run/ken-rootless-docker/{name}"}, f"{name}: rootless Docker ownership")
+    check(runner.get("systemd_instance") == name and runner.get("slice") == f"ken-runner-{name}.slice", f"{name}: systemd identity")
+    runner_class = runner.get("class")
+    expected_label_key = runner_class if runner_class in {"standard", "heavy"} else name.removeprefix("ken-deploy-").removesuffix("-01")
+    check(runner.get("labels") == labels.get(expected_label_key), f"{name}: exact labels")
+    check(runner.get("runner_group") == ("ci" if runner.get("vm") == "ken-ci" else "deploy"), f"{name}: group/VM separation")
+    check(runner.get("credential_profile") == "none" and runner.get("credential_delivery") == "broker-only-pending-task-6", f"{name}: no credential delivery")
+for index, (_, end, name) in enumerate(sorted(ranges)):
+    if index + 1 < len(ranges):
+        check(end <= sorted(ranges)[index + 1][0], f"{name}: subordinate range overlap")
+
+enabled = [r for r in runners if r.get("enabled")]
+cpu = {"standard": 2, "heavy": 4, "deploy": 2}
+memory = {"standard": 8, "heavy": 16, "deploy": 5}
+check(sum(cpu[r["class"]] for r in enabled if r["vm"] == "ken-ci") == 24, "CI aggregate CPU ceiling")
+check(sum(memory[r["class"]] for r in enabled if r["vm"] == "ken-ci") == 96, "CI aggregate memory ceiling")
+check(sum(cpu[r["class"]] for r in enabled if r["vm"] == "ken-deploy") == 4, "deploy aggregate CPU ceiling")
+check(sum(memory[r["class"]] for r in enabled if r["vm"] == "ken-deploy") == 10, "deploy aggregate memory ceiling")
+
+paths = [
+    root / "systemd/ken-runner@.service",
+    root / "systemd/ken-runner-docker@.service",
+    root / "systemd/ken-runner@.slice",
+    root / "systemd/ken-runner-cleanup",
+    root / "scripts/register-runners.sh",
+    root / "scripts/verify-platform.sh",
+]
+texts = {path.name: path.read_text() for path in paths}
+listener = texts["ken-runner@.service"]
+for control in ["NoNewPrivileges=true", "PrivateTmp=true", "ProtectSystem=strict", "ProtectHome=read-only", "RestrictSUIDSGID=true", "LockPersonality=true", "Restart=always", "RestartSec=5", "--once", "ExecStopPost=+"]:
+    check(control in listener, f"listener unit control {control}")
+check("ExecStopPost=+/usr/local/libexec/ken-runner-cleanup %i ${RUNNER_UID}" in listener, "cleanup receives exact runner instance and rendered numeric service UID")
+check("KillMode=control-group" in listener, "systemd kills leftover job descendants before post-job cleanup")
+docker_unit = texts["ken-runner-docker@.service"]
+check("dockerd-rootless.sh" in docker_unit and "ken-runner-%i.slice" in docker_unit, "rootless Docker shares exact runner slice")
+check("ken-runner-%i.slice" in listener, "listener uses exact runner slice")
+slice_text = texts["ken-runner@.slice"]
+for control in ["CPUAccounting=true", "MemoryAccounting=true", "TasksAccounting=true", "MemorySwapMax=0", "TasksMax=4096"]:
+    check(control in slice_text, f"slice control {control}")
+combined = "\n".join(texts.values()) + "\n" + (root / "inventory/runner-platform.yaml").read_text()
+for forbidden in ["LoadCredential", "OP_SERVICE_ACCOUNT_TOKEN", "ken-op-exec", "/var/run/docker.sock", "docker system prune", "--replace", "1password/load-secrets-action"]:
+    check(forbidden not in combined, f"forbidden runner capability: {forbidden}")
+check(not re.search(r"(?:^|[ =/])sudo(?:[ =/]|$)", combined, re.M), "no sudo path")
+check(not re.search(r"(?:SupplementaryGroups|groups?).*docker", combined, re.I), "no Docker group")
+
+if failures:
+    print("\n".join(f"RUNNER_SEMANTIC_FAIL {item}" for item in failures))
+    raise SystemExit(1)
+print("RUNNER_SEMANTIC_OK")
+PY
+  then
+    pass "runner desired-state, resources, identities, groups, and credential boundary"
+  else
+    fail "runner desired-state or unit security contract"
+  fi
+
+  echo "== offline runner registration, verification, and cleanup behavior =="
+  if [[ -f "${platform}" && -f "${register}" && -f "${verify}" && -f "${cleanup}" ]] &&
+    python3 - "${GA_ROOT}" <<'PY'
+import hashlib
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import yaml
+
+root = Path(sys.argv[1])
+register = root / "scripts/register-runners.sh"
+verify = root / "scripts/verify-platform.sh"
+cleanup = root / "systemd/ken-runner-cleanup"
+platform = yaml.safe_load((root / "inventory/runner-platform.yaml").read_text())
+expected_sha = platform["runner_distribution"]["sha256"]
+failures = []
+
+
+def check(condition, message, result=None):
+    if not condition:
+        detail = ""
+        if result is not None:
+            detail = f" (rc={result.returncode}, output={(result.stdout + result.stderr)[-800:]!r})"
+        failures.append(message + detail)
+
+
+def call(command, *, env=None):
+    merged = os.environ.copy()
+    if env:
+        merged.update({key: str(value) for key, value in env.items()})
+    return subprocess.run(command, text=True, capture_output=True, env=merged, check=False)
+
+
+def evidence(fake_root, healthy=True, isolated=True, host_memory_gib=40, ci_memory_healthy=True, deploy_memory_healthy=True):
+    fake_root.mkdir(parents=True, exist_ok=True)
+    (fake_root / "task4-evidence.json").write_text(json.dumps({
+        "host": "root@167.235.8.250",
+        "host_memory_available_gib": host_memory_gib,
+        "firewall_generation_verified": isolated,
+        "vms": {
+            "ken-ci": {"healthy": healthy, "isolation_verified": isolated, "memory_gib": 112, "memory_health_verified": ci_memory_healthy},
+            "ken-deploy": {"healthy": healthy, "isolation_verified": isolated, "memory_gib": 12, "memory_health_verified": deploy_memory_healthy},
+        },
+    }, sort_keys=True))
+    repositories = platform["groups"]["ci"]["repositories"]
+    (fake_root / "github-repository-resolver.json").write_text(json.dumps({
+        "organization": "Ken-Technology",
+        "resolved_at": platform["source_inventory"]["repository_ids_resolved_at"],
+        "repositories": [
+            {"name": item["name"], "id": item["repository_id"], "visibility": "private", "archived": False}
+            for item in repositories
+        ],
+    }, sort_keys=True))
+
+
+def fake_env(fake_root, **extra):
+    values = {
+        "KEN_RUNNER_OFFLINE_TEST": "1",
+        "KEN_RUNNER_TEST_ARCHIVE_SHA256": expected_sha,
+    }
+    values.update(extra)
+    return values
+
+
+def fake_command(fake_root):
+    return ["bash", str(register), "--org", "Ken-Technology", "--all", "--test-fake-root", str(fake_root)]
+
+
+def tree_digest(path):
+    digest = hashlib.sha256()
+    if not path.exists():
+        return digest.hexdigest()
+    for item in sorted(path.rglob("*")):
+        digest.update(str(item.relative_to(path)).encode())
+        digest.update(str(stat.S_IMODE(item.lstat().st_mode)).encode())
+        if item.is_file() and not item.is_symlink():
+            digest.update(item.read_bytes())
+    return digest.hexdigest()
+
+
+with tempfile.TemporaryDirectory() as temporary:
+    base = Path(temporary)
+    dry = call(["bash", str(register), "--org", "Ken-Technology", "--all", "--dry-run"])
+    check(dry.returncode == 0 and "RUNNER_PLAN_ENABLED=12" in dry.stdout and "NO_MUTATION=1" in dry.stdout, "dry-run plan boundary", dry)
+
+    marker_bin = base / "marker-bin"
+    marker_bin.mkdir()
+    for name in ("gh", "ssh"):
+        path = marker_bin / name
+        path.write_text(f"#!/usr/bin/env bash\ntouch '{base}/{name}-called'\nexit 70\n")
+        path.chmod(0o755)
+    live = call(
+        ["bash", str(register), "--org", "Ken-Technology", "--all"],
+        env={"PATH": f"{marker_bin}:{os.environ['PATH']}"},
+    )
+    check(live.returncode != 0 and "live registration is blocked until Task 4 evidence" in live.stderr and not (base / "gh-called").exists() and not (base / "ssh-called").exists(), "live transport refuses before gh or ssh", live)
+
+    wrong_org = call(["bash", str(register), "--org", "Other", "--all", "--dry-run"])
+    check(wrong_org.returncode != 0 and "organization must be Ken-Technology" in wrong_org.stderr, "wrong organization fails closed", wrong_org)
+    wrong_host = call(["bash", str(register), "--org", "Ken-Technology", "--all", "--dry-run", "--host", "root@185.183.35.189"])
+    check(wrong_host.returncode != 0 and "host must be root@167.235.8.250" in wrong_host.stderr, "wrong host fails closed", wrong_host)
+
+    missing_evidence_root = base / "missing-evidence"
+    missing_evidence = call(fake_command(missing_evidence_root), env=fake_env(missing_evidence_root))
+    check(missing_evidence.returncode != 0 and "Task 4 evidence" in missing_evidence.stderr and not (missing_evidence_root / "github").exists(), "missing Task 4 evidence stops before fake mutations", missing_evidence)
+    unhealthy_root = base / "unhealthy"
+    evidence(unhealthy_root, healthy=False)
+    unhealthy = call(fake_command(unhealthy_root), env=fake_env(unhealthy_root))
+    check(unhealthy.returncode != 0 and "guest health" in unhealthy.stderr and not (unhealthy_root / "github").exists(), "unhealthy guest stops before fake mutations", unhealthy)
+    unisolated_root = base / "unisolated"
+    evidence(unisolated_root, isolated=False)
+    unisolated = call(fake_command(unisolated_root), env=fake_env(unisolated_root))
+    check(unisolated.returncode != 0 and "isolation" in unisolated.stderr and not (unisolated_root / "github").exists(), "failed isolation evidence stops before fake mutations", unisolated)
+
+    memory_root = base / "memory-low"
+    evidence(memory_root, host_memory_gib=31)
+    memory_low = call(fake_command(memory_root), env=fake_env(memory_root))
+    check(memory_low.returncode != 0 and "host memory" in memory_low.stderr and not (memory_root / "github").exists(), "low host memory stops before fake mutations", memory_low)
+    guest_memory_root = base / "guest-memory-low"
+    evidence(guest_memory_root, ci_memory_healthy=False)
+    guest_memory_low = call(fake_command(guest_memory_root), env=fake_env(guest_memory_root))
+    check(guest_memory_low.returncode != 0 and "guest memory" in guest_memory_low.stderr and not (guest_memory_root / "github").exists(), "unhealthy guest memory stops before fake mutations", guest_memory_low)
+
+    repository_root = base / "repository-id-drift"
+    evidence(repository_root)
+    repository_fixture = repository_root / "github-repository-resolver.json"
+    repository_data = json.loads(repository_fixture.read_text())
+    repository_data["repositories"][0]["id"] += 1
+    repository_fixture.write_text(json.dumps(repository_data, sort_keys=True))
+    repository_drift = call(fake_command(repository_root), env=fake_env(repository_root))
+    check(repository_drift.returncode != 0 and "repository resolver mismatch" in repository_drift.stderr and not (repository_root / "github").exists(), "fresh repository ID drift stops before group mutation", repository_drift)
+    public_root = base / "repository-public"
+    evidence(public_root)
+    public_fixture = public_root / "github-repository-resolver.json"
+    public_data = json.loads(public_fixture.read_text())
+    public_data["repositories"][0]["visibility"] = "public"
+    public_fixture.write_text(json.dumps(public_data, sort_keys=True))
+    public_drift = call(fake_command(public_root), env=fake_env(public_root))
+    check(public_drift.returncode != 0 and "repository resolver mismatch" in public_drift.stderr and not (public_root / "github").exists(), "public repository fails before group mutation", public_drift)
+
+    checksum_root = base / "checksum"
+    evidence(checksum_root)
+    checksum = call(fake_command(checksum_root), env=fake_env(checksum_root, KEN_RUNNER_TEST_ARCHIVE_SHA256="0" * 64))
+    check(checksum.returncode != 0 and "runner archive checksum mismatch" in checksum.stderr and not (checksum_root / "github").exists(), "pinned checksum failure stops before fake mutations", checksum)
+
+    fake_root = base / "registered"
+    evidence(fake_root)
+    protected_group = fake_root / "github/groups/Default.json"
+    protected_group.parent.mkdir(parents=True)
+    protected_group.write_text('{"sentinel":"preserve"}\n')
+    first = call(fake_command(fake_root), env=fake_env(fake_root))
+    check(first.returncode == 0 and "CREATED_RUNNERS=12" in first.stdout and "offline-test-short-lived-token" not in first.stdout + first.stderr, "transactional fake registration with token redaction", first)
+    if first.returncode != 0:
+        print("\n".join(f"RUNNER_BEHAVIOR_FAIL {item}" for item in failures))
+        raise SystemExit(1)
+    github_runners = list((fake_root / "github/runners").glob("*.json"))
+    guest_runners = list((fake_root / "guests").glob("*/runners/*.json"))
+    check(len(github_runners) == 12 and len(guest_runners) == 12, "exact 12 fake registrations")
+    check(not any("standard-09" in str(path) or "standard-10" in str(path) for path in fake_root.rglob("*")), "disabled identities create no state")
+    check(protected_group.read_text() == '{"sentinel":"preserve"}\n', "unmanaged runner group remains untouched")
+    sample = json.loads((fake_root / "github/runners/ken-ci-standard-01.json").read_text())
+    check(sample["status"] == "online" and sample["group"] == "Ken Private CI" and sample["labels"] == ["self-hosted", "linux", "x64", "ken-ci", "standard"], "registered identity labels and group")
+    local = json.loads((fake_root / "guests/ken-ci/runners/ken-ci-standard-01.json").read_text())
+    check(local["disable_update"] is True and local["binary_owner"] == "root" and local["binary_mode"] == "0555" and "token" not in local, "pinned root-owned runner binary contract")
+    account = json.loads((fake_root / "guests/ken-ci/accounts/ken-ci-standard-01.json").read_text())
+    check(account["uid"] == 21001 and account["groups"] == [] and account["subuid"] == "1000000:65536", "isolated account and subordinate IDs")
+    runner_unit = (fake_root / "guests/ken-ci/units/ken-runner@ken-ci-standard-01.service").read_text()
+    docker_unit = (fake_root / "guests/ken-ci/units/ken-runner-docker@ken-ci-standard-01.service").read_text()
+    slice_unit = (fake_root / "guests/ken-ci/units/ken-runner-ken-ci-standard-01.slice").read_text()
+    check("User=ghr-ci-s01" in runner_unit and "Environment=RUNNER_UID=21001" in runner_unit and "Slice=ken-runner-ken-ci-standard-01.slice" in runner_unit and "Slice=ken-runner-ken-ci-standard-01.slice" in docker_unit, "listener and Docker share rendered identity and slice")
+    check(all(value in slice_unit for value in ["CPUQuota=200%", "MemoryMax=8G", "MemorySwapMax=0", "TasksMax=4096"]), "rendered standard limits")
+    check(not (fake_root / "guests/ken-deploy/units/ken-runner-docker@ken-deploy-production-01.service").exists(), "deploy Docker stays disabled")
+
+    before = tree_digest(fake_root)
+    second = call(fake_command(fake_root), env=fake_env(fake_root))
+    after = tree_digest(fake_root)
+    check(second.returncode == 0 and "NO_CHANGES=1" in second.stdout and before == after, "exact second registration is a filesystem no-op", second)
+
+    verify_command = ["bash", str(verify), "runners", "--test-fake-root", str(fake_root)]
+    verify_before = tree_digest(fake_root)
+    verified = call(verify_command, env={"KEN_RUNNER_OFFLINE_TEST": "1"})
+    check(verified.returncode == 0 and "RUNNERS_OK=12" in verified.stdout and tree_digest(fake_root) == verify_before, "read-only verifier accepts exact platform without mutation", verified)
+
+    disabled_record = fake_root / "github/runners/ken-ci-standard-09.json"
+    disabled_record.write_text("{}\n")
+    disabled_verify = call(verify_command, env={"KEN_RUNNER_OFFLINE_TEST": "1"})
+    check(disabled_verify.returncode != 0 and "disabled runner present" in disabled_verify.stderr, "verifier rejects reserved runner registration", disabled_verify)
+    disabled_record.unlink()
+    status_file = fake_root / "github/runners/ken-ci-standard-01.json"
+    status_data = json.loads(status_file.read_text())
+    status_data["status"] = "offline"
+    status_file.write_text(json.dumps(status_data, sort_keys=True) + "\n")
+    status_verify = call(verify_command, env={"KEN_RUNNER_OFFLINE_TEST": "1"})
+    check(status_verify.returncode != 0 and "runner mismatch" in status_verify.stderr, "verifier rejects offline or label/group drift", status_verify)
+
+    group_root = base / "group-mismatch"
+    evidence(group_root)
+    group_file = group_root / "github/groups/ci.json"
+    group_file.parent.mkdir(parents=True)
+    group_file.write_text('{"name":"Ken Private CI","visibility":"all","allows_public_repositories":true,"repositories":[]}\n')
+    group_before = group_file.read_text()
+    group_mismatch = call(fake_command(group_root), env=fake_env(group_root))
+    check(group_mismatch.returncode != 0 and "runner group mismatch" in group_mismatch.stderr and group_file.read_text() == group_before and not (group_root / "github/runners").exists(), "existing group mismatch stops without overwrite", group_mismatch)
+
+    rollback_root = base / "rollback"
+    evidence(rollback_root)
+    rollback = call(fake_command(rollback_root), env=fake_env(rollback_root, KEN_RUNNER_TEST_FAIL_AFTER="ken-ci-standard-03:github"))
+    residual = [p for p in rollback_root.rglob("*.json") if p.name not in {"task4-evidence.json", "github-repository-resolver.json"}]
+    check(rollback.returncode != 0 and "ROLLBACK_STATUS=ok" in rollback.stderr and not residual, "partial registration rolls back only run-created state", rollback)
+
+    drift_root = base / "drift"
+    evidence(drift_root)
+    initial = call(fake_command(drift_root), env=fake_env(drift_root))
+    drift_file = drift_root / "guests/ken-ci/runners/ken-ci-standard-01.json"
+    drift_data = json.loads(drift_file.read_text())
+    drift_data["group"] = "Ken Private Deploy"
+    drift_file.write_text(json.dumps(drift_data, sort_keys=True) + "\n")
+    drift_before = drift_file.read_text()
+    drift = call(fake_command(drift_root), env=fake_env(drift_root))
+    check(initial.returncode == 0 and drift.returncode != 0 and "local/GitHub runner identity drift" in drift.stderr and drift_file.read_text() == drift_before, "identity drift is preserved for inspection", drift)
+
+    cleanup_root = base / "cleanup"
+    runtime_root = base / "runtime"
+    docker_log = base / "docker.log"
+    systemctl_log = base / "systemctl.log"
+    fake_bin = base / "cleanup-bin"
+    fake_bin.mkdir()
+    docker = fake_bin / "docker"
+    docker.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >>"${KEN_CLEANUP_DOCKER_LOG:?}"
+case "$*" in
+  *' ps -aq') printf 'container-a\\n' ;;
+  *' network ls -q') printf 'network-a\\n' ;;
+  *' volume ls -q') printf 'volume-a\\n' ;;
+esac
+""")
+    docker.chmod(0o755)
+    systemctl = fake_bin / "systemctl"
+    systemctl.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >>"${KEN_CLEANUP_SYSTEMCTL_LOG:?}"
+""")
+    systemctl.chmod(0o755)
+    runner_a = "ken-ci-standard-01"
+    runner_b = "ken-ci-standard-02"
+    uid = os.getuid()
+    for name in (runner_a, runner_b):
+        base_path = cleanup_root / name
+        for child in ("home", "runner", "work", "docker"):
+            (base_path / child).mkdir(parents=True, exist_ok=True)
+        (base_path / "work/sentinel").write_text(name)
+        (base_path / "runner/cache-sentinel").write_text(name)
+        (base_path / "runner/process-sentinel").write_text(name)
+        (runtime_root / name).mkdir(parents=True)
+    socket_path = runtime_root / runner_a / "docker.sock"
+    socket_path.write_text("sandbox socket stand-in")
+    runner_b_socket = runtime_root / runner_b / "docker.sock"
+    runner_b_socket.write_text("other runner socket stand-in")
+    rootful_canary = base / "rootful-docker.sock"
+    rootful_canary.write_text("must remain untouched")
+    cleanup_env = {
+        "KEN_RUNNER_CLEANUP_ALLOW_NON_ROOT": "1",
+        "KEN_RUNNER_BASE": cleanup_root,
+        "KEN_RUNNER_RUNTIME_BASE": runtime_root,
+        "KEN_RUNNER_DOCKER_BIN": docker,
+        "KEN_RUNNER_SYSTEMCTL_BIN": systemctl,
+        "KEN_CLEANUP_DOCKER_LOG": docker_log,
+        "KEN_CLEANUP_SYSTEMCTL_LOG": systemctl_log,
+        "KEN_RUNNER_CLEANUP_TEST_SOCKET_FILE": "1",
+    }
+    cleaned = call(["bash", str(cleanup), runner_a, str(uid)], env=cleanup_env)
+    check(cleaned.returncode == 0 and not any((cleanup_root / runner_a / "work").iterdir()) and (cleanup_root / runner_b / "work/sentinel").read_text() == runner_b, "cleanup removes only one runner workspace", cleaned)
+    if cleaned.returncode != 0:
+        print("\n".join(f"RUNNER_BEHAVIOR_FAIL {item}" for item in failures))
+        raise SystemExit(1)
+    docker_calls = docker_log.read_text()
+    check(f"--host unix://{socket_path}" in docker_calls and str(runner_b_socket) not in docker_calls and "system prune" not in docker_calls and "/var/run" not in docker_calls, "cleanup uses only runner rootless Docker socket")
+    check((cleanup_root / runner_b / "runner/cache-sentinel").read_text() == runner_b and (cleanup_root / runner_b / "runner/process-sentinel").read_text() == runner_b and runner_b_socket.read_text() == "other runner socket stand-in" and rootful_canary.read_text() == "must remain untouched", "cleanup leaves the other runner cache, process canary, socket, and rootful canary untouched")
+    check(not systemctl_log.exists() or not systemctl_log.read_text(), "post-job cleanup does not signal its own systemd cgroup")
+
+    malicious = call(["bash", str(cleanup), "../ken-ci-standard-02", str(uid)], env=cleanup_env)
+    check(malicious.returncode != 0 and "invalid runner name" in malicious.stderr, "cleanup rejects malicious runner name", malicious)
+    owner = call(["bash", str(cleanup), runner_b, str(uid + 1)], env=cleanup_env)
+    check(owner.returncode != 0 and "owner mismatch" in owner.stderr and (cleanup_root / runner_b / "work/sentinel").exists(), "cleanup owner mismatch fails closed", owner)
+    device = call(["bash", str(cleanup), runner_b, str(uid)], env={**cleanup_env, "KEN_RUNNER_EXPECTED_DEVICE": "999999999"})
+    check(device.returncode != 0 and "device mismatch" in device.stderr and (cleanup_root / runner_b / "work/sentinel").exists(), "cleanup device mismatch fails closed", device)
+    runtime_device = call(["bash", str(cleanup), runner_b, str(uid)], env={**cleanup_env, "KEN_RUNNER_EXPECTED_RUNTIME_DEVICE": "999999999"})
+    check(runtime_device.returncode != 0 and "runtime device mismatch" in runtime_device.stderr and (cleanup_root / runner_b / "work/sentinel").exists(), "cleanup rootless runtime device mismatch fails closed", runtime_device)
+    outside = base / "outside"
+    outside.mkdir()
+    (outside / "sentinel").write_text("preserve")
+    work = cleanup_root / runner_b / "work"
+    shutil.rmtree(work)
+    work.symlink_to(outside, target_is_directory=True)
+    symlink = call(["bash", str(cleanup), runner_b, str(uid)], env=cleanup_env)
+    check(symlink.returncode != 0 and "symlink" in symlink.stderr and (outside / "sentinel").exists(), "cleanup symlink escape fails closed", symlink)
+
+if failures:
+    print("\n".join(f"RUNNER_BEHAVIOR_FAIL {item}" for item in failures))
+    raise SystemExit(1)
+print("RUNNER_BEHAVIOR_OK")
+PY
+  then
+    pass "offline registration is transactional/idempotent and cleanup is runner-scoped"
+  else
+    fail "offline runner registration, verification, or cleanup behavior"
+  fi
+
+  echo "== runner shell syntax =="
+  if [[ -f "${register}" && -f "${verify}" && -f "${cleanup}" ]] && bash -n "${register}" "${verify}" "${cleanup}"; then
+    pass "runner scripts bash -n"
+  else
+    fail "runner scripts bash -n"
+  fi
+
+  echo
+  if (( FAILED == 0 )); then
+    echo "runners: ${RAN} assertions passed"
+    return 0
+  fi
+  echo "runners: ${FAILED} failed / ${RAN} assertions"
+  return 1
+}
+
 cmd="${1:-inventory}"
 case "${cmd}" in
   inventory)
@@ -1636,14 +2152,13 @@ case "${cmd}" in
     run_vm_definitions
     ;;
   runners)
-    echo "runners: Task 5 owns runner-service tests"
-    exit 2
+    run_runners
     ;;
   -h|--help)
-    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|vm-static|vm-definitions|all]"
+    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|vm-static|vm-definitions|runners|all]"
     ;;
   *)
-    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|vm-static|vm-definitions|all]"
+    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|vm-static|vm-definitions|runners|all]"
     exit 2
     ;;
 esac

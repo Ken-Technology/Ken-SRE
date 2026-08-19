@@ -1,0 +1,39 @@
+[Unit]
+Description=Ken GitHub Actions runner %i
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/ken-runners/%i.ready
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+Slice=ken-runner-%i.slice
+WorkingDirectory=/var/lib/ken-runners/%i/runner
+Environment=HOME=/var/lib/ken-runners/%i/home
+Environment=RUNNER_TOOL_CACHE=/var/lib/ken-runners/%i/runner/_tool
+Environment=DOCKER_HOST=unix:///run/ken-rootless-docker/%i/docker.sock
+Environment=RUNNER_UID=invalid
+ExecStart=/var/lib/ken-runners/%i/runner/run.sh --once
+ExecStopPost=+/usr/local/libexec/ken-runner-cleanup %i ${RUNNER_UID}
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=90
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/ken-runners/%i/home
+ReadWritePaths=/var/lib/ken-runners/%i/runner/_diag
+ReadWritePaths=/var/lib/ken-runners/%i/runner/_tool
+ReadWritePaths=/var/lib/ken-runners/%i/work
+
+[Install]
+WantedBy=multi-user.target

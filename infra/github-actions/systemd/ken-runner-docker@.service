@@ -1,0 +1,35 @@
+[Unit]
+Description=Ken rootless Docker daemon for runner %i
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/ken-runners/%i.docker-ready
+
+[Service]
+Type=notify
+NotifyAccess=all
+User=nobody
+Group=nogroup
+Slice=ken-runner-%i.slice
+Environment=HOME=/var/lib/ken-runners/%i/home
+Environment=XDG_RUNTIME_DIR=/run/ken-rootless-docker/%i
+Environment=DOCKER_HOST=unix:///run/ken-rootless-docker/%i/docker.sock
+ExecStart=/usr/bin/dockerd-rootless.sh --host=unix:///run/ken-rootless-docker/%i/docker.sock --data-root=/var/lib/ken-runners/%i/docker
+Restart=always
+RestartSec=5
+TimeoutStopSec=90
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+Delegate=true
+ReadWritePaths=/var/lib/ken-runners/%i/home
+ReadWritePaths=/var/lib/ken-runners/%i/docker
+ReadWritePaths=/run/ken-rootless-docker/%i
+
+[Install]
+WantedBy=multi-user.target

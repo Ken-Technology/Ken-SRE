@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly RUNNER_BASE="${KEN_RUNNER_BASE:-/var/lib/ken-runners}"
+readonly RUNTIME_BASE="${KEN_RUNNER_RUNTIME_BASE:-/run/ken-rootless-docker}"
+readonly DOCKER_BIN="${KEN_RUNNER_DOCKER_BIN:-/usr/bin/docker}"
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+stat_uid() {
+  stat -c '%u' -- "$1" 2>/dev/null || stat -f '%u' "$1"
+}
+
+stat_device() {
+  stat -c '%d' -- "$1" 2>/dev/null || stat -f '%d' "$1"
+}
+
+stat_mode() {
+  stat -c '%a' -- "$1" 2>/dev/null || stat -f '%Lp' "$1"
+}
+
+canonical_path() {
+  if readlink -e -- "$1" 2>/dev/null; then
+    return
+  fi
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+path = os.path.realpath(sys.argv[1])
+if not os.path.exists(path):
+    raise SystemExit(1)
+print(path)
+PY
+}
+
+[[ $# == 2 ]] || die 'usage: ken-runner-cleanup RUNNER_NAME RUNNER_UID'
+runner_name="$1"
+runner_uid="$2"
+[[ "${runner_name}" =~ ^ken-(ci-(standard|heavy)-[0-9]{2}|deploy-(nonproduction|production)-01)$ ]] || die 'invalid runner name'
+[[ "${runner_uid}" =~ ^[0-9]+$ ]] || die 'runner UID must be numeric'
+
+test_mode=0
+if [[ "${KEN_RUNNER_CLEANUP_ALLOW_NON_ROOT:-0}" == 1 ]]; then
+  test_mode=1
+else
+  (( EUID == 0 )) || die 'cleanup must run as root'
+  script_uid="$(stat_uid "${BASH_SOURCE[0]}")"
+  script_mode="$(stat_mode "${BASH_SOURCE[0]}")"
+  [[ "${script_uid}" == 0 ]] || die 'cleanup program is not root-owned'
+  (( (8#${script_mode} & 0022) == 0 )) || die 'cleanup program is group/other writable'
+fi
+
+base_canonical="$(canonical_path "${RUNNER_BASE}")" || die 'runner base is missing'
+runner_root="${RUNNER_BASE}/${runner_name}"
+runner_canonical="$(canonical_path "${runner_root}")" || die 'runner root is missing'
+[[ "${runner_canonical}" == "${base_canonical}/${runner_name}" ]] || die 'runner root resolves outside the approved base'
+[[ -d "${runner_root}" && ! -L "${runner_root}" ]] || die 'runner root is a symlink or not a directory'
+[[ "$(stat_uid "${runner_root}")" == "${runner_uid}" ]] || die 'runner root owner mismatch'
+
+root_device="$(stat_device "${runner_root}")"
+expected_device="${KEN_RUNNER_EXPECTED_DEVICE:-${root_device}}"
+[[ "${root_device}" == "${expected_device}" ]] || die 'runner root device mismatch'
+
+for child in home runner work docker; do
+  path="${runner_root}/${child}"
+  [[ -d "${path}" && ! -L "${path}" ]] || die "runner ${child} path is a symlink or not a directory"
+  canonical="$(canonical_path "${path}")" || die "runner ${child} path is missing"
+  [[ "${canonical}" == "${runner_canonical}/${child}" ]] || die "runner ${child} path resolves outside the runner root"
+  [[ "$(stat_uid "${path}")" == "${runner_uid}" ]] || die "runner ${child} owner mismatch"
+  [[ "$(stat_device "${path}")" == "${expected_device}" ]] || die "runner ${child} device mismatch"
+done
+
+if [[ "${runner_name}" == ken-ci-* ]]; then
+  runtime_root="${RUNTIME_BASE}/${runner_name}"
+  runtime_base_canonical="$(canonical_path "${RUNTIME_BASE}")" || die 'rootless Docker runtime base is missing'
+  runtime_canonical="$(canonical_path "${runtime_root}")" || die 'rootless Docker runtime is missing'
+  [[ "${runtime_canonical}" == "${runtime_base_canonical}/${runner_name}" ]] || die 'rootless Docker runtime resolves outside the approved base'
+  [[ -d "${runtime_root}" && ! -L "${runtime_root}" ]] || die 'rootless Docker runtime is a symlink or not a directory'
+  [[ "$(stat_uid "${runtime_root}")" == "${runner_uid}" ]] || die 'rootless Docker runtime owner mismatch'
+  runtime_device="$(stat_device "${runtime_root}")"
+  expected_runtime_device="${KEN_RUNNER_EXPECTED_RUNTIME_DEVICE:-$(stat_device "${RUNTIME_BASE}")}"
+  [[ "${runtime_device}" == "${expected_runtime_device}" ]] || die 'rootless Docker runtime device mismatch'
+  docker_socket="${runtime_root}/docker.sock"
+  if (( test_mode == 1 )) && [[ "${KEN_RUNNER_CLEANUP_TEST_SOCKET_FILE:-0}" == 1 ]]; then
+    [[ -f "${docker_socket}" && ! -L "${docker_socket}" ]] || die 'rootless Docker test socket stand-in is invalid'
+  else
+    [[ -S "${docker_socket}" && ! -L "${docker_socket}" ]] || die 'rootless Docker socket is invalid'
+  fi
+  [[ "$(stat_uid "${docker_socket}")" == "${runner_uid}" ]] || die 'rootless Docker socket owner mismatch'
+  [[ "$(stat_device "${docker_socket}")" == "${expected_runtime_device}" ]] || die 'rootless Docker socket device mismatch'
+  docker_host="unix://${docker_socket}"
+
+  containers=()
+  while IFS= read -r identifier; do containers+=("${identifier}"); done < <("${DOCKER_BIN}" --host "${docker_host}" ps -aq)
+  for identifier in "${containers[@]}"; do
+    [[ -z "${identifier}" || "${identifier}" =~ ^[A-Za-z0-9_.:-]+$ ]] || die 'rootless Docker returned an invalid container ID'
+    [[ -z "${identifier}" ]] || "${DOCKER_BIN}" --host "${docker_host}" rm -f "${identifier}"
+  done
+  networks=()
+  while IFS= read -r identifier; do networks+=("${identifier}"); done < <("${DOCKER_BIN}" --host "${docker_host}" network ls -q)
+  for identifier in "${networks[@]}"; do
+    [[ -z "${identifier}" || "${identifier}" =~ ^[A-Za-z0-9_.:-]+$ ]] || die 'rootless Docker returned an invalid network ID'
+    [[ -z "${identifier}" ]] || "${DOCKER_BIN}" --host "${docker_host}" network rm "${identifier}"
+  done
+  volumes=()
+  while IFS= read -r identifier; do volumes+=("${identifier}"); done < <("${DOCKER_BIN}" --host "${docker_host}" volume ls -q)
+  for identifier in "${volumes[@]}"; do
+    [[ -z "${identifier}" || "${identifier}" =~ ^[A-Za-z0-9_.:-]+$ ]] || die 'rootless Docker returned an invalid volume ID'
+    [[ -z "${identifier}" ]] || "${DOCKER_BIN}" --host "${docker_host}" volume rm -f "${identifier}"
+  done
+fi
+
+work_root="${runner_root}/work"
+work_canonical="$(canonical_path "${work_root}")" || die 'runner work path disappeared before cleanup'
+[[ "${work_canonical}" == "${runner_canonical}/work" && -d "${work_root}" && ! -L "${work_root}" ]] || die 'runner work path changed before cleanup'
+[[ "$(stat_uid "${work_root}")" == "${runner_uid}" ]] || die 'runner work owner changed before cleanup'
+[[ "$(stat_device "${work_root}")" == "${expected_device}" ]] || die 'runner work device changed before cleanup'
+find "${work_root}" -xdev -mindepth 1 -delete
+printf 'CLEANUP_OK=%s\n' "${runner_name}"

@@ -1,0 +1,326 @@
+schema_version: 1
+organization: Ken-Technology
+source_inventory:
+  path: inventory/repositories.yaml
+  generated_at: '2026-08-19T20:13:15Z'
+  repository_ids_resolved_at: '2026-08-19T20:52:33Z'
+  resolver: read-only gh api orgs/Ken-Technology/repos
+runner_distribution:
+  version: 2.336.0
+  archive_url: https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-linux-x64-2.336.0.tar.gz
+  sha256: 04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
+  release_id: 356901421
+  asset_id: 483731096
+  provenance_url: https://api.github.com/repos/actions/runner/releases/356901421
+  provenance_retrieved_at: '2026-08-19T20:52:33Z'
+groups:
+  ci:
+    name: Ken Private CI
+    visibility: selected
+    allows_public_repositories: false
+    repositories: &selected_private_repositories
+      - {name: ken-agents, repository_id: 1283261362}
+      - {name: ken-ai-mcp, repository_id: 1197124361}
+      - {name: ken-ai-public-mcp, repository_id: 1219183688}
+      - {name: ken-analytics, repository_id: 1246327615}
+      - {name: ken-backend, repository_id: 986095345}
+      - {name: ken-brain, repository_id: 1301483993}
+      - {name: ken-cms, repository_id: 1297432707}
+      - {name: ken-daily, repository_id: 1297306483}
+      - {name: ken-frontend, repository_id: 1141163204}
+      - {name: ken-help, repository_id: 1284009844}
+      - {name: ken-hermes-clickup, repository_id: 1302468525}
+      - {name: ken-scraping, repository_id: 1214880132}
+      - {name: ken-search, repository_id: 1156281101}
+      - {name: ken-vexa-mcp-auth, repository_id: 1318316509}
+      - {name: ken-website, repository_id: 1215913301}
+  deploy:
+    name: Ken Private Deploy
+    visibility: selected
+    allows_public_repositories: false
+    repositories: *selected_private_repositories
+classes:
+  standard: {cpu_quota: 200%, memory_max: 8G, memory_swap_max: 0, tasks_max: 4096}
+  heavy: {cpu_quota: 400%, memory_max: 16G, memory_swap_max: 0, tasks_max: 8192}
+  deploy: {cpu_quota: 200%, memory_max: 5G, memory_swap_max: 0, tasks_max: 4096}
+runners:
+  - name: ken-ci-standard-01
+    enabled: true
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s01
+    uid: 21001
+    gid: 21001
+    home: /var/lib/ken-runners/ken-ci-standard-01/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-01/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-01/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-01/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-01}
+    subuid_start: 1000000
+    subgid_start: 1000000
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-01
+    slice: ken-runner-ken-ci-standard-01.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-standard-02
+    enabled: true
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s02
+    uid: 21002
+    gid: 21002
+    home: /var/lib/ken-runners/ken-ci-standard-02/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-02/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-02/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-02/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-02}
+    subuid_start: 1065536
+    subgid_start: 1065536
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-02
+    slice: ken-runner-ken-ci-standard-02.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-standard-03
+    enabled: true
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s03
+    uid: 21003
+    gid: 21003
+    home: /var/lib/ken-runners/ken-ci-standard-03/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-03/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-03/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-03/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-03}
+    subuid_start: 1131072
+    subgid_start: 1131072
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-03
+    slice: ken-runner-ken-ci-standard-03.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-standard-04
+    enabled: true
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s04
+    uid: 21004
+    gid: 21004
+    home: /var/lib/ken-runners/ken-ci-standard-04/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-04/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-04/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-04/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-04}
+    subuid_start: 1196608
+    subgid_start: 1196608
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-04
+    slice: ken-runner-ken-ci-standard-04.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-standard-05
+    enabled: true
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s05
+    uid: 21005
+    gid: 21005
+    home: /var/lib/ken-runners/ken-ci-standard-05/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-05/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-05/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-05/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-05}
+    subuid_start: 1262144
+    subgid_start: 1262144
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-05
+    slice: ken-runner-ken-ci-standard-05.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-standard-06
+    enabled: true
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s06
+    uid: 21006
+    gid: 21006
+    home: /var/lib/ken-runners/ken-ci-standard-06/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-06/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-06/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-06/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-06}
+    subuid_start: 1327680
+    subgid_start: 1327680
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-06
+    slice: ken-runner-ken-ci-standard-06.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-standard-07
+    enabled: true
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s07
+    uid: 21007
+    gid: 21007
+    home: /var/lib/ken-runners/ken-ci-standard-07/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-07/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-07/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-07/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-07}
+    subuid_start: 1393216
+    subgid_start: 1393216
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-07
+    slice: ken-runner-ken-ci-standard-07.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-standard-08
+    enabled: true
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s08
+    uid: 21008
+    gid: 21008
+    home: /var/lib/ken-runners/ken-ci-standard-08/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-08/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-08/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-08/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-08}
+    subuid_start: 1458752
+    subgid_start: 1458752
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-08
+    slice: ken-runner-ken-ci-standard-08.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-standard-09
+    enabled: false
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s09
+    uid: 21009
+    gid: 21009
+    home: /var/lib/ken-runners/ken-ci-standard-09/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-09/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-09/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-09/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-09}
+    subuid_start: 1524288
+    subgid_start: 1524288
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-09
+    slice: ken-runner-ken-ci-standard-09.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-standard-10
+    enabled: false
+    vm: ken-ci
+    class: standard
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, standard]
+    user: ghr-ci-s10
+    uid: 21010
+    gid: 21010
+    home: /var/lib/ken-runners/ken-ci-standard-10/home
+    runner_root: /var/lib/ken-runners/ken-ci-standard-10/runner
+    work_root: /var/lib/ken-runners/ken-ci-standard-10/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-standard-10/docker, runtime_root: /run/ken-rootless-docker/ken-ci-standard-10}
+    subuid_start: 1589824
+    subgid_start: 1589824
+    subid_count: 65536
+    systemd_instance: ken-ci-standard-10
+    slice: ken-runner-ken-ci-standard-10.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-heavy-01
+    enabled: true
+    vm: ken-ci
+    class: heavy
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, heavy]
+    user: ghr-ci-h01
+    uid: 21011
+    gid: 21011
+    home: /var/lib/ken-runners/ken-ci-heavy-01/home
+    runner_root: /var/lib/ken-runners/ken-ci-heavy-01/runner
+    work_root: /var/lib/ken-runners/ken-ci-heavy-01/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-heavy-01/docker, runtime_root: /run/ken-rootless-docker/ken-ci-heavy-01}
+    subuid_start: 1655360
+    subgid_start: 1655360
+    subid_count: 65536
+    systemd_instance: ken-ci-heavy-01
+    slice: ken-runner-ken-ci-heavy-01.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-ci-heavy-02
+    enabled: true
+    vm: ken-ci
+    class: heavy
+    runner_group: ci
+    labels: [self-hosted, linux, x64, ken-ci, heavy]
+    user: ghr-ci-h02
+    uid: 21012
+    gid: 21012
+    home: /var/lib/ken-runners/ken-ci-heavy-02/home
+    runner_root: /var/lib/ken-runners/ken-ci-heavy-02/runner
+    work_root: /var/lib/ken-runners/ken-ci-heavy-02/work
+    docker: {enabled: true, data_root: /var/lib/ken-runners/ken-ci-heavy-02/docker, runtime_root: /run/ken-rootless-docker/ken-ci-heavy-02}
+    subuid_start: 1720896
+    subgid_start: 1720896
+    subid_count: 65536
+    systemd_instance: ken-ci-heavy-02
+    slice: ken-runner-ken-ci-heavy-02.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-deploy-nonproduction-01
+    enabled: true
+    vm: ken-deploy
+    class: deploy
+    runner_group: deploy
+    labels: [self-hosted, linux, x64, ken-deploy, nonproduction]
+    user: ghr-deploy-np01
+    uid: 21013
+    gid: 21013
+    home: /var/lib/ken-runners/ken-deploy-nonproduction-01/home
+    runner_root: /var/lib/ken-runners/ken-deploy-nonproduction-01/runner
+    work_root: /var/lib/ken-runners/ken-deploy-nonproduction-01/work
+    docker: {enabled: false, data_root: /var/lib/ken-runners/ken-deploy-nonproduction-01/docker, runtime_root: /run/ken-rootless-docker/ken-deploy-nonproduction-01}
+    subuid_start: 1786432
+    subgid_start: 1786432
+    subid_count: 65536
+    systemd_instance: ken-deploy-nonproduction-01
+    slice: ken-runner-ken-deploy-nonproduction-01.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6
+  - name: ken-deploy-production-01
+    enabled: true
+    vm: ken-deploy
+    class: deploy
+    runner_group: deploy
+    labels: [self-hosted, linux, x64, ken-deploy, production]
+    user: ghr-deploy-p01
+    uid: 21014
+    gid: 21014
+    home: /var/lib/ken-runners/ken-deploy-production-01/home
+    runner_root: /var/lib/ken-runners/ken-deploy-production-01/runner
+    work_root: /var/lib/ken-runners/ken-deploy-production-01/work
+    docker: {enabled: false, data_root: /var/lib/ken-runners/ken-deploy-production-01/docker, runtime_root: /run/ken-rootless-docker/ken-deploy-production-01}
+    subuid_start: 1851968
+    subgid_start: 1851968
+    subid_count: 65536
+    systemd_instance: ken-deploy-production-01
+    slice: ken-runner-ken-deploy-production-01.slice
+    credential_profile: none
+    credential_delivery: broker-only-pending-task-6

@@ -169,3 +169,47 @@ The full acceptance target stays intentionally red and is labeled `PENDING APPRO
 ```bash
 bash infra/github-actions/tests/test-config.sh vm-definitions
 ```
+
+## Task 5 offline runner platform
+
+`inventory/runner-platform.yaml` is the reviewed desired state for the new runner pools. It reserves 14 identities and enables 12: eight standard CI slots, two heavy CI slots, and one nonproduction plus one production deployment slot. `ken-ci-standard-09` and `ken-ci-standard-10` remain disabled capacity reservations and must not create accounts, units, or GitHub registrations. The Task 2 `inventory/runners.yaml` file remains observed evidence and is not an operational input.
+
+Every identity has a fixed user, UID/GID, non-overlapping 65,536-entry subordinate-ID range, runner/work path, Docker path, and parent slice. Standard slices are capped at `200%` CPU and 8 GiB; heavy slices at `400%` and 16 GiB; deployment slices at `200%` and 5 GiB. All have swap disabled. The listener and that identity's separate rootless Docker daemon share the same slice. Deployment Docker stays disabled until a reviewed workflow proves it is required.
+
+The runner release is pinned to Actions runner `2.336.0`, asset `483731096`, with SHA-256 `04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d`. Provenance is the official GitHub release API record `356901421`, read on 2026-08-19. Live installation must re-download the exact archive, verify that digest before extraction, keep the binaries root-owned and read-only, and configure `--disableupdate`.
+
+The `Ken Private CI` and `Ken Private Deploy` desired groups both use selected-repository visibility, reject public repositories, and pin the reviewed IDs of the 15 private repositories in the inventory contract. Before any group mutation, a live implementation must resolve those names again through the GitHub API and fail if an ID, visibility, archival state, or inventory generation differs. It must not change Default, Blacksmith, Grok, or Worldstream groups.
+
+Runner listeners load no credentials. Every Task 5 record remains:
+
+```yaml
+credential_profile: none
+credential_delivery: broker-only-pending-task-6
+```
+
+The listener units do not expose a 1Password token, systemd credential directory, `ken-op-exec`, the rootful Docker socket, sudo, or Docker-group membership. Task 6 alone owns the broker and credential delivery.
+
+`ken-runner-cleanup` is a root-owned `ExecStopPost` boundary. Systemd first kills all remaining descendants in the completed listener's control group. The helper then validates the exact runner name, numeric service UID, canonical base/child paths, ownership, filesystem device, and non-symlink state before deleting only that runner's work directory. For CI identities it contacts only that runner's rootless Docker socket and removes objects returned by that daemon individually; it never invokes a global prune or a rootful socket. The other identities' caches, sockets, processes, and workspaces are out of scope.
+
+### Offline checks and live boundary
+
+Run the complete Task 5 offline suite with:
+
+```bash
+bash infra/github-actions/tests/test-config.sh runners
+```
+
+The suite exercises schema and unit security, fake selected-repository resolution, missing/unhealthy Task 4 evidence, low-memory gates, archive checksum failure, exact/idempotent registration, local/GitHub drift, rollback, read-only verification, and adversarial two-runner cleanup.
+
+The only supported controller preview is read-only:
+
+```bash
+bash infra/github-actions/scripts/register-runners.sh \
+  --org Ken-Technology \
+  --all \
+  --dry-run
+
+bash infra/github-actions/scripts/verify-platform.sh runners --dry-run
+```
+
+Task 5 deliberately contains no SSH or GitHub mutation transport. Any non-test registration or verification call fails locally until Task 4 is reviewed, its three persistent-unit approval is granted, the VMs are provisioned, and fresh evidence proves the exact host, at least 32 GiB host memory headroom, both VM memory contracts and health, firewall generation, and guest isolation. The fake transport exists only for hermetic tests; it does not install accounts, start services, create GitHub groups, or register runners.
