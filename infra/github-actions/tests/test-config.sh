@@ -646,6 +646,38 @@ fi
 SH
   cat >"${fake_bin}/ss" <<'SH'
 #!/usr/bin/env bash
+set -euo pipefail
+profile="${FAKE_SSH_PROFILE:-good}"
+after=0
+[[ -e "${FAKE_STATE_ROOT}/packages-installed" ]] && after=1
+ssh_protocol=tcp
+ssh_state=LISTEN
+ssh_local=0.0.0.0:22
+ssh_fd=101
+[[ "${profile}" == port-metadata-churn && "${after}" == 1 ]] && ssh_fd=249
+case "${profile}:${after}" in
+  port-listener-lost:1) ;;
+  port-address-changed:1)
+    ssh_local=127.0.0.1:22
+    printf '%s %s 0 128 %s 0.0.0.0:* users:(("systemd",pid=1,fd=%s))\n' "${ssh_protocol}" "${ssh_state}" "${ssh_local}" "${ssh_fd}"
+    ;;
+  port-number-changed:1)
+    ssh_local=0.0.0.0:2222
+    printf '%s %s 0 128 %s 0.0.0.0:* users:(("systemd",pid=1,fd=%s))\n' "${ssh_protocol}" "${ssh_state}" "${ssh_local}" "${ssh_fd}"
+    ;;
+  port-protocol-changed:1)
+    ssh_protocol=udp
+    ssh_state=UNCONN
+    printf '%s %s 0 0 %s 0.0.0.0:* users:(("systemd",pid=1,fd=%s))\n' "${ssh_protocol}" "${ssh_state}" "${ssh_local}" "${ssh_fd}"
+    ;;
+  *)
+    if [[ "${profile}" == port-metadata-churn && "${after}" == 1 ]]; then
+      printf '%s   %s  0  128   %s   0.0.0.0:*   users:(("systemd",pid=1,fd=%s))\n' "${ssh_protocol}" "${ssh_state}" "${ssh_local}" "${ssh_fd}"
+    else
+      printf '%s %s 0 128 %s 0.0.0.0:* users:(("systemd",pid=1,fd=%s))\n' "${ssh_protocol}" "${ssh_state}" "${ssh_local}" "${ssh_fd}"
+    fi
+    ;;
+esac
 echo 'tcp LISTEN 0 128 127.0.0.1:9200 0.0.0.0:* users:(("java",pid=4242,fd=1))'
 SH
   cat >"${fake_bin}/du" <<'SH'
@@ -842,6 +874,26 @@ SH
     fail "container without a healthcheck broke or leaked from the protected-state snapshot"
     printf '%s\n' "${output}"
   fi
+
+  exercise port-metadata-churn root@167.235.8.250
+  if (( status == 0 )) && grep -Fq 'Host provisioning verified' <<<"${output}"; then
+    pass "socket PID and FD churn preserves the logical listener set"
+  else
+    fail "volatile socket process metadata changed protected port identity"
+    printf '%s\n' "${output}"
+  fi
+
+  for profile in port-listener-lost port-address-changed port-number-changed port-protocol-changed; do
+    exercise "${profile}" root@167.235.8.250
+    if (( status != 0 )) &&
+      grep -Fq 'Protected ports entries disappeared or changed' <<<"${output}" &&
+      grep -Fq 'AUTO_ROLLBACK_STATUS=ok' <<<"${output}"; then
+      pass "${profile} still fails protected port verification"
+    else
+      fail "${profile} escaped protected port verification"
+      printf '%s\n' "${output}"
+    fi
+  done
 
   exercise runner-listener-missing-baseline root@167.235.8.250
   if (( status != 0 )) &&

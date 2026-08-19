@@ -530,6 +530,20 @@ snapshot_protected_processes() {
   sort <<<"${report}" >"${destination}"
 }
 
+snapshot_protected_ports() {
+  local destination="$1" report
+  if ! report="$(ss -H -lntu 2>/dev/null)"; then
+    die "cannot snapshot protected listening ports"
+  fi
+  [[ -n "${report//[[:space:]]/}" ]] || die "protected listening port snapshot is empty"
+  if ! awk '
+    NF < 6 { exit 1 }
+    { print $1 "\t" $2 "\t" $5 "\t" $6 }
+  ' <<<"${report}" | LC_ALL=C sort -u >"${destination}"; then
+    die "cannot normalize protected listening ports"
+  fi
+}
+
 snapshot_protected_state() {
   local destination="$1" unit container_id
   : >"${destination}/services"
@@ -555,7 +569,7 @@ snapshot_protected_state() {
   done < <(docker ps -q 2>/dev/null | sort)
   sort -o "${destination}/docker" "${destination}/docker"
   snapshot_protected_processes "${destination}/processes"
-  ss -H -lntup 2>/dev/null | sort >"${destination}/ports"
+  snapshot_protected_ports "${destination}/ports"
 }
 
 assert_preserved() {
