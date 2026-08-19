@@ -1,0 +1,27 @@
+{
+  "name": "production-protected",
+  "protection_rules": [
+    {
+      "type": "required_reviewers",
+      "prevent_self_review": true,
+      "reviewers": [
+        {
+          "type": "User",
+          "reviewer": { "login": "other-human" }
+        }
+      ]
+    },
+    {
+      "type": "wait_timer",
+      "wait_timer": 15
+    }
+  ],
+  "deployment_branch_policy": {
+    "protected_branches": false,
+    "custom_branch_policies": true
+  },
+  "deployment_branch_policies": [
+    { "name": "main", "type": "branch" },
+    { "name": "release/*", "type": "tag" }
+  ]
+}

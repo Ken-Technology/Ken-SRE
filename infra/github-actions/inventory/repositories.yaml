@@ -1,6 +1,6 @@
 schema_version: 1
 organization: Ken-Technology
-generated_at: '2026-08-19T16:32:25Z'
+generated_at: '2026-08-19T16:27:01Z'
 authority: live GitHub default-branch workflow YAML and environment metadata; names only
 counts:
   active_repositories: 25
@@ -82,6 +82,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#ci
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -148,6 +156,14 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -200,6 +216,18 @@ repositories:
       - GHCR
       - ghcr.io
       - Langfuse
+      - DEPLOY_HOST
+      target:
+        kind: ssh-or-host
+        action_types:
+        - appleboy/ssh-action
+        endpoint_expressions:
+        - ${{ secrets.DEPLOY_HOST }}
+        host_secret_names:
+        - DEPLOY_HOST
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -226,6 +254,14 @@ repositories:
       artifacts: []
       target_hints:
       - ClickUp
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy.yml#notify
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -272,15 +308,24 @@ repositories:
       target_hints:
       - ClickUp
       - Langfuse
-      classification: standard-ci
-      target_runner_class: ken-ci-standard
-      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
-      secret_class: ci-runtime
-      production_impact: false
-      deploys_or_publishes: false
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/eval-weekly.yml#scoreboard
+      classification: scheduled-secret-production
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
+      - SCHEDULED_LONG_LIVED_SECRET
   - path: .github/workflows/grok-pr-review.yml
     name: Grok PR Review
     triggers:
@@ -315,6 +360,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#gate
       classification: existing-grok-review-gate
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -344,6 +397,14 @@ repositories:
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#review
       classification: existing-grok-review
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, grok-review]'
@@ -388,15 +449,24 @@ repositories:
       artifacts: []
       target_hints:
       - Langfuse
-      classification: standard-ci
-      target_runner_class: ken-ci-standard
-      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
-      secret_class: ci-runtime
-      production_impact: false
-      deploys_or_publishes: false
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/prompt-parity.yml#parity
+      classification: scheduled-secret-production
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
+      - SCHEDULED_LONG_LIVED_SECRET
 - name: ken-ai-mcp
   visibility: private
   archived: false
@@ -437,15 +507,24 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
-      classification: standard-ci
-      target_runner_class: ken-ci-standard
-      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
-      secret_class: ci-runtime
-      production_impact: false
-      deploys_or_publishes: false
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/contracts-drift.yml#drift-check
+      classification: scheduled-secret-production
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
+      - SCHEDULED_LONG_LIVED_SECRET
   - path: .github/workflows/deploy.yml
     name: Deploy Ken AI MCP Server to Worldstream
     triggers:
@@ -494,6 +573,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy.yml#should-deploy
       classification: deploy-gate
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -511,9 +598,9 @@ repositories:
       environment:
         name: Prod
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -550,6 +637,22 @@ repositories:
       artifacts: []
       target_hints:
       - Worldstream
+      - WORLDSTREAM_HOST
+      - DB_HOST
+      target:
+        kind: ssh-or-host
+        action_types:
+        - appleboy/scp-action
+        - appleboy/ssh-action
+        endpoint_expressions:
+        - ${{ secrets.WORLDSTREAM_HOST }}
+        - ${{ secrets.DB_HOST }}
+        host_secret_names:
+        - WORLDSTREAM_HOST
+        - DB_HOST
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -560,6 +663,7 @@ repositories:
       flags:
       - BLACKSMITH
       - COMBINED_BUILD_AND_DEPLOY
+      - SCHEDULED_LONG_LIVED_SECRET
   - path: .github/workflows/grok-pr-review.yml
     name: Grok PR Review
     triggers:
@@ -594,6 +698,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#gate
       classification: existing-grok-review-gate
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -623,6 +735,14 @@ repositories:
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#review
       classification: existing-grok-review
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, grok-review]'
@@ -661,6 +781,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/tests.yml#tests
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -688,6 +816,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/tests.yml#contracts-fresh
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -746,6 +882,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/check-mcp-urls.yml#check
       classification: public-standard-ci
       target_runner_class: public-github-hosted
       target_runs_on: ubuntu-latest
@@ -783,7 +927,16 @@ repositories:
       - COLD_EMAIL_SKILLS_DEPLOY_KEY
       variable_names: []
       artifacts: []
-      target_hints: []
+      target_hints:
+      - git-deploy-key
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: git-deploy-key
+        unknown_reason: null
       classification: public-production-impact-deploy
       target_runner_class: public-github-hosted
       target_runs_on: ubuntu-latest
@@ -821,9 +974,9 @@ repositories:
       environment:
         name: Prod
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -843,6 +996,19 @@ repositories:
       artifacts: []
       target_hints:
       - Worldstream
+      - WORLDSTREAM_HOST
+      target:
+        kind: ssh-or-host
+        action_types:
+        - appleboy/scp-action
+        - appleboy/ssh-action
+        endpoint_expressions:
+        - ${{ secrets.WORLDSTREAM_HOST }}
+        host_secret_names:
+        - WORLDSTREAM_HOST
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -887,6 +1053,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#validate
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -930,12 +1104,20 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
-      classification: production-impact-deploy
-      target_runner_class: ken-deploy-production
-      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
-      secret_class: deploy-production
-      production_impact: true
-      deploys_or_publishes: true
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy-production.yml#validate
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
@@ -947,9 +1129,9 @@ repositories:
       environment:
         name: production
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -968,7 +1150,18 @@ repositories:
       - DEPLOY_PATH
       - ANALYTICS_URL
       artifacts: []
-      target_hints: []
+      target_hints:
+      - DEPLOY_HOST
+      target:
+        kind: ssh-or-host
+        action_types: []
+        endpoint_expressions:
+        - ${{ vars.DEPLOY_HOST }}
+        host_secret_names: []
+        host_variable_names:
+        - DEPLOY_HOST
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -993,6 +1186,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy-production.yml#no_stack_yet
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -1047,6 +1248,14 @@ repositories:
       artifacts: []
       target_hints:
       - NuGet
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci-guardrails.yml#guardrails
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -1084,6 +1293,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/contract-export-check.yml#verify-contracts
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -1130,9 +1347,9 @@ repositories:
       environment:
         name: cloudflare-edge-production
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -1166,6 +1383,14 @@ repositories:
       target_hints:
       - Cloudflare
       - npm
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy-cloudflare-redirector.yml#deploy
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -1204,9 +1429,9 @@ repositories:
       environment:
         name: Production
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -1235,6 +1460,20 @@ repositories:
       - GHCR
       - ghcr.io
       - OVH
+      - REDIRECT_DEPLOY_HOST
+      target:
+        kind: ssh-or-host
+        action_types:
+        - docker/login-action
+        - docker/build-push-action
+        endpoint_expressions:
+        - ${{ secrets.REDIRECT_DEPLOY_HOST }}
+        - ${{ secrets.REDIRECT_DEPLOY_HOST_KEY }}
+        host_secret_names:
+        - REDIRECT_DEPLOY_HOST
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -1268,9 +1507,9 @@ repositories:
       environment:
         name: Staging
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -1287,7 +1526,20 @@ repositories:
       - STAGING_BACKEND_SSH_KEY
       variable_names: []
       artifacts: []
-      target_hints: []
+      target_hints:
+      - STAGING_BACKEND_HOST
+      target:
+        kind: ssh-or-host
+        action_types:
+        - appleboy/scp-action
+        - appleboy/ssh-action
+        endpoint_expressions:
+        - ${{ secrets.STAGING_BACKEND_HOST }}
+        host_secret_names:
+        - STAGING_BACKEND_HOST
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: nonproduction-deploy
       target_runner_class: ken-deploy-nonproduction
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, nonproduction]'
@@ -1441,6 +1693,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy.yml#should-deploy
       classification: deploy-gate
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -1458,9 +1718,9 @@ repositories:
       environment:
         name: Preprod
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -1599,6 +1859,29 @@ repositories:
       - Langfuse
       - OVH
       - api.getken.ai
+      - WORLDSTREAM_HOST
+      - CLOUDFLARE_REDIRECT_INGRESS_HOSTNAME
+      - CLOUDFLARE_REDIRECT_STANDBY_HOSTNAME
+      - REDIRECT_SYNC_STANDBY_HOSTNAME
+      target:
+        kind: ssh-or-host
+        action_types:
+        - appleboy/scp-action
+        - appleboy/ssh-action
+        endpoint_expressions:
+        - ${{ secrets.WORLDSTREAM_HOST }}
+        - ${{ secrets.SCHEMA_TUNNEL_KNOWN_HOSTS }}
+        - "${{ vars.CLOUDFLARE_REDIRECT_INGRESS_HOSTNAME\n      }}"
+        - "${{ vars.CLOUDFLARE_REDIRECT_STANDBY_HOSTNAME\n      }}"
+        - ${{ vars.REDIRECT_SYNC_STANDBY_HOSTNAME }}
+        host_secret_names:
+        - WORLDSTREAM_HOST
+        host_variable_names:
+        - CLOUDFLARE_REDIRECT_INGRESS_HOSTNAME
+        - CLOUDFLARE_REDIRECT_STANDBY_HOSTNAME
+        - REDIRECT_SYNC_STANDBY_HOSTNAME
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -1609,6 +1892,7 @@ repositories:
       flags:
       - BLACKSMITH
       - COMBINED_BUILD_AND_DEPLOY
+      - SCHEDULED_LONG_LIVED_SECRET
   - path: .github/workflows/grok-pr-review.yml
     name: Grok PR Review
     triggers:
@@ -1643,6 +1927,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#gate
       classification: existing-grok-review-gate
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -1672,6 +1964,14 @@ repositories:
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#review
       classification: existing-grok-review
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, grok-review]'
@@ -1706,9 +2006,9 @@ repositories:
       environment:
         name: Production
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -1724,7 +2024,19 @@ repositories:
       - REDIRECT_DEPLOY_HOST_KEY
       variable_names: []
       artifacts: []
-      target_hints: []
+      target_hints:
+      - REDIRECT_DEPLOY_HOST
+      target:
+        kind: ssh-or-host
+        action_types: []
+        endpoint_expressions:
+        - ${{ secrets.REDIRECT_DEPLOY_HOST }}
+        - ${{ secrets.REDIRECT_DEPLOY_HOST_KEY }}
+        host_secret_names:
+        - REDIRECT_DEPLOY_HOST
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -1762,6 +2074,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/production-database-ops.yml#validate
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -1804,6 +2124,15 @@ repositories:
       artifacts: []
       target_hints:
       - NuGet
+      - github-packages
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: github-packages
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -1837,6 +2166,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/sql-migration-lint.yml#lint
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -1875,6 +2212,14 @@ repositories:
       artifacts: []
       target_hints:
       - npm
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-cloudflare-redirector.yml#test
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -1911,6 +2256,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-redirector-python.yml#test
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -1961,6 +2314,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#test
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -1978,9 +2339,9 @@ repositories:
       environment:
         name: Prod
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -1999,6 +2360,18 @@ repositories:
       artifacts: []
       target_hints:
       - Hetzner
+      - SSH_HOST
+      target:
+        kind: ssh-or-host
+        action_types: []
+        endpoint_expressions:
+        - ${{ secrets.SSH_KNOWN_HOSTS }}
+        - ${{ secrets.SSH_HOST }}
+        host_secret_names:
+        - SSH_HOST
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2079,6 +2452,21 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      - SSH_HOST
+      target:
+        kind: ssh-or-host
+        action_types:
+        - docker/login-action
+        - docker/build-push-action
+        - appleboy/scp-action
+        - appleboy/ssh-action
+        endpoint_expressions:
+        - ${{ secrets.SSH_HOST }}
+        host_secret_names:
+        - SSH_HOST
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2123,6 +2511,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#test
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -2164,7 +2560,19 @@ repositories:
       - DEPLOY_SSH_KEY
       variable_names: []
       artifacts: []
-      target_hints: []
+      target_hints:
+      - DEPLOY_HOST
+      target:
+        kind: ssh-or-host
+        action_types:
+        - appleboy/ssh-action
+        endpoint_expressions:
+        - ${{ secrets.DEPLOY_HOST }}
+        host_secret_names:
+        - DEPLOY_HOST
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2192,6 +2600,14 @@ repositories:
       artifacts: []
       target_hints:
       - ClickUp
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy.yml#notify
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2251,6 +2667,14 @@ repositories:
       - actions/upload-artifact@v7
       target_hints:
       - npm
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#ci
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -2277,6 +2701,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#security
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -2349,6 +2781,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy.yml#should-deploy
       classification: deploy-gate
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -2366,9 +2806,9 @@ repositories:
       environment:
         name: production
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -2396,6 +2836,16 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        - docker/build-push-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2406,6 +2856,7 @@ repositories:
       flags:
       - BLACKSMITH
       - COMBINED_BUILD_AND_DEPLOY
+      - SCHEDULED_LONG_LIVED_SECRET
     - id: deploy
       name: Deploy to Server
       runs_on: '[self-hosted, ken-ci]'
@@ -2414,9 +2865,9 @@ repositories:
       environment:
         name: production
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -2458,6 +2909,18 @@ repositories:
       - ghcr.io
       - ClickUp
       - Langfuse
+      - DEPLOY_HOST
+      target:
+        kind: ssh-or-host
+        action_types:
+        - appleboy/ssh-action
+        endpoint_expressions:
+        - ${{ secrets.DEPLOY_HOST }}
+        host_secret_names:
+        - DEPLOY_HOST
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2467,6 +2930,7 @@ repositories:
       combined_build_and_deploy: false
       flags:
       - LEGACY_KEN_CI
+      - SCHEDULED_LONG_LIVED_SECRET
   - path: .github/workflows/grok-pr-review.yml
     name: Grok PR Review
     triggers:
@@ -2501,6 +2965,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#gate
       classification: existing-grok-review-gate
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -2530,6 +3002,14 @@ repositories:
       artifacts:
       - actions/upload-artifact@v7
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#review
       classification: existing-grok-review
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, grok-review]'
@@ -2575,6 +3055,14 @@ repositories:
       target_hints:
       - npm
       - Langfuse
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/publish-campaign-build-prompts.yml#publish
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2627,6 +3115,14 @@ repositories:
       - actions/upload-artifact@v4
       target_hints:
       - npm
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#build
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -2657,7 +3153,19 @@ repositories:
       variable_names: []
       artifacts:
       - actions/download-artifact@v4
-      target_hints: []
+      target_hints:
+      - DEPLOY_HOST
+      target:
+        kind: ssh-or-host
+        action_types: []
+        endpoint_expressions:
+        - ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        - ${{ secrets.DEPLOY_HOST }}
+        host_secret_names:
+        - DEPLOY_HOST
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2707,6 +3215,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#test
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -2732,6 +3248,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#static
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -2757,6 +3281,14 @@ repositories:
       artifacts: []
       target_hints:
       - ClickUp
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ci.yml#secrets-guard
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -2797,6 +3329,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy.yml#test
       classification: reusable-workflow-call
       target_runner_class: inherit-called-workflow
       target_runs_on: ''
@@ -2813,9 +3353,9 @@ repositories:
       environment:
         name: production
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -2834,6 +3374,18 @@ repositories:
       artifacts: []
       target_hints:
       - ClickUp
+      - DEPLOY_HOST
+      target:
+        kind: ssh-or-host
+        action_types: []
+        endpoint_expressions:
+        - ${{ secrets.DEPLOY_HOST }}
+        - ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        host_secret_names:
+        - DEPLOY_HOST
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2890,6 +3442,16 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        - useblacksmith/build-push-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2918,6 +3480,15 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2959,6 +3530,16 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        - useblacksmith/build-push-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -2998,6 +3579,15 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: nonproduction-deploy
       target_runner_class: ken-deploy-nonproduction
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, nonproduction]'
@@ -3042,6 +3632,16 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        - useblacksmith/build-push-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3070,6 +3670,15 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3109,6 +3718,15 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3196,6 +3814,17 @@ repositories:
       artifacts: []
       target_hints:
       - OVH
+      - OVH_HOST_KEY
+      target:
+        kind: ssh-or-host
+        action_types: []
+        endpoint_expressions:
+        - ${{ secrets.OVH_HOST_KEY }}
+        host_secret_names:
+        - OVH_HOST_KEY
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3237,6 +3866,16 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        - useblacksmith/build-push-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3265,6 +3904,15 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3304,6 +3952,15 @@ repositories:
       target_hints:
       - GHCR
       - ghcr.io
+      target:
+        kind: registry-or-package
+        action_types:
+        - docker/login-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: ghcr.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3342,6 +3999,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/eval-prod.yml#run-eval-benchmark-prod
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -3378,6 +4043,14 @@ repositories:
       artifacts: []
       target_hints:
       - GHCR
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/ghcr-clean.yml#delete-untagged-images
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -3421,6 +4094,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#gate
       classification: existing-grok-review-gate
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -3450,6 +4131,14 @@ repositories:
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#review
       classification: existing-grok-review
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, grok-review]'
@@ -3487,6 +4176,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/lint-workflows.yml#actionlint
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -3522,6 +4219,14 @@ repositories:
       artifacts: []
       target_hints:
       - npm
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/npm-audit.yml#audit
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -3561,6 +4266,15 @@ repositories:
       artifacts: []
       target_hints:
       - NuGet
+      - nuget
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: nuget
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3599,6 +4313,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/publish-elixir-sdk.yml#regenerate
       classification: nonproduction-deploy
       target_runner_class: ken-deploy-nonproduction
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, nonproduction]'
@@ -3624,7 +4346,16 @@ repositories:
       - HEX_API_KEY
       variable_names: []
       artifacts: []
-      target_hints: []
+      target_hints:
+      - hex.pm
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: hex.pm
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3634,6 +4365,7 @@ repositories:
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
+      - SCHEDULED_LONG_LIVED_SECRET
   - path: .github/workflows/publish-go-sdk.yml
     name: Publish Go SDK
     triggers:
@@ -3662,7 +4394,16 @@ repositories:
       - GITHUB_TOKEN
       variable_names: []
       artifacts: []
-      target_hints: []
+      target_hints:
+      - github-packages
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: github-packages
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3709,6 +4450,14 @@ repositories:
       artifacts: []
       target_hints:
       - Maven
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/publish-java-sdk.yml#publish
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3748,6 +4497,14 @@ repositories:
       artifacts: []
       target_hints:
       - npm
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: npm
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3791,7 +4548,17 @@ repositories:
       - PACKAGIST_TOKEN
       variable_names: []
       artifacts: []
-      target_hints: []
+      target_hints:
+      - packagist
+      - git-deploy-key
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: git-deploy-key
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3831,6 +4598,15 @@ repositories:
       artifacts: []
       target_hints:
       - PyPI
+      - pypi
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: pypi
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3868,7 +4644,16 @@ repositories:
       - RUBYGEMS_API_KEY
       variable_names: []
       artifacts: []
-      target_hints: []
+      target_hints:
+      - rubygems
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: rubygems
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3907,7 +4692,16 @@ repositories:
       - CRATES_IO_TOKEN
       variable_names: []
       artifacts: []
-      target_hints: []
+      target_hints:
+      - crates.io
+      target:
+        kind: registry-or-package
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: crates.io
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -3945,6 +4739,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/scrape-evals.yml#quality-eval
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -3971,6 +4773,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/scrape-evals.yml#ocr-eval
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4009,6 +4819,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-dotnet-sdk.yml#build-and-test
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4045,6 +4863,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-go-sdk.yml#build-and-vet
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4085,6 +4911,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-java-sdk.yml#build-and-test
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4128,6 +4962,14 @@ repositories:
       artifacts: []
       target_hints:
       - npm
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-js-sdk.yml#test
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4168,6 +5010,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-php-sdk.yml#build-and-test
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4205,6 +5055,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-ruby-sdk.yml#build-and-test
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4240,6 +5098,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-rust-sdk.yml#test
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4326,6 +5192,14 @@ repositories:
       - actions/upload-artifact@v4
       target_hints:
       - npm
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/test-server.yml#self-host
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4362,6 +5236,14 @@ repositories:
       artifacts: []
       target_hints:
       - npm
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/validate-lockfiles.yml#validate
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -4404,6 +5286,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/database-files-check.yml#check-database-files
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -4460,6 +5350,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy.yml#should-deploy
       classification: deploy-gate
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -4477,9 +5375,9 @@ repositories:
       environment:
         name: Preprod
         required_reviewers: []
-        prevent_self_review: false
-        wait_timer: 0
-        deployment_branches: unrestricted
+        prevent_self_review: null
+        wait_timer: null
+        deployment_branches: null
         protection_available: true
         external_hard_stop: false
         note: ''
@@ -4515,6 +5413,19 @@ repositories:
       target_hints:
       - NuGet
       - ClickUp
+      - VPS_HOST
+      target:
+        kind: ssh-or-host
+        action_types:
+        - appleboy/scp-action
+        - appleboy/ssh-action
+        endpoint_expressions:
+        - ${{ secrets.VPS_HOST }}
+        host_secret_names:
+        - VPS_HOST
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -4525,6 +5436,7 @@ repositories:
       flags:
       - BLACKSMITH
       - COMBINED_BUILD_AND_DEPLOY
+      - SCHEDULED_LONG_LIVED_SECRET
   - path: .github/workflows/grok-pr-review.yml
     name: Grok PR Review
     triggers:
@@ -4559,6 +5471,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#gate
       classification: existing-grok-review-gate
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -4588,6 +5508,14 @@ repositories:
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/grok-pr-review.yml#review
       classification: existing-grok-review
       target_runner_class: existing-grok-review
       target_runs_on: '[self-hosted, grok-review]'
@@ -4634,6 +5562,14 @@ repositories:
       artifacts: []
       target_hints:
       - NuGet
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/projection-mysql-tests.yml#projection-mysql
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4680,6 +5616,14 @@ repositories:
       artifacts: []
       target_hints:
       - NuGet
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/residual-mysql-tests.yml#residual-mysql
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4726,6 +5670,14 @@ repositories:
       artifacts: []
       target_hints:
       - NuGet
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/technology-full-schedule-mysql-tests.yml#technology-full-schedule-mysql
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4772,6 +5724,14 @@ repositories:
       artifacts: []
       target_hints:
       - NuGet
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/technology-refresh-mysql-tests.yml#technology-refresh-mysql
       classification: heavy-ci
       target_runner_class: ken-ci-heavy
       target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
@@ -4819,6 +5779,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/build-web.yml#build-web
       classification: public-standard-ci
       target_runner_class: public-github-hosted
       target_runs_on: ubuntu-latest
@@ -4857,6 +5825,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/close-issue.yml#close-issues
       classification: public-standard-ci
       target_runner_class: public-github-hosted
       target_runs_on: ubuntu-latest
@@ -4893,6 +5869,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/homebrew.yml#homebrew
       classification: public-standard-ci
       target_runner_class: public-github-hosted
       target_runs_on: ubuntu-latest
@@ -4930,6 +5914,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/pr-labeler.yml#main
       classification: public-standard-ci
       target_runner_class: public-github-hosted
       target_runs_on: ubuntu-latest
@@ -4973,6 +5965,16 @@ repositories:
       - actions/upload-artifact@v3
       target_hints:
       - PyPI
+      - pypi
+      target:
+        kind: registry-or-package
+        action_types:
+        - pypa/gh-action-pypi-publish
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: pypi
+        unknown_reason: null
       classification: public-production-impact-deploy
       target_runner_class: public-github-hosted
       target_runs_on: ubuntu-latest
@@ -5012,6 +6014,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/release-drafter.yml#main
       classification: public-standard-ci
       target_runner_class: public-github-hosted
       target_runs_on: ubuntu-latest
@@ -5059,6 +6069,14 @@ repositories:
       variable_names: []
       artifacts: []
       target_hints: []
+      target:
+        kind: null
+        action_types: []
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/deploy.yml#test
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
@@ -5090,6 +6108,17 @@ repositories:
       artifacts: []
       target_hints:
       - 1Password
+      target:
+        kind: ssh-or-host
+        action_types:
+        - 1password/load-secrets-action
+        - appleboy/scp-action
+        - appleboy/ssh-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -5099,6 +6128,7 @@ repositories:
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
+      - OP_BOOTSTRAP_TOKEN
 - name: ken-website
   visibility: private
   archived: false
@@ -5142,15 +6172,26 @@ repositories:
       - npm
       - 1Password
       - beehiiv
-      classification: standard-ci
-      target_runner_class: ken-ci-standard
-      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
-      secret_class: ci-runtime
-      production_impact: false
-      deploys_or_publishes: false
+      target:
+        kind: action
+        action_types:
+        - 1password/load-secrets-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
+      classification: scheduled-secret-production
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
+      - SCHEDULED_LONG_LIVED_SECRET
+      - OP_BOOTSTRAP_TOKEN
   - path: .github/workflows/deploy.yml
     name: Deploy Website
     triggers:
@@ -5199,6 +6240,17 @@ repositories:
       - Cloudflare
       - npm
       - 1Password
+      target:
+        kind: ssh-or-host
+        action_types:
+        - 1password/load-secrets-action
+        - appleboy/scp-action
+        - appleboy/ssh-action
+        endpoint_expressions: []
+        host_secret_names: []
+        host_variable_names: []
+        registry_or_package: null
+        unknown_reason: null
       classification: production-impact-deploy
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
@@ -5209,3 +6261,6 @@ repositories:
       flags:
       - BLACKSMITH
       - COMBINED_BUILD_AND_DEPLOY
+      - SCHEDULED_LONG_LIVED_SECRET
+      - OP_BOOTSTRAP_TOKEN
+input_hash: bc7d3fd9a8286b3ff4efce54028a31fc7d27b4c25acdea2713d482c68d50a05d

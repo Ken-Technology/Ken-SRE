@@ -194,9 +194,6 @@ for item in budgets:
 out = {
     "actions_overage_budget_usd": overage,
     "prevent_further_usage": prevent,
-    "blacksmith_previous_month_usd": 130,
-    "blacksmith_previous_month_status": "unverified-planning-baseline",
-    "blacksmith_current_unbilled": "unavailable",
 }
 dst.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
 PY
@@ -212,6 +209,9 @@ if [[ -f "${ROOT}/infra/github-actions/inventory/evidence/worldstream-runners.js
 fi
 if [[ -f "${ROOT}/infra/github-actions/inventory/evidence/onepassword-vaults.json" ]]; then
   cp "${ROOT}/infra/github-actions/inventory/evidence/onepassword-vaults.json" "${COLLECT_DIR}/onepassword-vaults.json"
+fi
+if [[ -f "${ROOT}/infra/github-actions/inventory/evidence/blacksmith-billing.json" ]]; then
+  cp "${ROOT}/infra/github-actions/inventory/evidence/blacksmith-billing.json" "${COLLECT_DIR}/blacksmith-billing.json"
 fi
 
 while IFS= read -r repo; do
@@ -245,6 +245,22 @@ while IFS= read -r repo; do
       [[ -n "${env_name}" ]] || continue
       encoded="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "${env_name}")"
       safe_gh api "repos/${ORG}/${repo}/environments/${encoded}" >"${repo_dir}/environments/${env_name}.json" || true
+      if python3 - "${repo_dir}/environments/${env_name}.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+policy = data.get("deployment_branch_policy") or {}
+sys.exit(0 if policy.get("custom_branch_policies") else 1)
+PY
+      then
+        safe_gh api "repos/${ORG}/${repo}/environments/${encoded}/deployment-branch-policies" \
+          >"${repo_dir}/environments/${env_name}.branches.json" || echo '[]' >"${repo_dir}/environments/${env_name}.branches.json"
+      fi
       safe_gh secret list --repo "${ORG}/${repo}" --env "${env_name}" --json name,updatedAt \
         >"${repo_dir}/environment-secrets/${env_name}.json" || echo '[]' >"${repo_dir}/environment-secrets/${env_name}.json"
     done < <(printf '%s\n' "${envs_json}" | jq -r '.environments[]?.name // empty')

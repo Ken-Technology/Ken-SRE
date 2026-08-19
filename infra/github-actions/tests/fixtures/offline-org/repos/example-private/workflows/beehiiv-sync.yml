@@ -1,0 +1,13 @@
+name: beehiiv-sync
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+jobs:
+  sync:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: 1password/load-secrets-action@v2
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+      - run: echo beehiiv sync

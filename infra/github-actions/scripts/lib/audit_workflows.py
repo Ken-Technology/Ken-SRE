@@ -6,6 +6,7 @@ name/metadata payloads. Secret values are rejected if they appear.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
@@ -90,6 +91,44 @@ TARGET_HINT_WORDS = (
     "1Password",
     "beehiiv",
     "api.getken.ai",
+    "crates.io",
+    "hex.pm",
+    "packagist",
+    "rubygems",
+)
+HOST_SECRET_NAMES = {
+    "DEPLOY_HOST",
+    "SSH_HOST",
+    "VPS_HOST",
+    "WORLDSTREAM_HOST",
+    "STAGING_BACKEND_HOST",
+    "REDIRECT_DEPLOY_HOST",
+    "OVH_HOST_KEY",
+}
+PACKAGE_BY_SECRET = {
+    "HEX_API_KEY": "hex.pm",
+    "NPM_TOKEN": "npm",
+    "PYPI_USERNAME": "pypi",
+    "PYPI_PASSWORD": "pypi",
+    "PYPI_API_TOKEN": "pypi",
+    "CRATES_IO_TOKEN": "crates.io",
+    "RUBYGEMS_API_KEY": "rubygems",
+    "PACKAGIST_TOKEN": "packagist",
+    "PACKAGIST_USERNAME": "packagist",
+    "NUGET_API_KEY": "nuget",
+    "COLD_EMAIL_SKILLS_DEPLOY_KEY": "git-deploy-key",
+    "PHP_SDK_DEPLOY_KEY": "git-deploy-key",
+}
+OP_BOOTSTRAP_SECRET = "OP_SERVICE_ACCOUNT_TOKEN"
+SCHEDULED_PROD_HINTS = (
+    "langfuse",
+    "clickup",
+    "beehiiv",
+    "worldstream",
+    "1password",
+    "op_service",
+    "backend",
+    "ken_backend",
 )
 
 
@@ -260,6 +299,191 @@ def target_hints(text: str) -> list[str]:
     return hints
 
 
+def long_lived_secrets(secrets: list[str]) -> list[str]:
+    return [name for name in secrets if name != "GITHUB_TOKEN"]
+
+
+def is_scheduled(triggers: list[str]) -> bool:
+    return any(str(item) == "schedule" or str(item).startswith("schedule:") for item in triggers)
+
+
+def scheduled_production_side_effect(text: str, secrets: list[str]) -> bool:
+    blob = f"{text}\n{' '.join(secrets)}".lower()
+    return any(hint in blob for hint in SCHEDULED_PROD_HINTS)
+
+
+def structured_target(
+    job_id: str,
+    workflow_path: str,
+    text: str,
+    uses: list[str],
+    secret_names: list[str],
+    variable_names: list[str],
+) -> dict[str, Any]:
+    action_types: list[str] = []
+    for item in uses:
+        name = str(item).split("@", 1)[0]
+        if any(token in name for token in ("ssh-action", "scp-action", "build-push-action", "pypi-publish", "docker/login", "load-secrets-action")):
+            if name not in action_types:
+                action_types.append(name)
+    endpoint_expressions: list[str] = []
+    for match in re.finditer(r"\$\{\{\s*(?:secrets|vars)\.([A-Za-z0-9_]+)\s*\}\}", text):
+        name = match.group(1)
+        if name.endswith("_HOST") or name in HOST_SECRET_NAMES or "HOST" in name:
+            expr = match.group(0)
+            if expr not in endpoint_expressions:
+                endpoint_expressions.append(expr)
+    host_secret_names = [
+        name for name in secret_names if name.endswith("_HOST") or name in HOST_SECRET_NAMES or name.endswith("_HOSTNAME")
+    ]
+    host_variable_names = [
+        name for name in variable_names if name.endswith("_HOST") or name in HOST_SECRET_NAMES or "HOST" in name
+    ]
+    registry = None
+    for name in secret_names:
+        if name in PACKAGE_BY_SECRET:
+            registry = PACKAGE_BY_SECRET[name]
+            break
+    blob = text.lower()
+    if registry is None:
+        if "ghcr.io" in blob or any("build-push" in item for item in uses):
+            registry = "ghcr.io"
+        elif "cargo publish" in blob or "crates.io" in blob:
+            registry = "crates.io"
+        elif "hex.pm" in blob or "HEX_API_KEY" in secret_names:
+            registry = "hex.pm"
+        elif "rubygems" in blob:
+            registry = "rubygems"
+        elif "packagist" in blob:
+            registry = "packagist"
+        elif "pypi" in blob:
+            registry = "pypi"
+        elif job_id == "publish" and "GITHUB_TOKEN" in secret_names:
+            registry = "github-packages"
+    kind = None
+    if host_secret_names or host_variable_names or any("ssh" in item or "scp" in item for item in action_types):
+        kind = "ssh-or-host"
+    elif registry:
+        kind = "registry-or-package"
+    elif action_types:
+        kind = "action"
+    unknown_reason = None
+    if not (action_types or endpoint_expressions or host_secret_names or host_variable_names or registry):
+        unknown_reason = (
+            f"no action, host expression, secret/variable host, or registry/package signal for {workflow_path}#{job_id}"
+        )
+    return {
+        "kind": kind,
+        "action_types": action_types,
+        "endpoint_expressions": endpoint_expressions,
+        "host_secret_names": host_secret_names,
+        "host_variable_names": host_variable_names,
+        "registry_or_package": registry,
+        "unknown_reason": unknown_reason,
+    }
+
+
+def apply_secret_consumer(entry: dict[str, Any], classified: dict[str, Any]) -> dict[str, Any]:
+    if entry.get("github_secret_name") == "GITHUB_TOKEN":
+        entry["target_vault"] = None
+        entry["rotation_required"] = False
+        entry["consumer"] = None
+        return entry
+    secret_class = str(classified.get("secret_class") or "")
+    if secret_class.startswith("deploy") or secret_class.startswith("scheduled-secret"):
+        entry["target_vault"] = (
+            "Ken Deploy Production" if classified.get("production_impact") else "Ken Deploy Nonproduction"
+        )
+        entry["consumer"] = classified.get("target_runner_class")
+    elif secret_class == "ci-runtime":
+        entry["target_vault"] = "Ken CI Runtime"
+        entry["consumer"] = classified.get("target_runner_class")
+    elif secret_class == "grok-review-unchanged":
+        entry["target_vault"] = None
+        entry["consumer"] = "existing-grok-review"
+        entry["source_authority"] = (
+            "Existing Grok review workflow reference; do not copy onto ken-ci or ken-deploy."
+        )
+    if entry.get("github_secret_name") == OP_BOOTSTRAP_SECRET:
+        consumer = str(entry.get("consumer") or "")
+        if consumer.startswith("ken-ci") or not consumer:
+            entry["target_vault"] = "Ken Deploy Production"
+            entry["consumer"] = "ken-deploy-production"
+    return entry
+
+
+def load_billing_evidence(path: Path) -> dict[str, Any]:
+    raw = load_json(path, {}) if path.exists() else {}
+    if not isinstance(raw, dict):
+        raw = {}
+    previous = raw.get("previous_month") if isinstance(raw.get("previous_month"), dict) else {}
+    current = raw.get("current_unbilled") if isinstance(raw.get("current_unbilled"), dict) else {}
+    return {
+        "previous_month": {
+            "amount_usd": previous.get("amount_usd"),
+            "source": previous.get("source"),
+            "captured_at": previous.get("captured_at"),
+            "status": previous.get("status") or "unavailable",
+        },
+        "current_unbilled": {
+            "amount_usd": current.get("amount_usd"),
+            "source": current.get("source"),
+            "captured_at": current.get("captured_at"),
+            "status": current.get("status") or "unavailable",
+        },
+    }
+
+
+def assert_private_hosted_flag(repo: dict[str, Any]) -> None:
+    if str(repo.get("visibility") or "").lower() != "private":
+        return
+    for workflow in repo.get("workflows") or []:
+        for job in workflow.get("jobs") or []:
+            runs_on = str(job.get("runs_on") or "")
+            hosted = bool(re.search(r"(^|[,\s\[])ubuntu-(latest|[0-9]{2}\.[0-9]{2})($|[,\s\]])", runs_on))
+            if hosted and "blacksmith" not in runs_on.lower() and "self-hosted" not in runs_on:
+                if "PRIVATE_UBUNTU_HOSTED" not in (job.get("flags") or []):
+                    raise AssertionError(
+                        f"{repo.get('name')}:{workflow.get('path')}#{job.get('id')} missing PRIVATE_UBUNTU_HOSTED"
+                    )
+
+
+def build_input_manifest(collect_dir: Path, repositories: list[dict[str, Any]], collected_at: str) -> dict[str, Any]:
+    hasher = hashlib.sha256()
+    repos_out: list[dict[str, Any]] = []
+    for repo in repositories:
+        repo_dir = collect_dir / "repos" / repo["name"]
+        tree = load_json(repo_dir / "tree.json", {})
+        sha_by_path = {
+            item.get("path"): item.get("sha")
+            for item in (tree.get("tree") or [])
+            if isinstance(item, dict) and item.get("path")
+        }
+        workflows: list[dict[str, Any]] = []
+        for workflow in repo.get("workflows") or []:
+            path = workflow["path"]
+            sha = sha_by_path.get(path)
+            file_path = repo_dir / "workflows" / Path(path).name
+            if not sha and file_path.exists():
+                sha = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            workflows.append({"path": path, "sha": sha})
+            hasher.update(f"{repo['name']}|{repo.get('default_sha')}|{path}|{sha}\n".encode())
+        repos_out.append(
+            {
+                "name": repo["name"],
+                "default_branch": repo.get("default_branch"),
+                "default_sha": repo.get("default_sha"),
+                "workflows": workflows,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "collected_at": collected_at,
+        "input_hash": hasher.hexdigest(),
+        "repositories": repos_out,
+    }
+
+
 def resolve_matrix_runs_on(job: dict[str, Any], runs_on: Any) -> list[str]:
     expr = stringify_runs_on(runs_on)
     strategy = job.get("strategy") or {}
@@ -309,11 +533,9 @@ def production_impact(
 def is_deploy_or_publish(job_id: str, workflow_path: str, text: str, uses: list[str], env_name: str) -> bool:
     path = workflow_path.lower()
     joined_uses = " ".join(uses)
-    if job_id in {"should-deploy"}:
+    if job_id in {"should-deploy", "test", "ci", "security", "validate", "lint", "guardrails", "secrets-guard", "static"}:
         return False
     if any(hint in text.lower() or hint in joined_uses for hint in DEPLOY_HINTS):
-        if job_id in {"test", "ci", "security", "validate", "lint", "guardrails"} and "deploy" not in path:
-            return False
         return True
     if job_id in {"deploy", "publish", "pin", "build-and-publish"}:
         return True
@@ -323,6 +545,7 @@ def is_deploy_or_publish(job_id: str, workflow_path: str, text: str, uses: list[
         "validate",
         "secrets-guard",
         "static",
+        "no_stack_yet",
     }:
         return True
     if env_name and job_id in {"deploy", "pin", "publish"}:
@@ -382,6 +605,13 @@ def classify_job(
         flags.append("SECRET_BEARING_PR")
     if combined:
         flags.append("COMBINED_BUILD_AND_DEPLOY")
+    long_lived = long_lived_secrets(secrets)
+    scheduled = is_scheduled(triggers)
+    op_bootstrap = OP_BOOTSTRAP_SECRET in secrets
+    if vis == "private" and scheduled and long_lived:
+        flags.append("SCHEDULED_LONG_LIVED_SECRET")
+    if vis == "private" and op_bootstrap:
+        flags.append("OP_BOOTSTRAP_TOKEN")
 
     if is_grok_workflow(workflow_path):
         flags.append("PRESERVE_GROK_REVIEW_CLASS")
@@ -407,7 +637,32 @@ def classify_job(
             "flags": flags,
         }
 
-    uses_reusable = bool(re.search(r"^\s*uses:\s*", text, re.M)) and "runs-on" not in text.split("steps:", 1)[0]
+    if vis == "private" and ((scheduled and long_lived) or op_bootstrap):
+        scheduled_prod = bool(op_bootstrap) or production_impact(
+            repo, workflow_path, job_id, env_name, text, True
+        ) or scheduled_production_side_effect(text, secrets)
+        if deploys and prod:
+            scheduled_prod = True
+        classification = "production-impact-deploy" if deploys and scheduled_prod else (
+            "scheduled-secret-production" if scheduled_prod else "scheduled-secret-nonproduction"
+        )
+        if deploys and not scheduled_prod:
+            classification = "nonproduction-deploy"
+        return {
+            "classification": classification,
+            "target_runner_class": "ken-deploy-production" if scheduled_prod else "ken-deploy-nonproduction",
+            "target_runs_on": (
+                "[self-hosted, linux, x64, ken-deploy, production]"
+                if scheduled_prod
+                else "[self-hosted, linux, x64, ken-deploy, nonproduction]"
+            ),
+            "secret_class": "deploy-production" if scheduled_prod else "deploy-nonproduction",
+            "production_impact": bool(scheduled_prod),
+            "deploys_or_publishes": bool(deploys or scheduled),
+            "combined_build_and_deploy": combined,
+            "flags": flags,
+        }
+
     if not runs_on and any(u.startswith("./") or u.endswith(".yml") or u.endswith(".yaml") for u in uses):
         return {
             "classification": "reusable-workflow-call",
@@ -565,8 +820,7 @@ def env_protection(record: dict[str, Any] | None) -> dict[str, Any]:
     wait_timer = record.get("wait_timer")
     branch_policy = record.get("deployment_branch_policy")
     prevent = record.get("prevent_self_review")
-    if prevent is None:
-        prevent = False
+    note = ""
     for rule in record.get("protection_rules") or []:
         if not isinstance(rule, dict):
             continue
@@ -574,6 +828,8 @@ def env_protection(record: dict[str, Any] | None) -> dict[str, Any]:
         if rtype == "wait_timer" and wait_timer is None:
             wait_timer = rule.get("wait_timer")
         if rtype in {"required_reviewers", "required_reviewers_rule"} or "reviewers" in rule:
+            if "prevent_self_review" in rule:
+                prevent = rule.get("prevent_self_review")
             for reviewer in rule.get("reviewers") or []:
                 if isinstance(reviewer, dict):
                     inner = reviewer.get("reviewer") or reviewer
@@ -584,25 +840,28 @@ def env_protection(record: dict[str, Any] | None) -> dict[str, Any]:
         if branch_policy.get("protected_branches"):
             branches: Any = "protected_branches"
         elif branch_policy.get("custom_branch_policies"):
-            branches = "custom_branch_policies"
+            branches = record.get("deployment_branch_policies")
+            if not branches:
+                branches = None
+                note = "custom_branch_policies enabled but policy list was not collected"
         else:
-            branches = "unrestricted"
-    elif branch_policy is None:
-        branches = "unrestricted"
+            branches = None
     else:
-        branches = branch_policy
+        branches = None
     hard_stop = False
     for login in reviewers:
         if login.lower() not in {"cristian-frunze", "cristian"}:
             hard_stop = True
+    if hard_stop:
+        note = "required reviewer outside the cutover operator"
     return {
         "available": True,
         "required_reviewers": reviewers,
         "prevent_self_review": prevent,
-        "wait_timer": wait_timer if wait_timer is not None else 0,
+        "wait_timer": wait_timer,
         "deployment_branches": branches,
         "external_hard_stop": hard_stop,
-        "note": "required reviewer outside the cutover operator" if hard_stop else "",
+        "note": note,
     }
 
 
@@ -657,21 +916,44 @@ def secret_authority(
     }
 
 
-def summarize_runners(raw: dict[str, Any], snapshot_time: str) -> dict[str, Any]:
+def summarize_runners(raw: dict[str, Any], snapshot_time: str, groups: dict[str, Any] | None = None) -> dict[str, Any]:
     runners = raw.get("runners") or raw.get("items") or []
-    groups: dict[tuple[str, str, bool], int] = {}
+    group_name_by_id: dict[Any, str] = {}
+    blacksmith_group = None
+    group_docs = groups or {}
+    for group in group_docs.get("runner_groups") or group_docs.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        group_name_by_id[group.get("id")] = str(group.get("name") or "")
+        if "blacksmith" in str(group.get("name") or "").lower():
+            blacksmith_group = group.get("name")
+    grouped_counts: dict[tuple[str, str, bool], int] = {}
     labels_seen: dict[str, int] = {}
+    per_runner: list[dict[str, Any]] = []
     for runner in runners:
-        labels = tuple(sorted(lbl.get("name") if isinstance(lbl, dict) else str(lbl) for lbl in runner.get("labels") or []))
+        labels = [lbl.get("name") if isinstance(lbl, dict) else str(lbl) for lbl in runner.get("labels") or []]
         status = str(runner.get("status") or "unknown")
         busy = bool(runner.get("busy"))
-        key = (",".join(labels), status, busy)
-        groups[key] = groups.get(key, 0) + 1
+        label_key = tuple(sorted(str(item) for item in labels))
+        grouped_counts[(",".join(label_key), status, busy)] = grouped_counts.get((",".join(label_key), status, busy), 0) + 1
         for label in labels:
-            labels_seen[label] = labels_seen.get(label, 0) + 1
+            labels_seen[str(label)] = labels_seen.get(str(label), 0) + 1
+        group_name = group_name_by_id.get(runner.get("runner_group_id"))
+        if not group_name and any(str(label).startswith("blacksmith-") for label in labels):
+            group_name = blacksmith_group or "Blacksmith runners"
+        per_runner.append(
+            {
+                "name": runner.get("name"),
+                "status": status,
+                "busy": busy,
+                "labels": [str(item) for item in labels],
+                "group": group_name,
+                "captured_time": snapshot_time,
+            }
+        )
     grouped = [
         {"count": count, "labels": labels.split(",") if labels else [], "status": status, "busy": busy}
-        for (labels, status, busy), count in sorted(groups.items(), key=lambda item: (-item[1], item[0][0]))
+        for (labels, status, busy), count in sorted(grouped_counts.items(), key=lambda item: (-item[1], item[0][0]))
     ]
     return {
         "snapshot_time": snapshot_time,
@@ -683,6 +965,7 @@ def summarize_runners(raw: dict[str, Any], snapshot_time: str) -> dict[str, Any]
         ),
         "grouped_by_labels_status_busy": grouped,
         "label_counts": labels_seen,
+        "runners": per_runner,
         "note": "Count is a point-in-time organization API snapshot and is not a forever invariant.",
     }
 
@@ -728,7 +1011,6 @@ def load_host_snapshot(collect_dir: Path) -> dict[str, Any]:
 
 
 def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
-    generated_at = utc_now()
     org = load_json(collect_dir / "org.json", {})
     repos_meta = load_json(collect_dir / "repos.json", [])
     runners_raw = load_json(collect_dir / "runners.json", {})
@@ -736,7 +1018,11 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
     org_secrets = [item.get("name") for item in load_json(collect_dir / "org-secrets.json", []) if item.get("name")]
     org_vars = [item.get("name") for item in load_json(collect_dir / "org-variables.json", []) if item.get("name")]
     budgets = load_json(collect_dir / "budgets.json", {})
-    snapshot_time = load_json(collect_dir / "collection-meta.json", {}).get("collected_at") or generated_at
+    snapshot_time = load_json(collect_dir / "collection-meta.json", {}).get("collected_at") or utc_now()
+    generated_at = snapshot_time
+    billing = load_billing_evidence(collect_dir / "blacksmith-billing.json")
+    if not (collect_dir / "blacksmith-billing.json").exists():
+        billing = load_billing_evidence(Path(__file__).resolve().parents[2] / "inventory/evidence/blacksmith-billing.json")
 
     plan_name = ((org.get("plan") or {}).get("name") or "free").lower()
     organization_plan = {
@@ -789,7 +1075,12 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
                 for job in parsed["jobs"]:
                     env_name = job["environment_name"]
                     env_file = repo_dir / "environments" / f"{env_name}.json" if env_name else None
-                    protection = env_protection(load_json(env_file, None) if env_file and env_file.exists() else None) if env_name else {
+                    env_record_raw = load_json(env_file, None) if env_file and env_file.exists() else None
+                    if isinstance(env_record_raw, dict):
+                        branch_file = repo_dir / "environments" / f"{env_name}.branches.json"
+                        if branch_file.exists() and "deployment_branch_policies" not in env_record_raw:
+                            env_record_raw["deployment_branch_policies"] = load_json(branch_file, [])
+                    protection = env_protection(env_record_raw) if env_name else {
                         "available": False,
                         "required_reviewers": [],
                         "prevent_self_review": None,
@@ -828,6 +1119,20 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
                             "external_hard_stop": protection["external_hard_stop"],
                             "note": protection["note"],
                         }
+                    target = structured_target(
+                        job["id"],
+                        rel,
+                        job["raw_text"],
+                        job["uses"],
+                        job["secret_names"],
+                        job["variable_names"],
+                    )
+                    hint_list = list(job["target_hints"])
+                    for extra in target["host_secret_names"] + target["host_variable_names"]:
+                        if extra not in hint_list:
+                            hint_list.append(extra)
+                    if target["registry_or_package"] and target["registry_or_package"] not in hint_list:
+                        hint_list.append(target["registry_or_package"])
                     jobs_out.append(
                         {
                             "id": job["id"],
@@ -842,7 +1147,8 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
                             "secret_names": job["secret_names"],
                             "variable_names": job["variable_names"],
                             "artifacts": job["artifacts"],
-                            "target_hints": job["target_hints"],
+                            "target_hints": hint_list,
+                            "target": target,
                             "classification": classified["classification"],
                             "target_runner_class": classified["target_runner_class"],
                             "target_runs_on": classified["target_runs_on"],
@@ -858,23 +1164,10 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
                         if key in seen_secret_keys:
                             continue
                         seen_secret_keys.add(key)
-                        entry = secret_authority(secret_name, name, listed_secrets, rel)
-                        if classified["secret_class"].startswith("deploy"):
-                            entry["target_vault"] = (
-                                "Ken Deploy Production"
-                                if classified["production_impact"]
-                                else "Ken Deploy Nonproduction"
-                            )
-                            entry["consumer"] = classified["target_runner_class"]
-                        elif classified["secret_class"] == "ci-runtime":
-                            entry["target_vault"] = "Ken CI Runtime"
-                            entry["consumer"] = classified["target_runner_class"]
-                        elif classified["secret_class"] == "grok-review-unchanged":
-                            entry["target_vault"] = None
-                            entry["consumer"] = "existing-grok-review"
-                            entry["source_authority"] = (
-                                "Existing Grok review workflow reference; do not copy onto ken-ci or ken-deploy."
-                            )
+                        entry = apply_secret_consumer(
+                            secret_authority(secret_name, name, listed_secrets, rel),
+                            classified,
+                        )
                         secret_entries.append(entry)
                 workflows.append(
                     {
@@ -948,14 +1241,10 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
             "actions_overage_budget_usd": organization_plan["actions_overage_budget_usd"],
             "prevent_further_usage": organization_plan["prevent_further_usage"],
             "private_hosted_minutes_allowance": organization_plan["private_hosted_minutes_allowance"],
-            "blacksmith_previous_month_usd": budgets.get("blacksmith_previous_month_usd"),
-            "blacksmith_previous_month_status": budgets.get(
-                "blacksmith_previous_month_status",
-                "unverified-planning-baseline",
-            ),
-            "blacksmith_current_unbilled": budgets.get("blacksmith_current_unbilled", "unavailable"),
+            "previous_month": billing["previous_month"],
+            "current_unbilled": billing["current_unbilled"],
         },
-        "current": summarize_runners(runners_raw, snapshot_time),
+        "current": summarize_runners(runners_raw, snapshot_time, groups_raw),
         "runner_groups": groups_raw.get("runner_groups") or groups_raw.get("groups") or groups_raw,
         "target": build_target_runners(),
         "preserved": {"grok_review": grok},
@@ -978,13 +1267,17 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
         "secrets": secret_entries,
     }
 
+    manifest = build_input_manifest(collect_dir, repositories, snapshot_time)
+    repositories_doc["input_hash"] = manifest["input_hash"]
     dump_yaml(output_dir / "repositories.yaml", repositories_doc)
     dump_yaml(output_dir / "runners.yaml", runners_doc)
     dump_yaml(output_dir / "secrets.yaml", secrets_doc)
+    dump_yaml(output_dir / "input-manifest.yaml", manifest)
     return {
         "repositories": len(repositories),
         "jobs": sum(r["job_count"] for r in repositories),
         "secrets": len(secret_entries),
+        "input_hash": manifest["input_hash"],
         "output_dir": str(output_dir),
     }
 

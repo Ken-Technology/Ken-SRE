@@ -1,0 +1,12 @@
+name: protected-deploy
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: production-protected
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
