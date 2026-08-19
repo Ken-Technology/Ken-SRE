@@ -1,0 +1,70 @@
+#cloud-config
+hostname: ken-ci
+manage_etc_hosts: true
+timezone: UTC
+ssh_pwauth: false
+disable_root: true
+package_update: false
+package_upgrade: false
+
+users:
+  - name: ken-admin
+    gecos: Ken VM administrator
+    lock_passwd: true
+    shell: /bin/bash
+    groups: [adm]
+    sudo:
+      - ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - __HOST_ADMIN_SSH_KEY__
+  - name: ken-ci-runner
+    gecos: Ken CI runner bootstrap identity
+    lock_passwd: true
+    shell: /bin/bash
+    sudo: []
+
+packages:
+  - ca-certificates
+  - curl
+  - docker.io
+  - fuse-overlayfs
+  - git
+  - jq
+  - libicu74
+  - libssl3
+  - nftables
+  - qemu-guest-agent
+  - slirp4netns
+  - uidmap
+  - unzip
+  - xz-utils
+  - zip
+
+write_files:
+  - path: /etc/nftables.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      flush ruleset
+      table inet ken_guest {
+        chain input {
+          type filter hook input priority 0; policy drop;
+          iifname "lo" accept
+          ct state invalid drop
+          ct state established,related accept
+          ip saddr 192.168.210.1 tcp dport 22 accept
+        }
+        chain forward {
+          type filter hook forward priority 0; policy drop;
+        }
+        chain output {
+          type filter hook output priority 0; policy accept;
+        }
+      }
+
+runcmd:
+  - systemctl disable --now docker.service docker.socket || true
+  - loginctl enable-linger ken-ci-runner
+  - systemctl enable --now qemu-guest-agent nftables
+
+final_message: Ken CI guest bootstrap complete

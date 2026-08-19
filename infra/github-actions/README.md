@@ -135,3 +135,35 @@ bash infra/github-actions/scripts/provision-host.sh \
 The rollback command accepts only a real, non-symlinked state directory beneath `/var/tmp/ken-actions-host.*`, requires all three state manifests, and restores the captured active and autostart values. It does not delete `/mnt/data/libvirt`, package files, guest disks, seed data, or forensic evidence. Do not roll back a pool or network after a guest uses it; stop and inspect dependencies first. Package removal is never automatic. Review `/var/log/apt/history.log` and the live dependency graph before considering it.
 
 Rollback is complete only after the readback above shows the original pool/network state, original protected-service state, and all six Grok runners active.
+
+## Task 4 VM definitions and approval boundary
+
+Task 4 defines `ken-ci` (32 vCPU, 112 GiB RAM, 750 GiB disk) and `ken-deploy` (4 vCPU, 12 GiB RAM, 80 GiB disk), their cloud-init contracts, and a host firewall renderer. The definitions contain no credentials. The CI guest uses only `ken-ci-net`; the deployment guest uses only `ken-deploy-net`. Deployment HTTPS is limited to the inventory-reviewed GitHub and 1Password endpoints in `scripts/lib/vm-firewall.sh`, and deployment SSH is limited to `185.183.35.189`.
+
+Cloudflare remains blocked. The current inventory has no normalized, machine-readable Cloudflare deployment target, so `api.cloudflare.com` is not hardcoded into the allowlist. A later task must first add and audit that target record.
+
+The guest image must be built offline from a checksum-verified Ubuntu 24.04 qcow2 using `virt-customize`; the host prerequisite for that operation is committed separately. Neither guest may receive temporary access to Ubuntu package mirrors.
+
+Live VM creation is intentionally fail-closed pending one consolidated approval for these exact persistent host units:
+
+1. `ken-actions-vm-firewall.service` resolves the inventory-approved endpoint list, atomically replaces only the dedicated `inet ken_actions_vms` table, verifies its generation, and proves all non-Ken nftables state is unchanged. It must never write a global `/etc/nftables.conf` or run `flush ruleset`.
+2. `ken-actions-vm-firewall.timer` refreshes endpoint DNS every 15 minutes. Resolver failure retains the last verified generation and fails closed; a changed answer is applied atomically and read back before success.
+3. `ken-actions-vms.service` requires and starts after `libvirtd` and the firewall service. It rechecks `/mnt/data`, the full VM CPU/memory/disk/network contract, firewall generation, Docker, Elasticsearch, and all protected Grok runner services before starting either guest.
+
+These units are required for reboot persistence and for proving isolation is loaded before a guest can start. They are not included or installed without that approval. Until then, non-dry-run provisioning refuses locally before invoking SSH:
+
+```bash
+bash infra/github-actions/scripts/provision-vms.sh root@167.235.8.250
+```
+
+Use the static suite for the completed definitions and refusal boundary:
+
+```bash
+bash infra/github-actions/tests/test-config.sh vm-static
+```
+
+The full acceptance target stays intentionally red and is labeled `PENDING APPROVAL` until the three units exist and the fake-host apply test proves firewall-before-VM ordering, restart-safe convergence, disk/network contracts, and guest-agent readiness:
+
+```bash
+bash infra/github-actions/tests/test-config.sh vm-definitions
+```

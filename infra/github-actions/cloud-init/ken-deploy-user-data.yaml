@@ -1,0 +1,82 @@
+#cloud-config
+hostname: ken-deploy
+manage_etc_hosts: true
+timezone: UTC
+ssh_pwauth: false
+disable_root: true
+package_update: false
+package_upgrade: false
+
+users:
+  - name: ken-admin
+    gecos: Ken VM administrator
+    lock_passwd: true
+    shell: /bin/bash
+    groups: [adm]
+    sudo:
+      - ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - __HOST_ADMIN_SSH_KEY__
+  - name: ken-deploy-runner
+    gecos: Ken deployment runner bootstrap identity
+    lock_passwd: true
+    shell: /bin/bash
+    sudo: []
+
+packages:
+  - ca-certificates
+  - curl
+  - docker.io
+  - fuse-overlayfs
+  - git
+  - gnupg
+  - jq
+  - libicu74
+  - libssl3
+  - nftables
+  - qemu-guest-agent
+  - slirp4netns
+  - uidmap
+  - unzip
+  - xz-utils
+  - zip
+
+write_files:
+  - path: /etc/nftables.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      flush ruleset
+      table inet ken_guest {
+        chain input {
+          type filter hook input priority 0; policy drop;
+          iifname "lo" accept
+          ct state invalid drop
+          ct state established,related accept
+          ip saddr 192.168.211.1 tcp dport 22 accept
+        }
+        chain forward {
+          type filter hook forward priority 0; policy drop;
+        }
+        chain output {
+          type filter hook output priority 0; policy accept;
+        }
+      }
+  - path: /usr/local/sbin/verify-1password-cli
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      command -v op >/dev/null 2>&1 || {
+        echo '1Password CLI must be seeded into the verified offline image' >&2
+        exit 1
+      }
+
+runcmd:
+  - systemctl disable --now docker.service docker.socket || true
+  - /usr/local/sbin/verify-1password-cli
+  - loginctl enable-linger ken-deploy-runner
+  - systemctl enable --now qemu-guest-agent nftables
+
+final_message: Ken deployment guest bootstrap complete

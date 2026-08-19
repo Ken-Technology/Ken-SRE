@@ -8,6 +8,10 @@ GA_ROOT="${ROOT}/infra/github-actions"
 INV="${GA_ROOT}/inventory"
 AUDIT="${GA_ROOT}/scripts/audit-workflows.sh"
 HOST_PROVISION="${GA_ROOT}/scripts/provision-host.sh"
+VM_PROVISION="${GA_ROOT}/scripts/provision-vms.sh"
+VM_FIREWALL="${GA_ROOT}/scripts/lib/vm-firewall.sh"
+LIBVIRT_ROOT="${GA_ROOT}/libvirt"
+CLOUD_INIT_ROOT="${GA_ROOT}/cloud-init"
 FAILED=0
 RAN=0
 
@@ -867,6 +871,506 @@ SH
   return 1
 }
 
+run_vm_definitions() {
+  local path output status vm_test_dir fake_ssh fake_bin vm_state vm_data command_log
+
+  echo "== VM definition files =="
+  for path in \
+    "${LIBVIRT_ROOT}/ken-ci.xml" \
+    "${LIBVIRT_ROOT}/ken-deploy.xml" \
+    "${CLOUD_INIT_ROOT}/ken-ci-user-data.yaml" \
+    "${CLOUD_INIT_ROOT}/ken-deploy-user-data.yaml" \
+    "${VM_FIREWALL}" \
+    "${VM_PROVISION}"; do
+    require_file "${path}"
+  done
+
+  echo "== VM and cloud-init semantics =="
+  if python3 - "${GA_ROOT}" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import yaml
+
+root = Path(sys.argv[1])
+failures = []
+
+
+def check(condition, message):
+    if not condition:
+        failures.append(message)
+
+
+contracts = {
+    "ken-ci": (112 * 1024 * 1024, 32, "ken-ci-net", "192.168.210.1", "ken-ci-runner"),
+    "ken-deploy": (12 * 1024 * 1024, 4, "ken-deploy-net", "192.168.211.1", "ken-deploy-runner"),
+}
+
+for name, (memory_kib, vcpus, network, gateway, runner_name) in contracts.items():
+    xml_path = root / "libvirt" / f"{name}.xml"
+    user_data_path = root / "cloud-init" / f"{name}-user-data.yaml"
+    if not xml_path.is_file() or not user_data_path.is_file():
+        continue
+
+    domain = ET.parse(xml_path).getroot()
+    memory = domain.find("memory")
+    vcpu = domain.find("vcpu")
+    cpu = domain.find("cpu")
+    clock = domain.find("clock")
+    check(domain.tag == "domain" and domain.attrib.get("type") == "kvm", f"{name}: KVM domain")
+    check(domain.findtext("name") == name, f"{name}: domain name")
+    check(memory is not None and memory.attrib.get("unit") == "KiB" and int(memory.text or 0) == memory_kib, f"{name}: memory")
+    check(vcpu is not None and int(vcpu.text or 0) == vcpus, f"{name}: vCPU")
+    check(cpu is not None and cpu.attrib.get("mode") == "host-passthrough", f"{name}: host-passthrough CPU")
+    check(clock is not None and clock.attrib.get("offset") == "utc", f"{name}: UTC clock")
+
+    os_disks = []
+    seeds = []
+    for disk in domain.findall("./devices/disk"):
+        source = disk.find("source")
+        target = disk.find("target")
+        driver = disk.find("driver")
+        source_file = source.attrib.get("file", "") if source is not None else ""
+        if target is not None and target.attrib.get("dev") == "vda":
+            os_disks.append((source_file, target.attrib.get("bus"), driver.attrib.get("type") if driver is not None else None))
+        if disk.attrib.get("device") == "cdrom":
+            seeds.append(source_file)
+    check(os_disks == [(f"/mnt/data/libvirt/images/{name}.qcow2", "virtio", "qcow2")], f"{name}: approved qcow2 OS disk")
+    check(seeds == [f"/mnt/data/libvirt/seed/{name}-seed.img"], f"{name}: cloud-init seed")
+
+    interfaces = domain.findall("./devices/interface")
+    attached = [i.find("source").attrib.get("network") for i in interfaces if i.find("source") is not None]
+    check(attached == [network] and "default" not in attached, f"{name}: isolated network")
+    check(len(interfaces) == 1 and interfaces[0].find("model") is not None and interfaces[0].find("model").attrib.get("type") == "virtio", f"{name}: virtio NIC")
+    check(any(c.find("target") is not None and c.find("target").attrib.get("name") == "org.qemu.guest_agent.0" for c in domain.findall("./devices/channel")), f"{name}: guest agent channel")
+
+    data = yaml.safe_load(user_data_path.read_text())
+    check(data.get("hostname") == name and data.get("timezone") == "UTC", f"{name}: identity and UTC")
+    check(data.get("package_update") is False, f"{name}: no guest package-mirror refresh")
+    check(data.get("ssh_pwauth") is False and data.get("disable_root") is True, f"{name}: password and root SSH disabled")
+    users = {u.get("name"): u for u in data.get("users") or [] if isinstance(u, dict)}
+    check(set(users) == {"ken-admin", runner_name}, f"{name}: exact users")
+    runner = users.get(runner_name, {})
+    check(runner.get("lock_passwd") is True and runner.get("sudo") in (None, [], False), f"{name}: locked no-sudo runner")
+    check(not set(runner.get("groups") or []) & {"sudo", "adm", "wheel"}, f"{name}: runner outside admin groups")
+    admin = users.get("ken-admin", {})
+    check(admin.get("lock_passwd") is True and admin.get("ssh_authorized_keys") == ["__HOST_ADMIN_SSH_KEY__"], f"{name}: host-managed admin key")
+    packages = set(data.get("packages") or [])
+    check({"qemu-guest-agent", "nftables", "docker.io", "uidmap", "slirp4netns", "fuse-overlayfs"} <= packages, f"{name}: VM prerequisites")
+    files = {entry.get("path"): entry for entry in data.get("write_files") or [] if isinstance(entry, dict)}
+    firewall = files.get("/etc/nftables.conf", {}).get("content", "")
+    check("policy drop" in firewall and gateway in firewall and "tcp dport 22 accept" in firewall, f"{name}: host-only inbound SSH")
+    check("0.0.0.0/0" not in firewall, f"{name}: no public SSH source")
+    check("systemctl enable --now qemu-guest-agent nftables" in [str(c).strip() for c in data.get("runcmd") or []], f"{name}: services enabled")
+    if name == "ken-deploy":
+        op_verifier = files.get("/usr/local/sbin/verify-1password-cli", {}).get("content", "")
+        check("command -v op" in op_verifier and "apt-get" not in op_verifier and "curl" not in op_verifier, "ken-deploy: offline-seeded 1Password CLI required")
+
+secret_patterns = [
+    re.compile(r"-----BEGIN [A-Z0-9 ]+PRIVATE KEY-----"),
+    re.compile(r"\bgh[op]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bops_[A-Za-z0-9]{20,}\b"),
+]
+for path in [*root.glob("libvirt/*.xml"), *root.glob("cloud-init/*.yaml")]:
+    text = path.read_text()
+    for pattern in secret_patterns:
+        check(not pattern.search(text), f"{path.name}: secret-shaped material")
+
+if failures:
+    print("\n".join(f"VM_SEMANTIC_FAIL {item}" for item in failures))
+    raise SystemExit(1)
+print("VM_SEMANTIC_OK")
+PY
+  then
+    pass "VM XML and cloud-init contracts"
+  else
+    fail "VM XML and cloud-init contracts"
+  fi
+
+  echo "== VM provisioning boundary =="
+  set +e
+  output="$(PROVISION_VMS_SSH_BIN=false bash "${VM_PROVISION}" --dry-run root@167.235.8.250 2>&1)"
+  status=$?
+  set -e
+  if (( status == 0 )) &&
+    grep -Fq 'ken-ci: 32 vCPU, 112 GiB RAM, 750 GiB qcow2' <<<"${output}" &&
+    grep -Fq 'ken-deploy: 4 vCPU, 12 GiB RAM, 80 GiB qcow2' <<<"${output}" &&
+    grep -Fq 'No host or guest changes were requested' <<<"${output}"; then
+    pass "VM dry run reports the immutable plan without SSH"
+  else
+    fail "VM dry run boundary"
+    printf '%s\n' "${output}"
+  fi
+
+  set +e
+  output="$(bash "${VM_PROVISION}" --dry-run root@185.183.35.189 2>&1)"
+  status=$?
+  set -e
+  if (( status != 0 )) && grep -Fq 'target must be root@167.235.8.250' <<<"${output}"; then
+    pass "VM provisioner rejects every non-devws target"
+  else
+    fail "VM provisioner target guard"
+  fi
+
+  guard_dir="$(mktemp -d)"
+  cat >"${guard_dir}/ssh" <<'SH'
+#!/usr/bin/env bash
+touch "${PROVISION_VMS_GUARD_MARKER:?}"
+exit 70
+SH
+  chmod +x "${guard_dir}/ssh"
+  set +e
+  output="$(
+    PROVISION_VMS_SSH_BIN="${guard_dir}/ssh" \
+    PROVISION_VMS_GUARD_MARKER="${guard_dir}/ssh-called" \
+    bash "${VM_PROVISION}" root@167.235.8.250 2>&1
+  )"
+  status=$?
+  set -e
+  if (( status != 0 )) &&
+    grep -Fq 'live VM apply is blocked pending approval for dedicated reboot-persistent isolation services' <<<"${output}" &&
+    [[ ! -e "${guard_dir}/ssh-called" ]]; then
+    pass "unapproved live VM apply fails before SSH or guest start"
+  else
+    fail "live VM approval boundary"
+  fi
+  rm -rf "${guard_dir}"
+
+  echo "== host-enforced VM firewall =="
+  if [[ -f "${VM_FIREWALL}" ]]; then
+    firewall_test_dir="$(mktemp -d)"
+    firewall_path="${firewall_test_dir}/ken-actions-vms.nft"
+    # shellcheck source=/dev/null
+    source "${VM_FIREWALL}"
+    render_ken_actions_firewall "${firewall_path}" 140.82.112.3 140.82.114.21 13.107.42.16
+    if python3 - "${firewall_path}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text()
+checks = {
+    "CI blocks host and deploy subnet": all(value in text for value in ["192.168.210.1", "192.168.211.0/24"]),
+    "CI blocks private ranges": all(value in text for value in ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]),
+    "CI blocks recorded production": "185.183.35.189" in text,
+    "CI public web allow follows private blocks": text.index("185.183.35.189") < text.index("iifname \"virbr-ci\" tcp dport { 80, 443 } accept"),
+    "CI ends fail closed": "iifname \"virbr-ci\" drop" in text,
+    "deploy HTTPS is set-scoped": "iifname \"virbr-deploy\" ip daddr @deploy_https_v4 tcp dport 443 accept" in text,
+    "deploy SSH is production-target-scoped": "iifname \"virbr-deploy\" ip daddr 185.183.35.189 tcp dport 22 accept" in text,
+    "deploy ends fail closed": "iifname \"virbr-deploy\" drop" in text,
+    "resolved endpoint set is exact": all(value in text for value in ["13.107.42.16", "140.82.112.3", "140.82.114.21"]),
+    "guest cannot reach non-DNS host services": all(value in text for value in ["udp dport 67 accept", "th dport 53 accept", "iifname \"virbr-deploy\" drop"]),
+}
+failed = [name for name, ok in checks.items() if not ok]
+if failed:
+    print("FIREWALL_FAIL " + "; ".join(failed))
+    raise SystemExit(1)
+print("FIREWALL_OK")
+PY
+    then
+      pass "host nftables policy enforces CI and deployment egress boundaries"
+    else
+      fail "host nftables policy"
+    fi
+    rm -rf "${firewall_test_dir}"
+    set +e
+    resolver_output="$(
+      # shellcheck disable=SC2329
+      getent() {
+        [[ "${2:-}" == api.github.com ]] && return 2
+        printf '140.82.112.3 STREAM %s\n' "${2:-endpoint}"
+      }
+      resolve_ken_actions_endpoint_ipv4
+    ) 2>&1)"
+    resolver_status=$?
+    set -e
+    if (( resolver_status != 0 )); then
+      pass "required deployment endpoint DNS failure leaves the firewall fail-closed"
+    else
+      fail "deployment endpoint resolver accepted a partial DNS result"
+      printf '%s\n' "${resolver_output}"
+    fi
+  else
+    fail "host nftables policy"
+  fi
+
+  if [[ "${VM_TEST_STATIC_ONLY:-0}" == 1 ]]; then
+    echo "== VM apply behavior =="
+    echo "  PENDING APPROVAL  persistent firewall, refresh timer, and ordered VM startup"
+  else
+  echo "== VM apply behavior =="
+  vm_test_dir="$(mktemp -d)"
+  fake_ssh="${vm_test_dir}/ssh"
+  fake_bin="${vm_test_dir}/bin"
+  vm_state="${vm_test_dir}/state"
+  vm_data="${vm_test_dir}/data"
+  command_log="${vm_test_dir}/commands.log"
+  mkdir -p "${fake_bin}" "${vm_state}" "${vm_data}/libvirt/images" "${vm_data}/libvirt/seed"
+  printf '%s\n' 'test-only Ubuntu cloud image bytes' >"${vm_state}/cloud-image"
+  printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestOnlyKeyMaterial ken-vm-test' >"${vm_state}/authorized_keys"
+
+  cat >"${fake_ssh}" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+args=("$@")
+if [[ " $* " == *" tar -C "* ]]; then
+  stage="$(cat "${FAKE_VM_STATE:?}/stage-path")"
+  /usr/bin/tar -C "${stage}" -xf -
+  exit 0
+fi
+phase=''
+argument=''
+for ((i=0; i<${#args[@]}; i++)); do
+  if [[ "${args[i]}" == -- ]]; then
+    phase="${args[i+1]:-}"
+    argument="${args[i+2]:-}"
+    break
+  fi
+done
+[[ -n "${phase}" ]] || { echo 'fake ssh missing phase' >&2; exit 64; }
+remote="${FAKE_VM_STATE:?}/remote-${phase}.sh"
+cat >"${remote}"
+bash -n "${remote}"
+export PATH="${FAKE_VM_BIN:?}:/usr/bin:/bin"
+export PROVISION_VMS_ALLOW_NON_ROOT=1
+export PROVISION_VMS_DATA_ROOT="${FAKE_VM_DATA:?}"
+export PROVISION_VMS_STAGE_PARENT="${FAKE_VM_STATE:?}"
+export PROVISION_VMS_AUTHORIZED_KEYS="${FAKE_VM_STATE:?}/authorized_keys"
+export PROVISION_VMS_TEST_IMAGE="${FAKE_VM_STATE:?}/cloud-image"
+export PROVISION_VMS_COMMAND_LOG="${FAKE_VM_COMMAND_LOG:?}"
+export PROVISION_VMS_NFT_DIR="${FAKE_VM_STATE:?}/nftables.d"
+export PROVISION_VMS_NFT_MAIN="${FAKE_VM_STATE:?}/nftables.conf"
+if [[ "${phase}" == create-stage ]]; then
+  result="$(bash "${remote}" "${phase}" "${argument}")"
+  printf '%s\n' "${result}" >"${FAKE_VM_STATE:?}/stage-path"
+  printf '%s\n' "${result}"
+else
+  bash "${remote}" "${phase}" "${argument}"
+fi
+SH
+  chmod +x "${fake_ssh}"
+
+  cat >"${fake_bin}/curl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'curl %s\n' "$*" >>"${PROVISION_VMS_COMMAND_LOG:?}"
+destination=''
+url="${*: -1}"
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  [[ "${args[i]}" == -o ]] && destination="${args[i+1]}"
+done
+[[ -n "${destination}" ]] || exit 64
+if [[ "${url}" == */SHA256SUMS ]]; then
+  hash="$(sha256sum "${PROVISION_VMS_TEST_IMAGE:?}" | awk '{print $1}')"
+  printf '%s *noble-server-cloudimg-amd64.img\n' "${hash}" >"${destination}"
+else
+  cp "${PROVISION_VMS_TEST_IMAGE:?}" "${destination}"
+fi
+SH
+
+  cat >"${fake_bin}/sha256sum" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == -c ]]; then
+  exec /usr/bin/shasum -a 256 -c "$2"
+fi
+/usr/bin/shasum -a 256 "$@"
+SH
+
+  cat >"${fake_bin}/qemu-img" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'qemu-img %s\n' "$*" >>"${PROVISION_VMS_COMMAND_LOG:?}"
+case "${1:-}" in
+  info)
+    printf '{"format":"qcow2","virtual-size":10737418240}\n'
+    ;;
+  create)
+    output="${*: -2:1}"
+    size="${*: -1}"
+    : >"${output}"
+    printf '%s\n' "${size}" >"${output}.size"
+    ;;
+  convert)
+    source="${*: -2:1}"
+    output="${*: -1}"
+    cp "${source}" "${output}"
+    ;;
+  *) exit 64 ;;
+esac
+SH
+
+  cat >"${fake_bin}/virt-customize" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'virt-customize %s\n' "$*" >>"${PROVISION_VMS_COMMAND_LOG:?}"
+args=("$@")
+image=''
+generation=''
+for ((i=0; i<${#args[@]}; i++)); do
+  [[ "${args[i]}" == -a ]] && image="${args[i+1]}"
+  if [[ "${args[i]}" == --write ]]; then
+    generation="${args[i+1]##*:}"
+  fi
+done
+[[ -n "${image}" && -n "${generation}" ]] || exit 64
+printf '\ncustomized\n' >>"${image}"
+printf '%s\n' "${generation}" >"${image}.generation"
+SH
+
+  cat >"${fake_bin}/virt-cat" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == -a ]] || exit 64
+cat "$2.generation"
+SH
+
+  cat >"${fake_bin}/cloud-localds" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'cloud-localds %s\n' "$*" >>"${PROVISION_VMS_COMMAND_LOG:?}"
+output="${3:?}"
+printf 'seed\n' >"${output}"
+SH
+
+  cat >"${fake_bin}/virt-xml-validate" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+
+  cat >"${fake_bin}/virsh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'virsh %s\n' "$*" >>"${PROVISION_VMS_COMMAND_LOG:?}"
+state="${FAKE_VM_STATE:?}"
+case "${1:-}" in
+  pool-info|net-info) printf 'Name: %s\nActive: yes\nPersistent: yes\n' "${2:-resource}" ;;
+  dominfo) [[ -e "${state}/domain.$2" ]] || exit 1; printf 'Name: %s\nState: running\n' "$2" ;;
+  define)
+    name="$(sed -n 's:.*<name>\([^<]*\)</name>.*:\1:p' "$2")"
+    touch "${state}/domain.${name}"
+    ;;
+  start) touch "${state}/running.$2" ;;
+  domstate) [[ -e "${state}/running.$2" ]] && echo running || echo shut-off ;;
+  domblklist)
+    printf 'Target Source\n------------------------------------------------\n'
+    printf 'vda %s/libvirt/images/%s.qcow2\n' "${FAKE_VM_DATA:?}" "$2"
+    printf 'sda %s/libvirt/seed/%s-seed.img\n' "${FAKE_VM_DATA:?}" "$2"
+    ;;
+  domiflist)
+    network=ken-ci-net; [[ "$2" == ken-deploy ]] && network=ken-deploy-net
+    printf 'Interface Type Source Model MAC\n- - - - -\nvnet0 network %s virtio 52:54:00:00:00:01\n' "${network}"
+    ;;
+  qemu-agent-command)
+    if [[ "$*" == *guest-exec-status* ]]; then
+      printf '{"return":{"exited":true,"exitcode":0}}\n'
+    elif [[ "$*" == *guest-exec* ]]; then
+      printf '{"return":{"pid":7}}\n'
+    else
+      printf '{"return":{}}\n'
+    fi
+    ;;
+  *) exit 64 ;;
+esac
+SH
+
+  cat >"${fake_bin}/nft" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'nft %s\n' "$*" >>"${PROVISION_VMS_COMMAND_LOG:?}"
+state="${FAKE_VM_STATE:?}"
+if [[ "${1:-}" == list ]]; then
+  [[ -e "${state}/nft-loaded" ]]
+elif [[ "${1:-}" == delete ]]; then
+  rm -f "${state}/nft-loaded"
+elif [[ "${1:-}" == -c && "${2:-}" == -f ]]; then
+  exit 0
+elif [[ "${1:-}" == -f ]]; then
+  cp "$2" "${state}/nft-loaded"
+else
+  exit 64
+fi
+SH
+
+  cat >"${fake_bin}/systemctl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'systemctl %s\n' "$*" >>"${PROVISION_VMS_COMMAND_LOG:?}"
+case "${1:-}" in
+  is-active) exit 0 ;;
+  enable) exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+
+  cat >"${fake_bin}/free" <<'SH'
+#!/usr/bin/env bash
+printf 'Mem: 269509197824 0 0 0 0 68719476736\n'
+SH
+
+  cat >"${fake_bin}/getent" <<'SH'
+#!/usr/bin/env bash
+printf '%s STREAM %s\n' "${FAKE_VM_ENDPOINT_IP:-140.82.112.3}" "${2:-endpoint}"
+SH
+  cat >"${fake_bin}/readlink" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == -m ]] || exit 64
+shift
+[[ "${1:-}" == -- ]] && shift
+python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"
+SH
+  ln -s "$(command -v jq)" "${fake_bin}/jq"
+  chmod +x "${fake_bin}"/*
+
+  set +e
+  output="$(
+    FAKE_VM_STATE="${vm_state}" \
+    FAKE_VM_DATA="${vm_data}" \
+    FAKE_VM_BIN="${fake_bin}" \
+    FAKE_VM_COMMAND_LOG="${command_log}" \
+    PROVISION_VMS_SSH_BIN="${fake_ssh}" \
+    PROVISION_VMS_EXPECTED_STAGE_PARENT="${vm_state}" \
+    bash "${VM_PROVISION}" root@167.235.8.250 2>&1
+  )"
+  status=$?
+  set -e
+  if (( status == 0 )) &&
+    grep -Fq 'VM provisioning verified' <<<"${output}" &&
+    [[ -e "${vm_state}/running.ken-ci" && -e "${vm_state}/running.ken-deploy" ]] &&
+    [[ "$(cat "${vm_data}/libvirt/images/ken-ci.qcow2.size")" == 750G ]] &&
+    [[ "$(cat "${vm_data}/libvirt/images/ken-deploy.qcow2.size")" == 80G ]] &&
+    grep -Fq 'qemu-img convert -O qcow2' "${command_log}" &&
+    grep -Fq 'virt-customize -a' "${command_log}" &&
+    grep -Fq '185.183.35.189 tcp dport 22 accept' "${vm_state}/nft-loaded" &&
+    ! grep -R -Eq '(__HOST_ADMIN_SSH_KEY__|BEGIN .*PRIVATE KEY|gh[op]_)' "${vm_data}/libvirt/seed"; then
+    pass "VM apply verifies image, thin disks, seeds, guests, guest agent, and host firewall"
+  else
+    fail "PENDING APPROVAL: VM apply behavior"
+    printf '%s\n' "${output}"
+  fi
+  rm -rf "${vm_test_dir}"
+  fi
+
+  echo "== VM shell syntax =="
+  if [[ -f "${VM_PROVISION}" && -f "${VM_FIREWALL}" ]] && bash -n "${VM_PROVISION}" && bash -n "${VM_FIREWALL}" && bash -n "${GA_ROOT}/tests/test-config.sh"; then
+    pass "VM provisioner and test entry point bash -n"
+  else
+    fail "VM shell syntax"
+  fi
+
+  echo
+  if (( FAILED == 0 )); then
+    echo "vm-definitions: ${RAN} assertions passed"
+    return 0
+  fi
+  echo "vm-definitions: ${FAILED} failed / ${RAN} assertions"
+  return 1
+}
+
 cmd="${1:-inventory}"
 case "${cmd}" in
   inventory)
@@ -875,19 +1379,26 @@ case "${cmd}" in
   host)
     run_host
     ;;
+  vm-definitions)
+    run_vm_definitions
+    ;;
+  vm-static)
+    VM_TEST_STATIC_ONLY=1 run_vm_definitions
+    ;;
   all)
     run_inventory
     run_host
+    run_vm_definitions
     ;;
   runners)
     echo "runners: Task 5 owns runner-service tests"
     exit 2
     ;;
   -h|--help)
-    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|all]"
+    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|vm-static|vm-definitions|all]"
     ;;
   *)
-    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|all]"
+    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|vm-static|vm-definitions|all]"
     exit 2
     ;;
 esac
