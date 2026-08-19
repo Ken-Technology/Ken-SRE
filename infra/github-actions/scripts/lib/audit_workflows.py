@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -130,10 +130,6 @@ SCHEDULED_PROD_HINTS = (
     "backend",
     "ken_backend",
 )
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _parse_json_documents(text: str) -> list[Any]:
@@ -414,6 +410,10 @@ def apply_secret_consumer(entry: dict[str, Any], classified: dict[str, Any]) -> 
 
 def load_billing_evidence(path: Path) -> dict[str, Any]:
     raw = load_json(path, {}) if path.exists() else {}
+    return load_billing_evidence_data(raw)
+
+
+def load_billing_evidence_data(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {}
     previous = raw.get("previous_month") if isinstance(raw.get("previous_month"), dict) else {}
@@ -463,59 +463,83 @@ def _secret_names(payload: Any) -> list[str]:
     return sorted(set(names))
 
 
-COLLECT_DIR_INPUT_KEYS = (
-    "org",
-    "repos_index",
-    "runners",
-    "runner_groups",
-    "org_secret_names",
-    "org_variable_names",
-    "budgets",
-    "billing",
-    "hosts",
-    "grok_runners",
-    "worldstream_runners",
-    "onepassword_vaults",
-    "collection_meta",
-    "repositories",
+STATIC_INPUT_SOURCE_REGISTRY = {
+    "org": ("org.json", {}),
+    "repos_index": ("repos.json", []),
+    "runners": ("runners.json", {}),
+    "runner_groups": ("runner-groups.json", {}),
+    "org_secret_names": ("org-secrets.json", []),
+    "org_variable_names": ("org-variables.json", []),
+    "budgets": ("budgets.json", {}),
+    "billing": ("blacksmith-billing.json", {}),
+    "hosts": ("hosts.json", {}),
+    "grok_runners": ("grok-runners.json", {}),
+    "worldstream_runners": ("worldstream-runners.json", {}),
+    "onepassword_vaults": ("onepassword-vaults.json", []),
+    "collection_meta": ("collection-meta.json", {}),
+}
+DYNAMIC_NON_WORKFLOW_INPUT_KINDS = (
+    "repository_meta",
+    "repository_tree",
+    "repository_secret_names",
+    "repository_variable_names",
+    "environment",
+    "environment_branch_policies",
+    "environment_secret_names",
 )
+REGISTERED_NON_WORKFLOW_INPUT_KINDS = (
+    tuple(STATIC_INPUT_SOURCE_REGISTRY) + DYNAMIC_NON_WORKFLOW_INPUT_KINDS
+)
+REGISTERED_INPUT_KINDS = REGISTERED_NON_WORKFLOW_INPUT_KINDS + ("workflow",)
 
 
-def collect_dir_files_read_by_generate() -> tuple[str, ...]:
-    return (
-        "org.json",
-        "repos.json",
-        "runners.json",
-        "runner-groups.json",
-        "org-secrets.json",
-        "org-variables.json",
-        "budgets.json",
-        "blacksmith-billing.json",
-        "hosts.json",
-        "grok-runners.json",
-        "worldstream-runners.json",
-        "onepassword-vaults.json",
-        "collection-meta.json",
-        "repos/*/meta.json",
-        "repos/*/secrets.json",
-        "repos/*/variables.json",
-        "repos/*/tree.json",
-        "repos/*/workflows/*",
-        "repos/*/environments/*.json",
-        "repos/*/environment-secrets/*.json",
-    )
+@dataclass(frozen=True)
+class LoadedInventoryInputs:
+    data: dict[str, Any]
+    source_kinds: frozenset[str]
+    input_hash: str
 
 
-def collect_input_snapshot(collect_dir: Path) -> dict[str, Any]:
-    repos_index = load_json(collect_dir / "repos.json", [])
-    repo_snapshots: list[dict[str, Any]] = []
+class _RegisteredInputReader:
+    def __init__(self) -> None:
+        self._read_paths: set[Path] = set()
+        self.source_kinds: set[str] = set()
+
+    def _claim(self, kind: str, path: Path) -> None:
+        if kind not in REGISTERED_INPUT_KINDS:
+            raise ValueError(f"unregistered inventory input kind: {kind}")
+        resolved = path.resolve()
+        if resolved in self._read_paths:
+            raise ValueError(f"inventory input read more than once: {path}")
+        self._read_paths.add(resolved)
+        self.source_kinds.add(kind)
+
+    def json(self, kind: str, path: Path, default: Any) -> Any:
+        self._claim(kind, path)
+        return load_json(path, default)
+
+    def text(self, kind: str, path: Path) -> str:
+        self._claim(kind, path)
+        return path.read_text(encoding="utf-8")
+
+
+def load_inventory_inputs(collect_dir: Path) -> LoadedInventoryInputs:
+    reader = _RegisteredInputReader()
+    raw = {
+        kind: reader.json(kind, collect_dir / filename, default)
+        for kind, (filename, default) in STATIC_INPUT_SOURCE_REGISTRY.items()
+    }
+    repos_index = raw["repos_index"] if isinstance(raw["repos_index"], list) else []
+    repository_inputs: list[dict[str, Any]] = []
     for repo_info in repos_index:
+        if not isinstance(repo_info, dict):
+            continue
         name = repo_info.get("name")
         if not name:
             continue
         repo_dir = collect_dir / "repos" / name
-        meta = load_json(repo_dir / "meta.json", {})
-        tree = load_json(repo_dir / "tree.json", {})
+        meta = reader.json("repository_meta", repo_dir / "meta.json", {})
+        tree = reader.json("repository_tree", repo_dir / "tree.json", {})
         sha_by_path = {
             item.get("path"): item.get("sha")
             for item in (tree.get("tree") or [])
@@ -528,78 +552,118 @@ def collect_input_snapshot(collect_dir: Path) -> dict[str, Any]:
                 if wf_path.suffix.lower() not in {".yml", ".yaml"}:
                     continue
                 rel = ".github/workflows/" + wf_path.relative_to(wf_dir).as_posix()
-                sha = sha_by_path.get(rel) or hashlib.sha256(wf_path.read_bytes()).hexdigest()
-                workflows.append({"path": rel, "sha": sha})
-        environments: list[dict[str, Any]] = []
+                content = reader.text("workflow", wf_path)
+                sha = (
+                    sha_by_path.get(rel)
+                    or hashlib.sha256(content.encode("utf-8")).hexdigest()
+                )
+                workflows.append({"path": rel, "sha": sha, "content": content})
+        environments: dict[str, dict[str, Any]] = {}
         env_dir = repo_dir / "environments"
         if env_dir.exists():
             for env_file in sorted(env_dir.glob("*.json")):
                 if env_file.name.endswith(".branches.json"):
                     continue
-                record = load_json(env_file, {})
+                record = reader.json("environment", env_file, {})
+                if not isinstance(record, dict):
+                    record = {}
+                record = dict(record)
                 branch_file = env_dir / f"{env_file.stem}.branches.json"
-                branches = load_json(branch_file, None) if branch_file.exists() else record.get("deployment_branch_policies")
-                environments.append(
-                    {
-                        "name": record.get("name") or env_file.stem,
-                        "protection_rules": record.get("protection_rules") or [],
-                        "prevent_self_review": record.get("prevent_self_review"),
-                        "wait_timer": record.get("wait_timer"),
-                        "deployment_branch_policy": record.get("deployment_branch_policy"),
-                        "deployment_branches": normalize_deployment_branch_policies(branches),
-                    }
-                )
+                if branch_file.exists():
+                    record["deployment_branch_policies"] = reader.json(
+                        "environment_branch_policies", branch_file, None
+                    )
+                environments[str(record.get("name") or env_file.stem)] = record
         env_secret_names: list[str] = []
         env_secret_dir = repo_dir / "environment-secrets"
         if env_secret_dir.exists():
             for secret_file in sorted(env_secret_dir.glob("*.json")):
-                env_secret_names.extend(_secret_names(load_json(secret_file, [])))
-        repo_snapshots.append(
+                env_secret_names.extend(
+                    _secret_names(
+                        reader.json("environment_secret_names", secret_file, [])
+                    )
+                )
+        repository_inputs.append(
             {
                 "name": name,
-                "visibility": meta.get("visibility") or repo_info.get("visibility"),
-                "default_branch": meta.get("default_branch") or (repo_info.get("defaultBranchRef") or {}).get("name"),
-                "default_sha": meta.get("default_sha") or meta.get("sha"),
+                "repo_info": repo_info,
+                "meta": meta,
                 "workflows": workflows,
                 "environments": environments,
-                "repository_secret_names": _secret_names(load_json(repo_dir / "secrets.json", [])),
-                "repository_variable_names": _secret_names(load_json(repo_dir / "variables.json", [])),
+                "repository_secret_names": _secret_names(
+                    reader.json(
+                        "repository_secret_names", repo_dir / "secrets.json", []
+                    )
+                ),
+                "repository_variable_names": _secret_names(
+                    reader.json(
+                        "repository_variable_names", repo_dir / "variables.json", []
+                    )
+                ),
                 "environment_secret_names": sorted(set(env_secret_names)),
             }
         )
-    return {
-        "org": load_json(collect_dir / "org.json", {}),
+    data = {
+        "org": raw["org"] if isinstance(raw["org"], dict) else {},
         "repos_index": repos_index,
-        "runners": load_json(collect_dir / "runners.json", {}),
-        "runner_groups": load_json(collect_dir / "runner-groups.json", {}),
-        "org_secret_names": _secret_names(load_json(collect_dir / "org-secrets.json", [])),
-        "org_variable_names": _secret_names(load_json(collect_dir / "org-variables.json", [])),
-        "budgets": load_json(collect_dir / "budgets.json", {}),
-        "billing": load_json(collect_dir / "blacksmith-billing.json", {}),
-        "hosts": load_json(collect_dir / "hosts.json", {}),
-        "grok_runners": load_json(collect_dir / "grok-runners.json", {}),
-        "worldstream_runners": load_json(collect_dir / "worldstream-runners.json", {}),
-        "onepassword_vaults": load_json(collect_dir / "onepassword-vaults.json", []),
-        "collection_meta": load_json(collect_dir / "collection-meta.json", {}),
-        "repositories": repo_snapshots,
+        "runners": raw["runners"] if isinstance(raw["runners"], dict) else {},
+        "runner_groups": raw["runner_groups"]
+        if isinstance(raw["runner_groups"], dict)
+        else {},
+        "org_secret_names": _secret_names(raw["org_secret_names"]),
+        "org_variable_names": _secret_names(raw["org_variable_names"]),
+        "budgets": raw["budgets"] if isinstance(raw["budgets"], dict) else {},
+        "billing": load_billing_evidence_data(raw["billing"]),
+        "hosts": raw["hosts"] if isinstance(raw["hosts"], dict) else {},
+        "grok_runners": raw["grok_runners"]
+        if isinstance(raw["grok_runners"], dict)
+        else {},
+        "worldstream_runners": raw["worldstream_runners"]
+        if isinstance(raw["worldstream_runners"], dict)
+        else {},
+        "onepassword_vaults": raw["onepassword_vaults"]
+        if isinstance(raw["onepassword_vaults"], list)
+        else [],
+        "collection_meta": raw["collection_meta"]
+        if isinstance(raw["collection_meta"], dict)
+        else {},
+        "repositories": repository_inputs,
     }
+    input_hash = hashlib.sha256(_stable_json(data).encode("utf-8")).hexdigest()
+    return LoadedInventoryInputs(
+        data=data,
+        source_kinds=frozenset(REGISTERED_INPUT_KINDS),
+        input_hash=input_hash,
+    )
 
 
-def build_input_manifest(collect_dir: Path, repositories: list[dict[str, Any]], collected_at: str) -> dict[str, Any]:
-    snapshot = collect_input_snapshot(collect_dir)
+def hash_inventory_inputs(inputs: LoadedInventoryInputs) -> str:
+    current_hash = hashlib.sha256(_stable_json(inputs.data).encode("utf-8")).hexdigest()
+    if current_hash != inputs.input_hash:
+        raise ValueError("loaded inventory inputs were modified after hashing")
+    return inputs.input_hash
+
+
+def build_input_manifest(
+    inputs: LoadedInventoryInputs, collected_at: str
+) -> dict[str, Any]:
     repos_out = [
         {
             "name": repo["name"],
-            "default_branch": repo.get("default_branch"),
-            "default_sha": repo.get("default_sha"),
-            "workflows": repo.get("workflows") or [],
+            "default_branch": repo["meta"].get("default_branch")
+            or (repo["repo_info"].get("defaultBranchRef") or {}).get("name"),
+            "default_sha": repo["meta"].get("default_sha") or repo["meta"].get("sha"),
+            "workflows": [
+                {"path": workflow["path"], "sha": workflow["sha"]}
+                for workflow in repo.get("workflows") or []
+            ],
         }
-        for repo in snapshot["repositories"]
+        for repo in inputs.data["repositories"]
     ]
     return {
         "schema_version": 1,
         "collected_at": collected_at,
-        "input_hash": hashlib.sha256(_stable_json(snapshot).encode("utf-8")).hexdigest(),
+        "input_hash": hash_inventory_inputs(inputs),
         "covered_inputs": [
             "org",
             "repos_index",
@@ -1212,29 +1276,28 @@ def build_target_runners() -> dict[str, Any]:
     }
 
 
-def load_host_snapshot(collect_dir: Path) -> dict[str, Any]:
-    path = collect_dir / "hosts.json"
-    if path.exists():
-        return load_json(path, {})
-    return {
-        "available": False,
-        "note": "Host snapshot was not included in this collection.",
-    }
-
-
 def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
-    org = load_json(collect_dir / "org.json", {})
-    repos_meta = load_json(collect_dir / "repos.json", [])
-    runners_raw = load_json(collect_dir / "runners.json", {})
-    groups_raw = load_json(collect_dir / "runner-groups.json", {})
-    org_secrets = [item.get("name") for item in load_json(collect_dir / "org-secrets.json", []) if item.get("name")]
-    org_vars = [item.get("name") for item in load_json(collect_dir / "org-variables.json", []) if item.get("name")]
-    budgets = load_json(collect_dir / "budgets.json", {})
-    snapshot_time = load_json(collect_dir / "collection-meta.json", {}).get("collected_at") or utc_now()
+    return generate_from_inputs(load_inventory_inputs(collect_dir), output_dir)
+
+
+def generate_from_inputs(
+    inputs: LoadedInventoryInputs, output_dir: Path
+) -> dict[str, Any]:
+    data = inputs.data
+    org = data["org"]
+    repos_meta = data["repos_index"]
+    runners_raw = data["runners"]
+    groups_raw = data["runner_groups"]
+    org_secrets = data["org_secret_names"]
+    org_vars = data["org_variable_names"]
+    budgets = data["budgets"]
+    snapshot_time = data["collection_meta"].get("collected_at")
+    if not snapshot_time:
+        raise ValueError(
+            "collection-meta.json must contain collected_at before inventory generation"
+        )
     generated_at = snapshot_time
-    billing = load_billing_evidence(collect_dir / "blacksmith-billing.json")
-    if not (collect_dir / "blacksmith-billing.json").exists():
-        billing = load_billing_evidence(Path(__file__).resolve().parents[2] / "inventory/evidence/blacksmith-billing.json")
+    billing = data["billing"]
 
     plan_name = ((org.get("plan") or {}).get("name") or "free").lower()
     organization_plan = {
@@ -1255,44 +1318,38 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
     secret_entries: list[dict[str, Any]] = []
     seen_secret_keys: set[tuple[str, str, str]] = set()
 
+    repository_inputs = {repo["name"]: repo for repo in data["repositories"]}
     for repo_info in repos_meta:
         name = repo_info["name"]
-        repo_dir = collect_dir / "repos" / name
-        meta = load_json(repo_dir / "meta.json", repo_info)
-        visibility = str(meta.get("visibility") or repo_info.get("visibility") or "").lower()
+        repo_inputs = repository_inputs[name]
+        meta = repo_inputs["meta"] or repo_info
+        visibility = str(
+            meta.get("visibility") or repo_info.get("visibility") or ""
+        ).lower()
         default_branch = (
-            (meta.get("default_branch") or (repo_info.get("defaultBranchRef") or {}).get("name") or "main")
+            meta.get("default_branch")
+            or (repo_info.get("defaultBranchRef") or {}).get("name")
+            or "main"
         )
         workflows: list[dict[str, Any]] = []
-        wf_dir = repo_dir / "workflows"
         listed_secrets = {
             "org": org_secrets,
-            "repo": [item.get("name") for item in load_json(repo_dir / "secrets.json", []) if item.get("name")],
-            "environment": [],
+            "repo": repo_inputs["repository_secret_names"],
+            "environment": repo_inputs["environment_secret_names"],
         }
-        env_secret_names: list[str] = []
-        for env_secret_file in sorted((repo_dir / "environment-secrets").glob("*.json")) if (repo_dir / "environment-secrets").exists() else []:
-            for item in load_json(env_secret_file, []):
-                if item.get("name"):
-                    env_secret_names.append(item["name"])
-        listed_secrets["environment"] = env_secret_names
-
-        if wf_dir.exists():
-            for wf_path in sorted(wf_dir.rglob("*")):
-                if wf_path.suffix.lower() not in {".yml", ".yaml"}:
-                    continue
-                rel = ".github/workflows/" + wf_path.relative_to(wf_dir).as_posix()
-                parsed = parse_workflow(rel, wf_path.read_text(encoding="utf-8"))
-                jobs_out: list[dict[str, Any]] = []
-                for job in parsed["jobs"]:
-                    env_name = job["environment_name"]
-                    env_file = repo_dir / "environments" / f"{env_name}.json" if env_name else None
-                    env_record_raw = load_json(env_file, None) if env_file and env_file.exists() else None
-                    if isinstance(env_record_raw, dict):
-                        branch_file = repo_dir / "environments" / f"{env_name}.branches.json"
-                        if branch_file.exists():
-                            env_record_raw["deployment_branch_policies"] = load_json(branch_file, None)
-                    protection = env_protection(env_record_raw) if env_name else {
+        for workflow_input in repo_inputs["workflows"]:
+            rel = workflow_input["path"]
+            parsed = parse_workflow(rel, workflow_input["content"])
+            jobs_out: list[dict[str, Any]] = []
+            for job in parsed["jobs"]:
+                env_name = job["environment_name"]
+                env_record_raw = (
+                    repo_inputs["environments"].get(env_name) if env_name else None
+                )
+                protection = (
+                    env_protection(env_record_raw)
+                    if env_name
+                    else {
                         "available": False,
                         "required_reviewers": [],
                         "prevent_self_review": None,
@@ -1301,98 +1358,110 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
                         "external_hard_stop": False,
                         "note": "",
                     }
-                    if env_name and protection.get("external_hard_stop"):
-                        job_flags_extra = ["EXTERNAL_HARD_STOP"]
-                    else:
-                        job_flags_extra = []
-                    classified = classify_job(
-                        name,
-                        visibility,
-                        rel,
-                        job["id"],
-                        job["runs_on"],
-                        job["resolved_runs_on"],
-                        env_name,
-                        job["raw_text"],
-                        job["uses"],
-                        parsed["triggers"],
-                        job["secret_names"],
-                    )
-                    flags = classified["flags"] + [f for f in job_flags_extra if f not in classified["flags"]]
-                    env_record = None
-                    if env_name:
-                        env_record = {
-                            "name": env_name,
-                            "required_reviewers": protection["required_reviewers"],
-                            "prevent_self_review": protection["prevent_self_review"],
-                            "wait_timer": protection["wait_timer"],
-                            "deployment_branches": protection["deployment_branches"],
-                            "protection_available": protection["available"],
-                            "external_hard_stop": protection["external_hard_stop"],
-                            "note": protection["note"],
-                        }
-                    target = structured_target(
-                        job["id"],
-                        rel,
-                        job["raw_text"],
-                        job["uses"],
-                        job["secret_names"],
-                        job["variable_names"],
-                    )
-                    hint_list = list(job["target_hints"])
-                    for extra in target["host_secret_names"] + target["host_variable_names"]:
-                        if extra not in hint_list:
-                            hint_list.append(extra)
-                    if target["registry_or_package"] and target["registry_or_package"] not in hint_list:
-                        hint_list.append(target["registry_or_package"])
-                    jobs_out.append(
-                        {
-                            "id": job["id"],
-                            "name": job["name"],
-                            "runs_on": job["runs_on"],
-                            "resolved_runs_on": job["resolved_runs_on"],
-                            "environment": env_record,
-                            "environment_name": env_name or None,
-                            "needs": job["needs"],
-                            "permissions": job["permissions"] if job["permissions"] is not None else parsed["permissions"],
-                            "uses": job["uses"],
-                            "secret_names": job["secret_names"],
-                            "variable_names": job["variable_names"],
-                            "artifacts": job["artifacts"],
-                            "target_hints": hint_list,
-                            "target": target,
-                            "classification": classified["classification"],
-                            "target_runner_class": classified["target_runner_class"],
-                            "target_runs_on": classified["target_runs_on"],
-                            "secret_class": classified["secret_class"],
-                            "production_impact": classified["production_impact"],
-                            "deploys_or_publishes": classified["deploys_or_publishes"],
-                            "combined_build_and_deploy": classified["combined_build_and_deploy"],
-                            "flags": flags,
-                        }
-                    )
-                    for secret_name in job["secret_names"]:
-                        key = (name, rel, secret_name)
-                        if key in seen_secret_keys:
-                            continue
-                        seen_secret_keys.add(key)
-                        entry = apply_secret_consumer(
-                            secret_authority(secret_name, name, listed_secrets, rel),
-                            classified,
-                        )
-                        secret_entries.append(entry)
-                workflows.append(
+                )
+                if env_name and protection.get("external_hard_stop"):
+                    job_flags_extra = ["EXTERNAL_HARD_STOP"]
+                else:
+                    job_flags_extra = []
+                classified = classify_job(
+                    name,
+                    visibility,
+                    rel,
+                    job["id"],
+                    job["runs_on"],
+                    job["resolved_runs_on"],
+                    env_name,
+                    job["raw_text"],
+                    job["uses"],
+                    parsed["triggers"],
+                    job["secret_names"],
+                )
+                flags = classified["flags"] + [
+                    f for f in job_flags_extra if f not in classified["flags"]
+                ]
+                env_record = None
+                if env_name:
+                    env_record = {
+                        "name": env_name,
+                        "required_reviewers": protection["required_reviewers"],
+                        "prevent_self_review": protection["prevent_self_review"],
+                        "wait_timer": protection["wait_timer"],
+                        "deployment_branches": protection["deployment_branches"],
+                        "protection_available": protection["available"],
+                        "external_hard_stop": protection["external_hard_stop"],
+                        "note": protection["note"],
+                    }
+                target = structured_target(
+                    job["id"],
+                    rel,
+                    job["raw_text"],
+                    job["uses"],
+                    job["secret_names"],
+                    job["variable_names"],
+                )
+                hint_list = list(job["target_hints"])
+                for extra in (
+                    target["host_secret_names"] + target["host_variable_names"]
+                ):
+                    if extra not in hint_list:
+                        hint_list.append(extra)
+                if (
+                    target["registry_or_package"]
+                    and target["registry_or_package"] not in hint_list
+                ):
+                    hint_list.append(target["registry_or_package"])
+                jobs_out.append(
                     {
-                        "path": rel,
-                        "name": parsed["name"],
-                        "triggers": parsed["triggers"],
-                        "permissions": parsed["permissions"],
-                        "concurrency": parsed["concurrency"],
-                        "secret_names": parsed["secret_names"],
-                        "variable_names": parsed["variable_names"],
-                        "jobs": jobs_out,
+                        "id": job["id"],
+                        "name": job["name"],
+                        "runs_on": job["runs_on"],
+                        "resolved_runs_on": job["resolved_runs_on"],
+                        "environment": env_record,
+                        "environment_name": env_name or None,
+                        "needs": job["needs"],
+                        "permissions": job["permissions"]
+                        if job["permissions"] is not None
+                        else parsed["permissions"],
+                        "uses": job["uses"],
+                        "secret_names": job["secret_names"],
+                        "variable_names": job["variable_names"],
+                        "artifacts": job["artifacts"],
+                        "target_hints": hint_list,
+                        "target": target,
+                        "classification": classified["classification"],
+                        "target_runner_class": classified["target_runner_class"],
+                        "target_runs_on": classified["target_runs_on"],
+                        "secret_class": classified["secret_class"],
+                        "production_impact": classified["production_impact"],
+                        "deploys_or_publishes": classified["deploys_or_publishes"],
+                        "combined_build_and_deploy": classified[
+                            "combined_build_and_deploy"
+                        ],
+                        "flags": flags,
                     }
                 )
+                for secret_name in job["secret_names"]:
+                    key = (name, rel, secret_name)
+                    if key in seen_secret_keys:
+                        continue
+                    seen_secret_keys.add(key)
+                    entry = apply_secret_consumer(
+                        secret_authority(secret_name, name, listed_secrets, rel),
+                        classified,
+                    )
+                    secret_entries.append(entry)
+            workflows.append(
+                {
+                    "path": rel,
+                    "name": parsed["name"],
+                    "triggers": parsed["triggers"],
+                    "permissions": parsed["permissions"],
+                    "concurrency": parsed["concurrency"],
+                    "secret_names": parsed["secret_names"],
+                    "variable_names": parsed["variable_names"],
+                    "jobs": jobs_out,
+                }
+            )
 
         repositories.append(
             {
@@ -1425,9 +1494,12 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
         "repositories": repositories,
     }
 
-    host_snapshot = load_host_snapshot(collect_dir)
-    grok = load_json(collect_dir / "grok-runners.json", {})
-    worldstream = load_json(collect_dir / "worldstream-runners.json", {})
+    host_snapshot = data["hosts"] or {
+        "available": False,
+        "note": "Host snapshot was not included in this collection.",
+    }
+    grok = data["grok_runners"]
+    worldstream = data["worldstream_runners"]
     if not grok:
         grok = {
             "count": 6,
@@ -1474,12 +1546,12 @@ def generate(collect_dir: Path, output_dir: Path) -> dict[str, Any]:
         ),
         "organization_secret_names": org_secrets,
         "organization_variable_names": org_vars,
-        "onepassword_visible_vaults": load_json(collect_dir / "onepassword-vaults.json", []),
+        "onepassword_visible_vaults": data["onepassword_vaults"],
         "entries": secret_entries,
         "secrets": secret_entries,
     }
 
-    manifest = build_input_manifest(collect_dir, repositories, snapshot_time)
+    manifest = build_input_manifest(inputs, snapshot_time)
     repositories_doc["input_hash"] = manifest["input_hash"]
     dump_yaml(output_dir / "repositories.yaml", repositories_doc)
     dump_yaml(output_dir / "runners.yaml", runners_doc)

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 LIB = ROOT / "infra/github-actions/scripts/lib"
@@ -477,31 +478,219 @@ class RegenerationAndManifestTests(unittest.TestCase):
             out_b = Path(tmp) / "b"
             self._copy_fixture(collect)
             aw.generate(collect, out_a)
-            (collect / "onepassword-vaults.json").write_text(json.dumps(["Development", "New Vault"]))
+            (collect / "onepassword-vaults.json").write_text(
+                json.dumps(["Development", "New Vault"])
+            )
             aw.generate(collect, out_b)
             import yaml
 
-            hash_a = yaml.safe_load((out_a / "input-manifest.yaml").read_text())["input_hash"]
-            hash_b = yaml.safe_load((out_b / "input-manifest.yaml").read_text())["input_hash"]
+            hash_a = yaml.safe_load((out_a / "input-manifest.yaml").read_text())[
+                "input_hash"
+            ]
+            hash_b = yaml.safe_load((out_b / "input-manifest.yaml").read_text())[
+                "input_hash"
+            ]
             self.assertNotEqual(hash_a, hash_b)
             secrets_b = yaml.safe_load((out_b / "secrets.yaml").read_text())
-            self.assertEqual(secrets_b["onepassword_visible_vaults"], ["Development", "New Vault"])
+            self.assertEqual(
+                secrets_b["onepassword_visible_vaults"], ["Development", "New Vault"]
+            )
             secrets_a = yaml.safe_load((out_a / "secrets.yaml").read_text())
-            self.assertNotEqual(secrets_a["onepassword_visible_vaults"], secrets_b["onepassword_visible_vaults"])
+            self.assertNotEqual(
+                secrets_a["onepassword_visible_vaults"],
+                secrets_b["onepassword_visible_vaults"],
+            )
 
-    def test_covered_inputs_include_every_generator_collect_source(self):
-        snapshot = aw.collect_input_snapshot(FIXTURE_DIR)
-        covered = set(aw.build_input_manifest(FIXTURE_DIR, [], "2026-08-19T16:00:00Z")["covered_inputs"])
-        for key in aw.COLLECT_DIR_INPUT_KEYS:
-            self.assertIn(key, snapshot, f"snapshot missing {key}")
-        self.assertIn("onepassword_vaults", snapshot)
-        self.assertIn("onepassword_vaults", covered)
-        for banned in ("repositories.yaml", "runners.yaml", "secrets.yaml", "input-manifest.yaml"):
-            self.assertNotIn(banned, snapshot)
-            self.assertNotIn(banned, covered)
-        for source in aw.collect_dir_files_read_by_generate():
-            self.assertTrue(source, "empty generator source")
-            self.assertFalse(str(source).endswith(".yaml") and "inventory/" in str(source))
+    def test_loader_reads_each_registered_source_once(self):
+        reads: dict[Path, int] = {}
+        original = Path.read_text
+
+        def tracked_read(path: Path, *args, **kwargs):
+            resolved = path.resolve()
+            if resolved.is_relative_to(FIXTURE_DIR.resolve()):
+                reads[resolved] = reads.get(resolved, 0) + 1
+            return original(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "read_text", tracked_read):
+            loaded = aw.load_inventory_inputs(FIXTURE_DIR)
+
+        self.assertTrue(reads)
+        self.assertEqual(set(reads.values()), {1})
+        self.assertEqual(loaded.source_kinds, frozenset(aw.REGISTERED_INPUT_KINDS))
+        serialized = aw._stable_json(loaded.data)
+        self.assertNotIn(str(FIXTURE_DIR.resolve()), serialized)
+        for generated_name in ("repositories.yaml", "runners.yaml", "secrets.yaml", "input-manifest.yaml"):
+            self.assertNotIn(generated_name, serialized)
+
+    def test_each_registered_non_workflow_input_changes_hash(self):
+        mutations = {
+            "org": (
+                "org.json",
+                {"login": "Ken-Technology", "plan": {"name": "team"}, "id": 1},
+            ),
+            "repos_index": (
+                "repos.json",
+                [
+                    {
+                        "name": "example-private",
+                        "visibility": "PRIVATE",
+                        "isArchived": False,
+                        "defaultBranchRef": {"name": "trunk"},
+                    }
+                ],
+            ),
+            "runners": ("runners.json", {"total_count": 0, "runners": []}),
+            "runner_groups": (
+                "runner-groups.json",
+                {"total_count": 1, "runner_groups": [{"id": 9, "name": "Probe"}]},
+            ),
+            "org_secret_names": ("org-secrets.json", [{"name": "PROBE_SECRET"}]),
+            "org_variable_names": ("org-variables.json", [{"name": "PROBE_VARIABLE"}]),
+            "budgets": (
+                "budgets.json",
+                {"actions_overage_budget_usd": 7, "prevent_further_usage": False},
+            ),
+            "billing": (
+                "blacksmith-billing.json",
+                {
+                    "previous_month": {"amount_usd": 131, "status": "captured"},
+                    "current_unbilled": {"amount_usd": None, "status": "unavailable"},
+                },
+            ),
+            "hosts": ("hosts.json", {"available": False, "note": "probe"}),
+            "grok_runners": (
+                "grok-runners.json",
+                {"count": 0, "names": [], "unchanged": True},
+            ),
+            "worldstream_runners": (
+                "worldstream-runners.json",
+                {"count": 9, "unchanged_until_teardown_gate": True},
+            ),
+            "onepassword_vaults": ("onepassword-vaults.json", ["Development", "Probe"]),
+            "collection_meta": (
+                "collection-meta.json",
+                {"collected_at": "2026-08-19T17:00:00Z", "mode": "offline-fixture"},
+            ),
+            "repository_meta": (
+                "repos/example-private/meta.json",
+                {
+                    "name": "example-private",
+                    "visibility": "private",
+                    "default_branch": "main",
+                    "default_sha": "b" * 40,
+                },
+            ),
+            "repository_tree": (
+                "repos/example-private/tree.json",
+                {"tree": [{"path": ".github/workflows/ci.yml", "sha": "c" * 40}]},
+            ),
+            "repository_secret_names": (
+                "repos/example-private/secrets.json",
+                [{"name": "PROBE_SECRET"}],
+            ),
+            "repository_variable_names": (
+                "repos/example-private/variables.json",
+                [{"name": "PROBE_VARIABLE"}],
+            ),
+            "environment": (
+                "repos/example-private/environments/Preprod.json",
+                {
+                    "name": "Preprod",
+                    "protection_rules": [{"type": "wait_timer", "wait_timer": 9}],
+                },
+            ),
+            "environment_branch_policies": (
+                "repos/example-private/environments/production-protected.branches.json",
+                {
+                    "total_count": 1,
+                    "branch_policies": [
+                        {"id": 7, "node_id": "probe", "name": "probe/*"}
+                    ],
+                },
+            ),
+            "environment_secret_names": (
+                "repos/example-private/environment-secrets/production-protected.json",
+                [{"name": "PROBE_ENV_SECRET"}],
+            ),
+        }
+        self.assertEqual(set(mutations), set(aw.REGISTERED_NON_WORKFLOW_INPUT_KINDS))
+        baseline = aw.hash_inventory_inputs(aw.load_inventory_inputs(FIXTURE_DIR))
+        output_affecting = set(mutations) - {
+            "repository_variable_names",
+            "environment_secret_names",
+        }
+
+        def semantic_without_hash(output: Path) -> str:
+            import yaml
+
+            documents = {}
+            for name in (
+                "repositories.yaml",
+                "runners.yaml",
+                "secrets.yaml",
+                "input-manifest.yaml",
+            ):
+                document = yaml.safe_load((output / name).read_text())
+                document.pop("generated_at", None)
+                document.pop("input_hash", None)
+                documents[name] = document
+            return json.dumps(documents, sort_keys=True, separators=(",", ":"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            baseline_output = temp_root / "baseline-output"
+            aw.generate(FIXTURE_DIR, baseline_output)
+            baseline_semantic = semantic_without_hash(baseline_output)
+            for kind, (relative_path, payload) in mutations.items():
+                collect = temp_root / kind / "collect"
+                output = temp_root / kind / "output"
+                self._copy_fixture(collect)
+                path = collect / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(payload))
+                changed = aw.hash_inventory_inputs(aw.load_inventory_inputs(collect))
+                with self.subTest(kind=kind):
+                    self.assertNotEqual(baseline, changed)
+                    if kind in output_affecting:
+                        aw.generate(collect, output)
+                        self.assertNotEqual(
+                            baseline_semantic, semantic_without_hash(output)
+                        )
+
+    def test_generation_consumes_loaded_inputs_without_source_reads(self):
+        loaded = aw.load_inventory_inputs(FIXTURE_DIR)
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                mock.patch.object(
+                    aw,
+                    "load_json",
+                    side_effect=AssertionError("unexpected source read"),
+                ),
+                mock.patch.object(
+                    Path,
+                    "read_text",
+                    side_effect=AssertionError("unexpected source read"),
+                ),
+            ):
+                aw.generate_from_inputs(loaded, Path(tmp))
+
+    def test_missing_billing_is_explicitly_unavailable_without_repository_fallback(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            collect = Path(tmp) / "collect"
+            output = Path(tmp) / "output"
+            self._copy_fixture(collect)
+            (collect / "blacksmith-billing.json").unlink()
+            aw.generate(collect, output)
+            import yaml
+
+            runners = yaml.safe_load((output / "runners.yaml").read_text())
+            self.assertIsNone(runners["billing"]["previous_month"]["amount_usd"])
+            self.assertEqual(
+                runners["billing"]["previous_month"]["status"], "unavailable"
+            )
+            self.assertIsNone(runners["billing"]["current_unbilled"]["amount_usd"])
 
     def test_no_stack_yet_is_not_a_deploy(self):
         result = classify(
