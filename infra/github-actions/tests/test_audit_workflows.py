@@ -22,10 +22,15 @@ class OnePasswordEnvMetadataTests(unittest.TestCase):
     def test_emits_only_env_lhs_names_and_presence(self):
         import extract_op_env_metadata as extractor
 
+        github_canary = "".join(("g", "hp", "_", "A" * 30))
+        private_key_canary = "".join(
+            ("-----BEGIN ", "PRI", "VATE ", "KEY-----")
+        )
+        private_key_end = "".join(("-----END ", "PRI", "VATE ", "KEY-----"))
         canaries = [
             "RIGHT_HAND_CANARY_7fca2c",
-            "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-            "-----BEGIN PRIVATE KEY-----",
+            github_canary,
+            private_key_canary,
         ]
         item = {
             "title": "ken-frontend-env",
@@ -37,11 +42,11 @@ class OnePasswordEnvMetadataTests(unittest.TestCase):
                     "type": "STRING",
                     "value": (
                         "PUBLIC_URL=https://example.invalid/RIGHT_HAND_CANARY_7fca2c\n"
-                        "export API_TOKEN=ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
+                        f"export API_TOKEN={github_canary}\n"
                         "EMPTY=\n"
-                        "PRIVATE_KEY='-----BEGIN PRIVATE KEY-----\n"
+                        f"PRIVATE_KEY='{private_key_canary}\n"
                         "right-hand-only material\n"
-                        "-----END PRIVATE KEY-----'\n"
+                        f"{private_key_end}'\n"
                     ),
                 }
             ],
@@ -1132,8 +1137,44 @@ jobs:
                     self.assertTrue(entry["target_field"])
                     self.assertEqual(entry["field_type"], "concealed")
                     self.assertIsNone(entry["provider_rotation_steps"])
-                    self.assertEqual(entry["downstream_update_steps"], [])
+                    self.assertTrue(entry["downstream_update_steps"])
                     self.assertEqual(entry["alias_status"], "not-evaluated")
+
+            handoff = yaml.safe_load((output / "secret-handoff.yaml").read_text())
+            self.assertEqual(
+                handoff["runtime_access"]["runtime_accounts"],
+                [
+                    {
+                        "identity": "ken-ci-runtime",
+                        "vault": "Ken CI Runtime",
+                        "access": "read_items only",
+                    },
+                    {
+                        "identity": "ken-deploy-nonproduction",
+                        "vault": "Ken Deploy Nonproduction",
+                        "access": "read_items only",
+                    },
+                    {
+                        "identity": "ken-deploy-production",
+                        "vault": "Ken Deploy Production",
+                        "access": "read_items only",
+                    },
+                ],
+            )
+            writer = handoff["runtime_access"]["temporary_writer"]
+            self.assertEqual(writer["role"], "task6-temporary-migration-writer")
+            self.assertTrue(writer["revocation_and_readback_steps"])
+            coordinates = [row["coordinate"] for row in handoff["rows"]]
+            self.assertEqual(len(coordinates), len(set(coordinates)))
+            for row in handoff["rows"]:
+                for field in (
+                    "source_to_target_steps",
+                    "broker_or_workflow_cutover_steps",
+                    "live_verification_steps",
+                    "github_deletion_steps",
+                    "revocation_steps",
+                ):
+                    self.assertTrue(row[field], (field, row))
 
     def test_special_secret_semantics_are_not_reclassified_as_app_secrets(self):
         empty = {"org": [], "repo": [], "environment": []}
@@ -1170,6 +1211,7 @@ jobs:
         self.assertFalse(bootstrap["rotation_required"])
         self.assertNotIn("unresolved_reason", bootstrap)
         self.assertNotIn("resolution_class", bootstrap)
+        self.assertTrue(bootstrap["downstream_update_steps"])
 
     def test_unknown_consumer_does_not_default_to_production(self):
         entry = aw.secret_authority(
@@ -1182,6 +1224,38 @@ jobs:
         self.assertIsNone(entry["consumer"])
         self.assertEqual(entry["authority_status"], "unresolved")
         self.assertIsNone(entry["rotation_required"])
+
+    def test_handoff_deduplicates_workflows_by_unique_trust_coordinate(self):
+        classified = {
+            "secret_class": "deploy-production",
+            "production_impact": True,
+            "target_runner_class": "ken-deploy-production",
+        }
+        entries = []
+        for workflow, job in (("deploy.yml", "deploy"), ("scheduled.yml", "run")):
+            entry = aw.apply_secret_consumer(
+                aw.secret_authority(
+                    "SHARED_ENDPOINT",
+                    "ken-help",
+                    {"org": [], "repo": [], "environment": []},
+                    workflow,
+                ),
+                classified,
+            )
+            entry["consuming_jobs"] = [job]
+            entries.append(entry)
+
+        handoff = aw.build_secret_handoff(
+            entries, "Ken-Technology", "2026-08-19T00:00:00Z"
+        )
+        self.assertEqual(len(handoff["rows"]), 1)
+        self.assertEqual(
+            handoff["rows"][0]["workflows"], ["deploy.yml", "scheduled.yml"]
+        )
+        self.assertEqual(
+            handoff["rows"][0]["consuming_jobs"],
+            ["deploy.yml#deploy", "scheduled.yml#run"],
+        )
 
 
 class Task6AuthorityEvidenceTests(unittest.TestCase):
@@ -1248,6 +1322,13 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         self.assertTrue(entry["source_readable"])
         self.assertFalse(entry["rotation_required"])
         self.assertEqual(entry["source_evidence_id"], evidence["evidence_id"])
+        for field in (
+            "resolution_class",
+            "authority_owner",
+            "unresolved_reason",
+            "handoff_group",
+        ):
+            self.assertNotIn(field, entry)
 
     def test_production_mapping_does_not_resolve_ci_collision(self):
         evidence = {
@@ -1707,6 +1788,69 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "source metadata not proven"):
                 builder.build_evidence(tmp_path)
 
+    def test_raw_metadata_rejects_value_bearing_fields_at_any_depth(self):
+        import build_task6_authority_evidence as builder
+        import shutil
+
+        evidence_dir = ROOT / "infra/github-actions/inventory/evidence"
+        for forbidden in (
+            "value",
+            "secret",
+            "password",
+            "token",
+            "note",
+            "notes",
+            "value_hash",
+            "value_length",
+            "value_prefix",
+        ):
+            with self.subTest(forbidden=forbidden), tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                for name in (
+                    "task-6-op-env-key-metadata.json",
+                    "task-6-op-field-metadata.json",
+                    "task-6-worldstream-key-metadata.json",
+                    "task-6-connection-structure.json",
+                ):
+                    shutil.copy2(evidence_dir / name, tmp_path / name)
+                path = tmp_path / "task-6-op-env-key-metadata.json"
+                payload = json.loads(path.read_text())
+                payload["items"][0]["keys"][0][forbidden] = "must-not-be-accepted"
+                path.write_text(json.dumps(payload))
+                with self.assertRaisesRegex(ValueError, "forbidden raw metadata field"):
+                    builder.build_evidence(tmp_path)
+
+    def test_every_raw_metadata_schema_rejects_unexpected_nested_fields(self):
+        import build_task6_authority_evidence as builder
+        import shutil
+
+        evidence_dir = ROOT / "infra/github-actions/inventory/evidence"
+        mutations = {
+            "task-6-op-env-key-metadata.json": lambda doc: doc["items"][0].update(
+                {"unexpected_nested": {"safe_looking": True}}
+            ),
+            "task-6-op-field-metadata.json": lambda doc: doc["items"][0][
+                "fields"
+            ][0].update({"unexpected_nested": []}),
+            "task-6-worldstream-key-metadata.json": lambda doc: doc["keys"][0].update(
+                {"unexpected_nested": {}}
+            ),
+            "task-6-connection-structure.json": lambda doc: doc.update(
+                {"unexpected_nested": {"safe_looking": True}}
+            ),
+        }
+        for mutated_name, mutate in mutations.items():
+            with self.subTest(artifact=mutated_name), tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                for name in mutations:
+                    shutil.copy2(evidence_dir / name, tmp_path / name)
+                path = tmp_path / mutated_name
+                payload = json.loads(path.read_text())
+                mutate(payload)
+                path.write_text(json.dumps(payload))
+                with self.assertRaisesRegex(ValueError, "unexpected raw metadata field"):
+                    builder.build_evidence(tmp_path)
+
     def test_round_two_reuses_only_production_provider_authorities(self):
         import build_task6_authority_evidence as builder
 
@@ -1773,6 +1917,11 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                         "Create a replacement project-scoped PyPI publishing credential.",
                         "Store it through the concealed migration handoff, verify the package publish, then revoke the predecessor.",
                     ],
+                    "downstream_update_steps": [
+                        "Populate the named target 1Password field through the temporary writer.",
+                        "Cut the exact workflow over to the local broker and verify a live package publish.",
+                        "Delete the GitHub secret and revoke the predecessor only after verification.",
+                    ],
                 }
             ]
         }
@@ -1807,6 +1956,9 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                     "handoff_group": "publishing/pypi",
                     "unresolved_reason": "No readable authority was found.",
                     "provider_rotation_steps": ["Create and revoke a project token."],
+                    "downstream_update_steps": [
+                        "Populate the named target 1Password field, cut over, verify, then retire the GitHub field."
+                    ],
                 }
             ]
         }
@@ -1824,6 +1976,9 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                     "handoff_group": "publishing/pypi",
                     "unresolved_reason": "No readable authority was found.",
                     "provider_rotation_steps": None,
+                    "downstream_update_steps": [
+                        "Populate the target, cut over the consumer, verify, then retire the GitHub field."
+                    ],
                 }
             ]
         }
@@ -1834,15 +1989,13 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         import build_task6_authority_evidence as builder
 
         annotations = builder.build_evidence()["unresolved_annotations"]
-        pypi = next(
-            row
-            for row in annotations
-            if row["repository"] == "Ken-SRE"
-            and row["github_secret_name"] == "PYPI_API_TOKEN"
+        self.assertFalse(
+            any(
+                row["repository"] == "Ken-SRE"
+                and row["github_secret_name"] == "PYPI_API_TOKEN"
+                for row in annotations
+            )
         )
-        self.assertEqual(pypi["resolution_class"], "provider-rotation")
-        self.assertEqual(pypi["handoff_group"], "publishing/pypi")
-        self.assertGreaterEqual(len(pypi["provider_rotation_steps"]), 2)
 
         mcp_read = [
             row
@@ -1864,6 +2017,226 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                 for row in annotations
             )
         )
+        for annotation in annotations:
+            self.assertTrue(annotation["downstream_update_steps"], annotation)
+
+    def test_independent_authority_requires_rotation_and_full_cutover_steps(self):
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "DEDICATED_SIGNING_KEY",
+                "ken-backend",
+                self.empty_scopes,
+                ".github/workflows/deploy.yml",
+            ),
+            self.production,
+        )
+        evidence = {
+            "unresolved_annotations": [
+                {
+                    "annotation_id": "dedicated-signing-key",
+                    "repository": "ken-backend",
+                    "github_secret_name": "DEDICATED_SIGNING_KEY",
+                    "target_vault": "Ken Deploy Production",
+                    "resolution_class": "independent-trust-authority",
+                    "authority_owner": "Release signing owner",
+                    "handoff_group": "backend/release-signing",
+                    "unresolved_reason": "A new independent authority must be created.",
+                    "provider_rotation_steps": None,
+                    "downstream_update_steps": [
+                        "Create a dedicated authority and populate the named target field through the temporary writer.",
+                        "Cut the workflow over to the local broker and verify a live signed release.",
+                        "Delete the GitHub field and revoke the predecessor only after verification.",
+                    ],
+                }
+            ]
+        }
+        annotated = aw.apply_unresolved_annotation(entry, evidence)
+        self.assertTrue(annotated["rotation_required"])
+        self.assertEqual(
+            annotated["migration_action"], "create-independent-authority"
+        )
+        self.assertEqual(
+            annotated["downstream_update_steps"],
+            evidence["unresolved_annotations"][0]["downstream_update_steps"],
+        )
+
+    def test_unresolved_annotation_rejects_missing_downstream_cutover_steps(self):
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "DEPLOY_HOST",
+                "ken-help",
+                self.empty_scopes,
+                ".github/workflows/deploy.yml",
+            ),
+            self.production,
+        )
+        evidence = {
+            "unresolved_annotations": [
+                {
+                    "annotation_id": "help-deploy-host",
+                    "repository": "ken-help",
+                    "github_secret_name": "DEPLOY_HOST",
+                    "target_vault": "Ken Deploy Production",
+                    "resolution_class": "target-system-readback",
+                    "authority_owner": "Deployment target owner",
+                    "handoff_group": "help/deploy",
+                    "unresolved_reason": "Target readback is required.",
+                    "provider_rotation_steps": None,
+                    "downstream_update_steps": [],
+                }
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "downstream_update_steps"):
+            aw.apply_unresolved_annotation(entry, evidence)
+
+    def test_resolved_builder_steps_target_1password_not_github(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        copy_mapping = next(
+            row
+            for row in evidence["mappings"]
+            if row["migration_action"] == "copy"
+        )
+        rendered = " ".join(copy_mapping["downstream_update_steps"])
+        self.assertIn("target 1Password", rendered)
+        self.assertNotIn("1Password-to-GitHub", rendered)
+
+    def test_hermes_keeps_dedicated_deploy_identity_unresolved(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        self.assertFalse(
+            any(
+                row["repository"] == "ken-hermes-clickup"
+                and row["github_secret_name"]
+                in {"DEPLOY_HOST", "DEPLOY_USER", "DEPLOY_SSH_KEY"}
+                for row in evidence["mappings"]
+            )
+        )
+        hermes = {
+            row["github_secret_name"]: row
+            for row in evidence["unresolved_annotations"]
+            if row["repository"] == "ken-hermes-clickup"
+        }
+        self.assertEqual(
+            set(hermes),
+            {
+                "DEPLOY_HOST",
+                "DEPLOY_USER",
+                "DEPLOY_SSH_KEY",
+                "DEPLOY_SSH_KNOWN_HOSTS",
+            },
+        )
+        for row in hermes.values():
+            self.assertEqual(row["required_runtime_identity"], "kenhermes-deploy")
+            self.assertEqual(row["resolution_class"], "target-system-readback")
+            self.assertTrue(row["downstream_update_steps"])
+
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "DEPLOY_SSH_KEY",
+                "ken-hermes-clickup",
+                self.empty_scopes,
+                ".github/workflows/deploy.yml",
+            ),
+            self.production,
+        )
+        annotated = aw.apply_unresolved_annotation(entry, evidence)
+        self.assertEqual(
+            annotated["required_runtime_identity"], "kenhermes-deploy"
+        )
+
+    def test_public_publishers_have_secretless_github_hosted_migrations(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        migrations = {
+            (row["repository"], row["github_secret_name"]): row
+            for row in evidence["secretless_migrations"]
+        }
+        pypi = migrations[("Ken-SRE", "PYPI_API_TOKEN")]
+        self.assertEqual(pypi["migration_action"], "oidc-trusted-publisher")
+        self.assertIsNone(pypi["target_vault"])
+        self.assertIsNone(pypi["target_item"])
+        self.assertIsNone(pypi["target_field"])
+        self.assertEqual(pypi["target_runner_class"], "public-github-hosted")
+        self.assertEqual(
+            pypi["required_permissions"],
+            {"contents": "read", "id-token": "write"},
+        )
+        self.assertTrue(pypi["provider_setup_steps"])
+        self.assertTrue(pypi["downstream_update_steps"])
+        self.assertTrue(pypi["live_verification_steps"])
+        self.assertTrue(pypi["retirement_steps"])
+
+        plugin = migrations[("ken-ai-plugin", "COLD_EMAIL_SKILLS_DEPLOY_KEY")]
+        self.assertEqual(plugin["migration_action"], "pull-based-publisher")
+        self.assertEqual(plugin["target_runner_class"], "public-github-hosted")
+        self.assertEqual(plugin["cross_repo_task"]["task"], "Task 7")
+        self.assertEqual(
+            plugin["cross_repo_task"]["target_repository"],
+            "Ken-Technology/cold-email-skills",
+        )
+        self.assertEqual(plugin["cross_repo_task"]["authentication"], "GITHUB_TOKEN")
+        self.assertTrue(plugin["downstream_update_steps"])
+        self.assertTrue(plugin["live_verification_steps"])
+        self.assertTrue(plugin["retirement_steps"])
+
+    def test_secretless_migration_clears_vault_and_unresolved_defaults(self):
+        classified = classify(
+            repo="Ken-SRE",
+            visibility="public",
+            workflow_path=".github/workflows/python-publish.yml",
+            job_id="deploy",
+            triggers=["release"],
+            secrets=["PYPI_API_TOKEN"],
+            text="pypa/gh-action-pypi-publish",
+        )
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "PYPI_API_TOKEN",
+                "Ken-SRE",
+                self.empty_scopes,
+                ".github/workflows/python-publish.yml",
+            ),
+            classified,
+        )
+        evidence = {
+            "secretless_migrations": [
+                {
+                    "migration_id": "ken-sre-pypi",
+                    "repository": "Ken-SRE",
+                    "workflow": ".github/workflows/python-publish.yml",
+                    "github_secret_name": "PYPI_API_TOKEN",
+                    "migration_action": "oidc-trusted-publisher",
+                    "target_vault": None,
+                    "target_item": None,
+                    "target_field": None,
+                    "target_runner_class": "public-github-hosted",
+                    "required_permissions": {
+                        "contents": "read",
+                        "id-token": "write",
+                    },
+                    "provider_setup_steps": ["Register the exact trusted publisher."],
+                    "downstream_update_steps": ["Remove password input."],
+                    "live_verification_steps": ["Publish and verify the release."],
+                    "retirement_steps": ["Revoke the predecessor token."],
+                }
+            ]
+        }
+        migrated = aw.apply_secretless_migration(entry, evidence)
+        self.assertEqual(migrated["authority_status"], "planned-secretless")
+        self.assertEqual(migrated["migration_action"], "oidc-trusted-publisher")
+        self.assertIsNone(migrated["target_vault"])
+        self.assertEqual(migrated["consumer"], "public-github-hosted")
+        for field in (
+            "resolution_class",
+            "authority_owner",
+            "unresolved_reason",
+            "handoff_group",
+        ):
+            self.assertNotIn(field, migrated)
 
 
 if __name__ == "__main__":

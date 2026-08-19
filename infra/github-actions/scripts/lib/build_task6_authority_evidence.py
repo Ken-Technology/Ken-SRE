@@ -128,10 +128,56 @@ def _steps(action: str, repository: str, name: str) -> list[str]:
         ]
     if action == "reconstruct":
         return [
-            f"Reconstruct {name} from the approved metadata source, write it through a concealed handoff, and verify existence only."
+            f"Reconstruct {repository}/{name} from the approved metadata source and populate the exact target 1Password field through the temporary migration writer without printing it.",
+            f"Cut every {repository} consumer of {name} over to the local 1Password broker, verify the live consumer, and only then delete the GitHub secret field.",
         ]
     return [
-        f"Copy {name} through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+        f"Copy {repository}/{name} from its exact readable authority into the exact target 1Password field through the temporary migration writer without printing it.",
+        f"Cut every {repository} consumer of {name} over to the local 1Password broker, verify the live consumer, and only then delete the GitHub secret field.",
+    ]
+
+
+def _unresolved_steps(
+    repository: str,
+    name: str,
+    target_vault: str,
+    resolution_class: str,
+    handoff_group: str,
+) -> list[str]:
+    coordinate = f"{repository}/{name} in {target_vault} ({handoff_group})"
+    if resolution_class == "workflow-reference-removal":
+        return [
+            f"Remove every unused {repository} workflow reference to {name} and verify the affected workflow still completes.",
+            f"After the default-branch removal is live and verified, delete the matching GitHub secret field for {repository}; do not create a 1Password field.",
+        ]
+    if resolution_class == "independent-trust-authority":
+        return [
+            f"Create a new authority dedicated to {coordinate}; do not reuse an authority from another trust boundary.",
+            f"Populate the exact target 1Password field through the temporary migration writer, then cut the exact workflow consumers over to the local broker.",
+            f"Verify the live consumer, then delete the GitHub secret field and revoke the predecessor authority after the rollback window.",
+        ]
+    if resolution_class == "provider-rotation":
+        return [
+            f"Create the provider replacement for {coordinate} and populate the exact target 1Password field through the temporary migration writer.",
+            f"Cut the exact workflow consumers over to the local broker and verify the live provider operation.",
+            f"Only after verification, delete the GitHub secret field and revoke the predecessor provider credential.",
+        ]
+    if resolution_class == "target-system-readback":
+        return [
+            f"Read {coordinate} directly from the named target authority into the exact target 1Password field without displaying it.",
+            f"Cut the exact workflow consumers over to the local broker and verify the live target operation.",
+            f"Only after verification, delete the GitHub secret field; retain the target authority unless its owner requires replacement.",
+        ]
+    if resolution_class == "operator-supplied-config":
+        return [
+            f"Have the named operator supply or reconstruct {coordinate} directly into the exact target 1Password field without chat or terminal output.",
+            f"Cut the exact workflow consumers over to the local broker and verify the live operation.",
+            f"Only after verification, delete the GitHub secret field; retain the authoritative operator configuration record.",
+        ]
+    return [
+        f"The named owner must identify a readable authority or approved replacement for {coordinate} before migration; stop if that authority cannot be proven.",
+        f"Populate only the proven target 1Password field through the temporary migration writer, then cut the exact workflow consumers over to the local broker.",
+        f"Verify the live consumer before deleting the GitHub secret field or revoking any predecessor.",
     ]
 
 
@@ -180,8 +226,10 @@ def _unresolved_annotation(
     handoff_group: str,
     reason: str,
     provider_rotation_steps: list[str] | None = None,
+    downstream_update_steps: list[str] | None = None,
     workflow: str | None = None,
     data_classification: str = "credential",
+    required_runtime_identity: str | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "annotation_id": (
@@ -196,10 +244,20 @@ def _unresolved_annotation(
         "handoff_group": handoff_group,
         "unresolved_reason": reason,
         "provider_rotation_steps": provider_rotation_steps,
+        "downstream_update_steps": downstream_update_steps
+        or _unresolved_steps(
+            repository,
+            name,
+            target_vault,
+            resolution_class,
+            handoff_group,
+        ),
         "data_classification": data_classification,
     }
     if workflow:
         result["workflow"] = workflow
+    if required_runtime_identity:
+        result["required_runtime_identity"] = required_runtime_identity
     return result
 
 
@@ -209,9 +267,168 @@ def _load_metadata(evidence_dir: Path, name: str) -> dict[str, Any]:
         parsed = json.loads(path.read_text())
     except Exception as error:
         raise ValueError(f"source metadata artifact unavailable: {name}") from error
-    if not isinstance(parsed, dict) or parsed.get("schema_version") != 1:
-        raise ValueError(f"invalid source metadata artifact: {name}")
+    _validate_raw_metadata(name, parsed)
     return parsed
+
+
+def _reject_forbidden_raw_fields(value: Any, path: str) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if normalized in {
+                "value",
+                "secret",
+                "password",
+                "token",
+                "note",
+                "notes",
+            } or normalized.endswith(("_hash", "_length", "_prefix")):
+                raise ValueError(f"forbidden raw metadata field at {path}.{key}")
+            _reject_forbidden_raw_fields(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_forbidden_raw_fields(child, f"{path}[{index}]")
+
+
+def _object(
+    value: Any, *, path: str, fields: dict[str, tuple[type, ...]]
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"invalid raw metadata object at {path}")
+    unexpected = sorted(set(value) - set(fields))
+    if unexpected:
+        raise ValueError(
+            f"unexpected raw metadata field at {path}.{unexpected[0]}"
+        )
+    missing = sorted(set(fields) - set(value))
+    if missing:
+        raise ValueError(f"missing raw metadata field at {path}.{missing[0]}")
+    for key, allowed_types in fields.items():
+        if not isinstance(value[key], allowed_types):
+            raise ValueError(f"invalid raw metadata type at {path}.{key}")
+    return value
+
+
+def _list_of(value: Any, expected_type: type, path: str) -> list[Any]:
+    if not isinstance(value, list) or not all(
+        isinstance(item, expected_type) for item in value
+    ):
+        raise ValueError(f"invalid raw metadata list at {path}")
+    return value
+
+
+def _validate_raw_metadata(name: str, parsed: Any) -> None:
+    _reject_forbidden_raw_fields(parsed, name)
+    if name == "task-6-op-env-key-metadata.json":
+        root = _object(
+            parsed,
+            path=name,
+            fields={"schema_version": (int,), "collection_policy": (str,), "items": (list,)},
+        )
+        for item_index, item_value in enumerate(_list_of(root["items"], dict, f"{name}.items")):
+            item_path = f"{name}.items[{item_index}]"
+            item = _object(
+                item_value,
+                path=item_path,
+                fields={
+                    "schema_version": (int,),
+                    "vault": (str,),
+                    "item": (str,),
+                    "keys": (list,),
+                },
+            )
+            for key_index, key_value in enumerate(_list_of(item["keys"], dict, f"{item_path}.keys")):
+                _object(
+                    key_value,
+                    path=f"{item_path}.keys[{key_index}]",
+                    fields={
+                        "name": (str,),
+                        "declared_type": (str,),
+                        "value_present": (bool,),
+                    },
+                )
+    elif name == "task-6-op-field-metadata.json":
+        root = _object(
+            parsed,
+            path=name,
+            fields={"schema_version": (int,), "collection_policy": (str,), "items": (list,)},
+        )
+        for item_index, item_value in enumerate(_list_of(root["items"], dict, f"{name}.items")):
+            item_path = f"{name}.items[{item_index}]"
+            item = _object(
+                item_value,
+                path=item_path,
+                fields={
+                    "schema_version": (int,),
+                    "vault": (str,),
+                    "item": (str,),
+                    "category": (str,),
+                    "fields": (list,),
+                    "files": (list,),
+                },
+            )
+            for field_index, field_value in enumerate(_list_of(item["fields"], dict, f"{item_path}.fields")):
+                _object(
+                    field_value,
+                    path=f"{item_path}.fields[{field_index}]",
+                    fields={
+                        "label": (str,),
+                        "field_type": (str,),
+                        "purpose": (str, type(None)),
+                        "section": (str, type(None)),
+                        "value_present": (bool,),
+                    },
+                )
+            for file_index, file_value in enumerate(_list_of(item["files"], dict, f"{item_path}.files")):
+                _object(
+                    file_value,
+                    path=f"{item_path}.files[{file_index}]",
+                    fields={"name": (str,)},
+                )
+    elif name == "task-6-worldstream-key-metadata.json":
+        root = _object(
+            parsed,
+            path=name,
+            fields={
+                "schema_version": (int,),
+                "host": (str,),
+                "scoped_user": (str,),
+                "collection_policy": (str,),
+                "keys": (list,),
+            },
+        )
+        for key_index, key_value in enumerate(_list_of(root["keys"], dict, f"{name}.keys")):
+            _object(
+                key_value,
+                path=f"{name}.keys[{key_index}]",
+                fields={
+                    "file": (str,),
+                    "key_path": (str,),
+                    "value_type": (str,),
+                    "exists": (bool,),
+                    "readable": (bool,),
+                },
+            )
+    elif name == "task-6-connection-structure.json":
+        root = _object(
+            parsed,
+            path=name,
+            fields={
+                "schema_version": (int,),
+                "host": (str,),
+                "scoped_user": (str,),
+                "file": (str,),
+                "collection_policy": (str,),
+                "mysql_components": (list,),
+                "mongo_connection_present": (bool,),
+                "mongo_database_component_present": (bool,),
+            },
+        )
+        _list_of(root["mysql_components"], str, f"{name}.mysql_components")
+    else:
+        raise ValueError(f"unregistered raw metadata schema: {name}")
+    if parsed.get("schema_version") != 1:
+        raise ValueError(f"invalid source metadata artifact: {name}")
 
 
 def _source_is_proven(source: dict[str, Any], artifact: dict[str, Any]) -> bool:
@@ -301,6 +518,7 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     sources: dict[str, dict[str, Any]] = {}
     mappings: list[dict[str, Any]] = []
     unresolved_annotations: list[dict[str, Any]] = []
+    secretless_migrations: list[dict[str, Any]] = []
 
     def add_source(source: tuple[str, dict[str, Any]]) -> str:
         source_id, metadata = source
@@ -319,6 +537,7 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         handoff_group: str,
         reason: str,
         provider_rotation_steps: list[str] | None = None,
+        downstream_update_steps: list[str] | None = None,
         data_classification: str = "credential",
     ) -> None:
         for name in names:
@@ -332,6 +551,7 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
                     handoff_group=handoff_group,
                     reason=reason,
                     provider_rotation_steps=provider_rotation_steps,
+                    downstream_update_steps=downstream_update_steps,
                     data_classification=data_classification,
                 )
             )
@@ -631,7 +851,6 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         ("ken-scraping", ("PYPI_USERNAME", "PYPI_PASSWORD"), "PyPI", "the Firecrawl Python package", "publishing/pypi"),
         ("ken-scraping", ("RUBYGEMS_API_KEY",), "RubyGems", "the Firecrawl Ruby gem", "publishing/rubygems"),
         ("ken-scraping", ("CRATES_IO_TOKEN",), "crates.io", "the Firecrawl Rust crate", "publishing/crates-io"),
-        ("Ken-SRE", ("PYPI_API_TOKEN",), "PyPI", "the Ken-SRE Python package", "publishing/pypi"),
     ]
     for repository, names, provider, scope, group in provider_publications:
         annotate_many(
@@ -661,15 +880,64 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         reason="The publisher pushes over SSH to firecrawl/firecrawl-php, but GitHub exposes only the deploy-key secret name.",
         provider_rotation_steps=github_deploy_key_steps,
     )
-    annotate_many(
-        "ken-ai-plugin",
-        ("COLD_EMAIL_SKILLS_DEPLOY_KEY",),
-        PRODUCTION_VAULT,
-        resolution_class="provider-rotation",
-        authority_owner="GitHub Ken-Technology/cold-email-skills repository administrator",
-        handoff_group="publishing/cold-email-skills-deploy-key",
-        reason="The publisher pushes over SSH to Ken-Technology/cold-email-skills, but GitHub exposes only the deploy-key secret name.",
-        provider_rotation_steps=github_deploy_key_steps,
+    secretless_migrations.extend(
+        [
+            {
+                "migration_id": "ken-sre-pypi-trusted-publisher",
+                "repository": "Ken-SRE",
+                "workflow": ".github/workflows/python-publish.yml",
+                "github_secret_name": "PYPI_API_TOKEN",
+                "migration_action": "oidc-trusted-publisher",
+                "target_vault": None,
+                "target_item": None,
+                "target_field": None,
+                "target_runner_class": "public-github-hosted",
+                "required_permissions": {"contents": "read", "id-token": "write"},
+                "provider_setup_steps": [
+                    "In the PyPI Ken-SRE project, add a Trusted Publisher for owner Ken-Technology, repository Ken-SRE, workflow python-publish.yml, and the exact GitHub environment if the workflow names one."
+                ],
+                "downstream_update_steps": [
+                    "Keep the publisher on a GitHub-hosted runner, set top-level workflow permissions to contents: read and id-token: write, and configure pypa/gh-action-pypi-publish without a password input or PYPI_API_TOKEN reference."
+                ],
+                "live_verification_steps": [
+                    "Publish one intended Ken-SRE release through Trusted Publishing and verify the expected PyPI project version and provenance before removing the old path."
+                ],
+                "retirement_steps": [
+                    "After the verified OIDC publish, revoke the predecessor PyPI credential and delete PYPI_API_TOKEN from GitHub."
+                ],
+            },
+            {
+                "migration_id": "ken-ai-plugin-pull-publisher",
+                "repository": "ken-ai-plugin",
+                "workflow": ".github/workflows/publish-cold-email-skills.yml",
+                "github_secret_name": "COLD_EMAIL_SKILLS_DEPLOY_KEY",
+                "migration_action": "pull-based-publisher",
+                "target_vault": None,
+                "target_item": None,
+                "target_field": None,
+                "target_runner_class": "public-github-hosted",
+                "required_permissions": {"contents": "write"},
+                "provider_setup_steps": [
+                    "Implement Task 7 in public Ken-Technology/cold-email-skills before changing the source publisher."
+                ],
+                "downstream_update_steps": [
+                    "In cold-email-skills, add a GitHub-hosted scheduled and workflow_dispatch publisher that checks out public ken-ai-plugin@main, runs the existing deterministic build and tests, and commits the generated tree with the target repository GITHUB_TOKEN."
+                ],
+                "live_verification_steps": [
+                    "Run the pull publisher, compare its generated tree with the existing source-push output, and verify a target-repository commit is created with no deploy key."
+                ],
+                "retirement_steps": [
+                    "Only after equivalent live output is verified, remove ken-ai-plugin's source-push workflow and COLD_EMAIL_SKILLS_DEPLOY_KEY, then remove the predecessor deploy key from cold-email-skills."
+                ],
+                "cross_repo_task": {
+                    "task": "Task 7",
+                    "source_repository": "Ken-Technology/ken-ai-plugin",
+                    "source_ref": "main",
+                    "target_repository": "Ken-Technology/cold-email-skills",
+                    "authentication": "GITHUB_TOKEN",
+                },
+            },
+        ]
     )
 
     github_pat_steps = [
@@ -1095,7 +1363,6 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
 
     for repository, names, owner, group in (
         ("ken-brain", ("SSH_KNOWN_HOSTS",), "Ken Brain production host administrator", "brain/deploy-host-key"),
-        ("ken-hermes-clickup", ("DEPLOY_SSH_KNOWN_HOSTS",), "Ken Hermes deployment host administrator", "hermes/deploy-host-key"),
         ("ken-help", ("DEPLOY_SSH_KEY", "DEPLOY_KNOWN_HOSTS", "DEPLOY_USER", "DEPLOY_HOST", "DEPLOY_PATH"), "help.ken.so host administrator", "help/deploy-target"),
         ("ken-daily", ("DEPLOY_HOST", "DEPLOY_USER", "DEPLOY_SSH_KEY"), "Ken Daily production host administrator", "daily/deploy-target"),
         ("ken-analytics", ("DEPLOY_USER", "DEPLOY_SSH_KEY"), "Ken Analytics production VM administrator", "analytics/deploy-target"),
@@ -1109,6 +1376,35 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
             authority_owner=owner,
             handoff_group=group,
             reason="The default-branch workflow identifies the target system, but no exact readable deployment bundle was found in approved evidence.",
+        )
+
+    hermes_steps = [
+        "Recover or rotate the dedicated kenhermes-deploy host, private key, and known-host authority into the Ken Deploy Production item for ken-hermes-clickup; do not substitute root or another service account.",
+        "Cut the Hermes deploy workflow over through the production broker while preserving SSH user kenhermes-deploy and the existing narrow sudo contract.",
+        "Run one Hermes deployment and verify the service plus the allow-listed sudo operation before deleting any GitHub field.",
+        "Delete the four Hermes GitHub deployment fields only after the dedicated identity succeeds, then revoke any predecessor dedicated key from authorized_keys.",
+    ]
+    for name in (
+        "DEPLOY_HOST",
+        "DEPLOY_USER",
+        "DEPLOY_SSH_KEY",
+        "DEPLOY_SSH_KNOWN_HOSTS",
+    ):
+        unresolved_annotations.append(
+            _unresolved_annotation(
+                "ken-hermes-clickup",
+                name,
+                PRODUCTION_VAULT,
+                resolution_class="target-system-readback",
+                authority_owner="Ken Hermes dedicated deployment identity owner",
+                handoff_group="hermes/dedicated-deploy-identity",
+                reason="The workflow requires dedicated user kenhermes-deploy, but no exact dedicated host/key/known-host authority was proven. Root credentials are forbidden.",
+                downstream_update_steps=hermes_steps,
+                data_classification=(
+                    "identifier" if name in {"DEPLOY_HOST", "DEPLOY_USER"} else "credential"
+                ),
+                required_runtime_identity="kenhermes-deploy",
+            )
         )
 
     annotate_many(
@@ -1419,21 +1715,6 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
             )
         )
 
-    for name, source_ref, action, classification in (
-        ("DEPLOY_HOST", search_root_host, "move-to-variable", "identifier"),
-        ("DEPLOY_USER", search_root_user, "move-to-variable", "identifier"),
-        ("DEPLOY_SSH_KEY", search_root_key, "copy", "credential"),
-    ):
-        mappings.append(
-            _mapping(
-                "ken-hermes-clickup",
-                name,
-                source_ref,
-                action=action,
-                classification=classification,
-            )
-        )
-
     proxy_api_key = add_source(
         _op_source("Development", "Proxy-cheap", "API Key", "STRING")
     )
@@ -1463,6 +1744,9 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     annotation_ids = [row["annotation_id"] for row in unresolved_annotations]
     if len(annotation_ids) != len(set(annotation_ids)):
         raise ValueError("duplicate unresolved authority annotation selector")
+    migration_ids = [row["migration_id"] for row in secretless_migrations]
+    if len(migration_ids) != len(set(migration_ids)):
+        raise ValueError("duplicate secretless migration selector")
     _validate_source_metadata(sources, evidence_dir)
 
     return {
@@ -1473,6 +1757,9 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         "mappings": sorted(mappings, key=lambda row: row["mapping_id"]),
         "unresolved_annotations": sorted(
             unresolved_annotations, key=lambda row: row["annotation_id"]
+        ),
+        "secretless_migrations": sorted(
+            secretless_migrations, key=lambda row: row["migration_id"]
         ),
         "unresolved_observations": [
             {

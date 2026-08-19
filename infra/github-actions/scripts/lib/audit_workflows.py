@@ -435,6 +435,34 @@ def apply_secret_consumer(entry: dict[str, Any], classified: dict[str, Any]) -> 
         entry["migration_action"] = "replace-bootstrap"
         entry["replacement_required"] = True
         entry["alias_status"] = "not-applicable"
+        identity = {
+            "ken-ci-standard": "ken-ci-runtime",
+            "ken-ci-docker": "ken-ci-runtime",
+            "ken-ci-heavy": "ken-ci-runtime",
+            "ken-deploy-nonproduction": "ken-deploy-nonproduction",
+            "ken-deploy-production": "ken-deploy-production",
+        }.get(
+            str(entry.get("consumer") or ""),
+            "the exact workflow-scoped runtime service account",
+        )
+        entry["downstream_update_steps"] = [
+            f"Create or confirm {identity} with read_items only to its single named vault; never copy the predecessor bootstrap credential into a target vault.",
+            f"Install the new one-time credential through hidden input as the VM systemd credential, then cut {entry['repository']}/{entry['workflow']} over to the local broker.",
+            f"Live-verify the broker-backed workflow before deleting {entry['repository']}/{OP_BOOTSTRAP_SECRET} from GitHub or revoking the predecessor bootstrap credential.",
+        ]
+    if entry.get("authority_status") == "unresolved" and not entry.get(
+        "downstream_update_steps"
+    ):
+        target = entry.get("target_vault") or "an explicitly approved trust-domain target"
+        coordinate = (
+            f"{entry['repository']}/{entry['github_secret_name']} "
+            f"for {entry['workflow']}"
+        )
+        entry["downstream_update_steps"] = [
+            f"Identify a readable authority or approved replacement for {coordinate}; stop if its trust boundary cannot be proven.",
+            f"Populate the exact field in {target} through the temporary migration writer, cut the workflow over to the local broker, and verify the live consumer.",
+            f"Only after live verification, delete the matching GitHub secret field and revoke a predecessor when the approved recovery class requires it.",
+        ]
     return entry
 
 
@@ -447,6 +475,94 @@ def _reject_value_bearing_evidence(value: Any, path: str = "evidence") -> None:
     elif isinstance(value, list):
         for index, child in enumerate(value):
             _reject_value_bearing_evidence(child, f"{path}[{index}]")
+
+
+def apply_secretless_migration(
+    entry: dict[str, Any], evidence: dict[str, Any] | None
+) -> dict[str, Any]:
+    evidence = evidence or {}
+    _reject_value_bearing_evidence(evidence)
+    matches = [
+        row
+        for row in evidence.get("secretless_migrations") or []
+        if isinstance(row, dict)
+        and row.get("repository") == entry.get("repository")
+        and row.get("github_secret_name") == entry.get("github_secret_name")
+        and row.get("workflow") in {None, entry.get("workflow")}
+    ]
+    if not matches:
+        return entry
+    if len(matches) != 1:
+        raise ValueError(
+            f"multiple secretless migrations for {entry.get('repository')}:"
+            f"{entry.get('workflow')}:{entry.get('github_secret_name')}"
+        )
+    migration = matches[0]
+    action = str(migration.get("migration_action") or "")
+    if action not in {"oidc-trusted-publisher", "pull-based-publisher"}:
+        raise ValueError(f"unsupported secretless migration action: {action!r}")
+    if any(migration.get(key) is not None for key in ("target_vault", "target_item", "target_field")):
+        raise ValueError("secretless migration must not target 1Password")
+    if migration.get("target_runner_class") != "public-github-hosted":
+        raise ValueError("public secretless migration must remain GitHub-hosted")
+    if entry.get("consumer") != "public-github-hosted":
+        raise ValueError("secretless migration matched a non-public consumer")
+    required_permissions = migration.get("required_permissions")
+    if not isinstance(required_permissions, dict) or not required_permissions:
+        raise ValueError("secretless migration requires explicit workflow permissions")
+    if action == "oidc-trusted-publisher" and required_permissions.get("id-token") != "write":
+        raise ValueError("OIDC trusted publisher requires id-token: write")
+    if action == "pull-based-publisher":
+        cross_repo = migration.get("cross_repo_task")
+        if (
+            not isinstance(cross_repo, dict)
+            or cross_repo.get("task") != "Task 7"
+            or cross_repo.get("authentication") != "GITHUB_TOKEN"
+        ):
+            raise ValueError("pull-based publisher requires the exact Task 7 contract")
+    for key in (
+        "provider_setup_steps",
+        "downstream_update_steps",
+        "live_verification_steps",
+        "retirement_steps",
+    ):
+        steps = migration.get(key)
+        if not isinstance(steps, list) or not steps or not all(
+            isinstance(step, str) and step.strip() for step in steps
+        ):
+            raise ValueError(f"secretless migration requires nonempty {key}")
+
+    for key in (
+        "resolution_class",
+        "authority_owner",
+        "unresolved_reason",
+        "handoff_group",
+        "authority_annotation_id",
+    ):
+        entry.pop(key, None)
+    entry["source_authority"] = f"planned-secretless://{migration['migration_id']}"
+    entry["source_readable"] = False
+    entry["authority_status"] = "planned-secretless"
+    entry["migration_action"] = action
+    entry["secretless_migration_id"] = migration["migration_id"]
+    entry["target_vault"] = None
+    entry["target_item"] = None
+    entry["target_field"] = None
+    entry["field_type"] = None
+    entry["classification"] = "secretless-publication"
+    entry["data_classification"] = "secretless"
+    entry["rotation_required"] = False
+    entry["provider_rotation_steps"] = None
+    entry["provider_setup_steps"] = migration["provider_setup_steps"]
+    entry["downstream_update_steps"] = migration["downstream_update_steps"]
+    entry["live_verification_steps"] = migration["live_verification_steps"]
+    entry["retirement_steps"] = migration["retirement_steps"]
+    entry["required_permissions"] = required_permissions
+    entry["cross_repo_task"] = migration.get("cross_repo_task")
+    entry["replacement_required"] = True
+    entry["alias_group"] = None
+    entry["alias_status"] = "not-applicable"
+    return entry
 
 
 def apply_authority_evidence(
@@ -550,6 +666,14 @@ def apply_authority_evidence(
     entry["source_ref"] = source_ref
     if mapping.get("mapping_id"):
         entry["authority_mapping_id"] = mapping["mapping_id"]
+    for key in (
+        "resolution_class",
+        "authority_owner",
+        "unresolved_reason",
+        "handoff_group",
+        "authority_annotation_id",
+    ):
+        entry.pop(key, None)
     entry["authority_status"] = (
         "verified-reconstructable" if action == "reconstruct" else "verified-readable"
     )
@@ -628,6 +752,13 @@ def apply_unresolved_annotation(
     ):
         raise ValueError("incomplete unresolved authority annotation")
     steps = annotation.get("provider_rotation_steps")
+    downstream = annotation.get("downstream_update_steps")
+    if not isinstance(downstream, list) or not downstream or not all(
+        isinstance(step, str) and step.strip() for step in downstream
+    ):
+        raise ValueError(
+            "unresolved authority annotation requires nonempty downstream_update_steps"
+        )
     if resolution_class == "provider-rotation":
         if not isinstance(steps, list) or not steps or not all(
             isinstance(step, str) and step.strip() for step in steps
@@ -637,6 +768,9 @@ def apply_unresolved_annotation(
         entry["migration_action"] = "rotate-at-provider"
     elif steps is not None:
         raise ValueError("provider rotation steps require provider-rotation classification")
+    elif resolution_class == "independent-trust-authority":
+        entry["rotation_required"] = True
+        entry["migration_action"] = "create-independent-authority"
     elif resolution_class == "workflow-reference-removal":
         entry["rotation_required"] = False
         entry["migration_action"] = "remove-unused-reference"
@@ -647,6 +781,11 @@ def apply_unresolved_annotation(
     entry["handoff_group"] = handoff_group
     entry["unresolved_reason"] = reason
     entry["provider_rotation_steps"] = steps
+    entry["downstream_update_steps"] = downstream
+    if annotation.get("required_runtime_identity"):
+        entry["required_runtime_identity"] = annotation[
+            "required_runtime_identity"
+        ]
     if annotation.get("data_classification"):
         entry["data_classification"] = annotation["data_classification"]
     return entry
@@ -657,7 +796,8 @@ def validate_authority_mapping_coverage(
 ) -> None:
     mappings = evidence.get("mappings") or []
     annotations = evidence.get("unresolved_annotations") or []
-    if not mappings and not annotations:
+    migrations = evidence.get("secretless_migrations") or []
+    if not mappings and not annotations and not migrations:
         return
     mapping_ids: list[str] = []
     for mapping in mappings:
@@ -696,6 +836,25 @@ def validate_authority_mapping_coverage(
     unused_annotations = sorted(set(annotation_ids) - used_annotations)
     if unused_annotations:
         raise ValueError(f"unused authority annotations: {', '.join(unused_annotations)}")
+
+    migration_ids: list[str] = []
+    for migration in migrations:
+        if not isinstance(migration, dict):
+            raise ValueError("secretless migration must be an object")
+        migration_id = str(migration.get("migration_id") or "").strip()
+        if not migration_id:
+            raise ValueError("secretless migration requires migration_id")
+        migration_ids.append(migration_id)
+    if len(migration_ids) != len(set(migration_ids)):
+        raise ValueError("duplicate secretless migration_id")
+    used_migrations = {
+        str(entry["secretless_migration_id"])
+        for entry in entries
+        if entry.get("secretless_migration_id")
+    }
+    unused_migrations = sorted(set(migration_ids) - used_migrations)
+    if unused_migrations:
+        raise ValueError(f"unused secretless migrations: {', '.join(unused_migrations)}")
 
 
 def load_billing_evidence(path: Path) -> dict[str, Any]:
@@ -1000,7 +1159,13 @@ def build_input_manifest(
 
 def semantic_output_digest(output_dir: Path) -> str:
     docs: dict[str, Any] = {}
-    for name in ("repositories.yaml", "runners.yaml", "secrets.yaml", "input-manifest.yaml"):
+    for name in (
+        "repositories.yaml",
+        "runners.yaml",
+        "secrets.yaml",
+        "secret-handoff.yaml",
+        "input-manifest.yaml",
+    ):
         path = output_dir / name
         if not path.exists():
             continue
@@ -1556,6 +1721,305 @@ def secret_authority(
     }
 
 
+def _nonempty_steps(value: Any, label: str) -> list[str]:
+    if not isinstance(value, list) or not value or not all(
+        isinstance(step, str) and step.strip() for step in value
+    ):
+        raise ValueError(f"handoff row requires nonempty {label}")
+    return list(value)
+
+
+def _handoff_procedure(entry: dict[str, Any]) -> dict[str, list[str]]:
+    repository = str(entry["repository"])
+    name = str(entry["github_secret_name"])
+    workflow = str(entry["workflow"])
+    action = str(entry["migration_action"])
+    source = str(entry.get("source_authority") or "unproven authority")
+    target_vault = entry.get("target_vault")
+    target_item = entry.get("target_item")
+    target_field = entry.get("target_field")
+    target = (
+        f"{target_vault}/{target_item}/{target_field}"
+        if all((target_vault, target_item, target_field))
+        else "no 1Password target"
+    )
+    coordinate = f"{repository}/{name}"
+
+    if entry.get("authority_status") == "planned-secretless":
+        return {
+            "source_to_target_steps": _nonempty_steps(
+                entry.get("provider_setup_steps"), "provider_setup_steps"
+            ),
+            "broker_or_workflow_cutover_steps": _nonempty_steps(
+                entry.get("downstream_update_steps"), "downstream_update_steps"
+            ),
+            "live_verification_steps": _nonempty_steps(
+                entry.get("live_verification_steps"), "live_verification_steps"
+            ),
+            "github_deletion_steps": _nonempty_steps(
+                entry.get("retirement_steps"), "retirement_steps"
+            ),
+            "revocation_steps": [
+                f"Complete the retirement steps for {coordinate} only after the secretless publisher passes its live verification."
+            ],
+        }
+
+    if action == "replace-bootstrap":
+        identity_by_consumer = {
+            "ken-ci-standard": "ken-ci-runtime",
+            "ken-ci-docker": "ken-ci-runtime",
+            "ken-ci-heavy": "ken-ci-runtime",
+            "ken-deploy-nonproduction": "ken-deploy-nonproduction",
+            "ken-deploy-production": "ken-deploy-production",
+        }
+        identity = identity_by_consumer.get(
+            str(entry.get("consumer") or ""), "the exact workflow-scoped runtime account"
+        )
+        return {
+            "source_to_target_steps": [
+                f"Create or confirm {identity} as the dedicated one-vault read_items-only runtime service account; never copy the old GitHub bootstrap credential into a target vault.",
+                f"Save its one-time credential only in Cristian's built-in Private vault and install it as the VM systemd credential for {workflow} through hidden input.",
+            ],
+            "broker_or_workflow_cutover_steps": [
+                f"Cut {repository}/{workflow} over to the local broker under {identity}; do not store a 1Password service-account credential in GitHub."
+            ],
+            "live_verification_steps": [
+                f"Run {repository}/{workflow}, verify the exact 1Password references resolve under {identity}, and confirm the job never reads the old GitHub field."
+            ],
+            "github_deletion_steps": [
+                f"Delete {repository}/{name} from GitHub only after the broker-backed workflow is live-verified and the rollback record is captured."
+            ],
+            "revocation_steps": [
+                f"Revoke the predecessor bootstrap service-account credential after every workflow that used {repository}/{name} has passed the broker-backed verification."
+            ],
+        }
+
+    if action == "move-to-variable":
+        return {
+            "source_to_target_steps": [
+                f"Reconstruct {coordinate} from {source} and create the exact repository Actions variable {name}; no 1Password field is created."
+            ],
+            "broker_or_workflow_cutover_steps": _nonempty_steps(
+                entry.get("downstream_update_steps"), "downstream_update_steps"
+            ),
+            "live_verification_steps": [
+                f"Run every listed {repository} workflow and verify it reads vars.{name} successfully without displaying the setting."
+            ],
+            "github_deletion_steps": [
+                f"Delete the GitHub secret field {repository}/{name} only after every listed workflow uses vars.{name} and live verification passes."
+            ],
+            "revocation_steps": [
+                f"Retain {source}; this is a configuration move and has no predecessor credential to revoke."
+            ],
+        }
+
+    if action == "remove-unused-reference":
+        downstream = _nonempty_steps(
+            entry.get("downstream_update_steps"), "downstream_update_steps"
+        )
+        return {
+            "source_to_target_steps": [
+                f"Do not create a 1Password field for {coordinate}; remove the unused workflow reference."
+            ],
+            "broker_or_workflow_cutover_steps": downstream,
+            "live_verification_steps": [
+                f"Run the affected {repository} workflow after default-branch removal and verify equivalent behavior without {name}."
+            ],
+            "github_deletion_steps": [
+                f"Delete the GitHub secret field {repository}/{name} only after the reference-removal workflow is live and verified."
+            ],
+            "revocation_steps": [
+                f"Revoke any predecessor for {coordinate} only if the named owner confirms it has no other consumer."
+            ],
+        }
+
+    downstream = _nonempty_steps(
+        entry.get("downstream_update_steps"), "downstream_update_steps"
+    )
+    if entry.get("authority_status") in {
+        "verified-readable",
+        "verified-reconstructable",
+    }:
+        source_to_target = [
+            f"Populate {target} from {source} through task6-temporary-migration-writer without displaying the value."
+        ]
+    elif entry.get("resolution_class") == "provider-rotation":
+        source_to_target = _nonempty_steps(
+            entry.get("provider_rotation_steps"), "provider_rotation_steps"
+        )
+    elif entry.get("resolution_class") == "independent-trust-authority":
+        source_to_target = [downstream[0]]
+    else:
+        source_to_target = [
+            f"The named authority owner must prove or reconstruct {coordinate} for {target} before task6-temporary-migration-writer populates it; stop on ambiguity."
+        ]
+
+    rotation = entry.get("rotation_required") is True
+    return {
+        "source_to_target_steps": source_to_target,
+        "broker_or_workflow_cutover_steps": downstream,
+        "live_verification_steps": [
+            f"Run every listed {repository} workflow against its real consumer and verify {name} is obtained from {target} through the local broker without displaying it."
+        ],
+        "github_deletion_steps": [
+            f"Delete the matching GitHub secret field {repository}/{name} only after all listed workflow consumers pass live verification and rollback evidence is recorded."
+        ],
+        "revocation_steps": [
+            (
+                f"Revoke the predecessor authority for {coordinate} after the verified rollback window."
+                if rotation
+                else f"Retain {source} unless its named owner separately approves retirement; no revocation is implied by this handoff."
+            )
+        ],
+    }
+
+
+def build_secret_handoff(
+    entries: list[dict[str, Any]], organization: str, generated_at: str
+) -> dict[str, Any]:
+    grouped: dict[tuple[str, str, str | None], list[dict[str, Any]]] = {}
+    excluded = {"github-provided": 0, "preserved-existing": 0}
+    for entry in entries:
+        status = str(entry.get("authority_status") or "")
+        if status in excluded:
+            excluded[status] += 1
+            continue
+        key = (
+            str(entry.get("repository") or ""),
+            str(entry.get("github_secret_name") or ""),
+            entry.get("target_vault"),
+        )
+        grouped.setdefault(key, []).append(entry)
+
+    rows: list[dict[str, Any]] = []
+    invariant_fields = (
+        "authority_status",
+        "migration_action",
+        "resolution_class",
+        "authority_owner",
+        "handoff_group",
+        "source_authority",
+        "target_item",
+        "target_field",
+        "field_type",
+        "rotation_required",
+        "required_runtime_identity",
+    )
+    for (repository, name, target_vault), members in sorted(
+        grouped.items(), key=lambda item: (item[0][0].lower(), item[0][1], item[0][2] or "")
+    ):
+        first = members[0]
+        for member in members[1:]:
+            for field in invariant_fields:
+                if member.get(field) != first.get(field):
+                    raise ValueError(
+                        f"conflicting handoff coordinate {repository}/{name}/{target_vault}: {field}"
+                    )
+        procedure = _handoff_procedure(first)
+        workflows = sorted({str(member["workflow"]) for member in members})
+        consumers = sorted(
+            {str(member["consumer"]) for member in members if member.get("consumer")}
+        )
+        consuming_jobs = sorted(
+            {
+                f"{member['workflow']}#{job}"
+                for member in members
+                for job in member.get("consuming_jobs") or []
+            }
+        )
+        coordinate = f"{repository}|{name}|{target_vault or 'no-1password-target'}"
+        row = {
+            "coordinate": coordinate,
+            "repository": repository,
+            "github_secret_name": name,
+            "target_vault": target_vault,
+            "target_item": first.get("target_item"),
+            "target_field": first.get("target_field"),
+            "field_type": first.get("field_type"),
+            "authority_status": first.get("authority_status"),
+            "migration_action": first.get("migration_action"),
+            "resolution_class": first.get("resolution_class"),
+            "source_authority": first.get("source_authority"),
+            "authority_owner": first.get("authority_owner"),
+            "handoff_group": first.get("handoff_group") or coordinate,
+            "rotation_required": first.get("rotation_required"),
+            "required_runtime_identity": first.get("required_runtime_identity"),
+            "workflows": workflows,
+            "consumers": consumers,
+            "consuming_jobs": consuming_jobs,
+            **procedure,
+            "user_only_actions": [
+                f"Complete the named authority-owner or 1Password-admin action for {coordinate} without pasting a value into chat."
+            ],
+        }
+        for field in (
+            "source_to_target_steps",
+            "broker_or_workflow_cutover_steps",
+            "live_verification_steps",
+            "github_deletion_steps",
+            "revocation_steps",
+            "user_only_actions",
+        ):
+            _nonempty_steps(row[field], field)
+        rows.append(row)
+
+    def counts(field: str) -> dict[str, int]:
+        output: dict[str, int] = {}
+        for row in rows:
+            label = str(row.get(field) or "none")
+            output[label] = output.get(label, 0) + 1
+        return dict(sorted(output.items()))
+
+    return {
+        "schema_version": 1,
+        "organization": organization,
+        "generated_at": generated_at,
+        "policy": (
+            "One value-free row per repository, GitHub field name, and target trust-domain coordinate. "
+            "GitHub deletion and predecessor revocation are delayed until live verification passes."
+        ),
+        "runtime_access": {
+            "runtime_accounts": [
+                {
+                    "identity": "ken-ci-runtime",
+                    "vault": "Ken CI Runtime",
+                    "access": "read_items only",
+                },
+                {
+                    "identity": "ken-deploy-nonproduction",
+                    "vault": "Ken Deploy Nonproduction",
+                    "access": "read_items only",
+                },
+                {
+                    "identity": "ken-deploy-production",
+                    "vault": "Ken Deploy Production",
+                    "access": "read_items only",
+                },
+            ],
+            "temporary_writer": {
+                "role": "task6-temporary-migration-writer",
+                "identity": "separate existing 1Password admin or automation identity selected by Cristian",
+                "access": "temporary item-write only to the three named target vaults",
+                "grant_steps": [
+                    "Grant the selected identity temporary item-write access only to each target vault it must populate; grant no runtime token or Environment access."
+                ],
+                "revocation_and_readback_steps": [
+                    "After every handoff row is live-verified, remove all target-vault write grants from task6-temporary-migration-writer.",
+                    "Re-read 1Password permissions and confirm the writer has no target-vault access and each runtime account has read_items only for exactly its one named vault.",
+                ],
+            },
+        },
+        "counts": {
+            "rows": len(rows),
+            "excluded_no_action_references": excluded,
+            "by_authority_status": counts("authority_status"),
+            "by_target_vault": counts("target_vault"),
+            "by_handoff_group": counts("handoff_group"),
+        },
+        "rows": rows,
+    }
+
+
 def summarize_runners(raw: dict[str, Any], snapshot_time: str, groups: dict[str, Any] | None = None) -> dict[str, Any]:
     runners = raw.get("runners") or raw.get("items") or []
     group_name_by_id: dict[Any, str] = {}
@@ -1817,6 +2281,7 @@ def generate_from_inputs(
                         secret_authority(secret_name, name, listed_secrets, rel),
                         classified,
                     )
+                    entry = apply_secretless_migration(entry, authority_evidence)
                     entry = apply_authority_evidence(entry, authority_evidence)
                     entry = apply_unresolved_annotation(entry, authority_evidence)
                     entry["consuming_jobs"] = [job["id"]]
@@ -1924,17 +2389,24 @@ def generate_from_inputs(
         "authority_evidence_id": authority_evidence.get("evidence_id"),
         "entries": secret_entries,
     }
+    handoff_doc = build_secret_handoff(
+        secret_entries,
+        str(org.get("login") or "Ken-Technology"),
+        generated_at,
+    )
 
     manifest = build_input_manifest(inputs, snapshot_time)
     repositories_doc["input_hash"] = manifest["input_hash"]
     dump_yaml(output_dir / "repositories.yaml", repositories_doc)
     dump_yaml(output_dir / "runners.yaml", runners_doc)
     dump_yaml(output_dir / "secrets.yaml", secrets_doc)
+    dump_yaml(output_dir / "secret-handoff.yaml", handoff_doc)
     dump_yaml(output_dir / "input-manifest.yaml", manifest)
     return {
         "repositories": len(repositories),
         "jobs": sum(r["job_count"] for r in repositories),
         "secrets": len(secret_entries),
+        "handoff_rows": len(handoff_doc["rows"]),
         "input_hash": manifest["input_hash"],
         "output_dir": str(output_dir),
     }
