@@ -40,7 +40,10 @@ virtinst
 cloud-image-utils
 jq
 nftables
+dnsmasq-base
 ```
+
+`dnsmasq-base` is a Recommends of `libvirt-daemon-system` on Ubuntu 24.04, so `--no-install-recommends` does not install it. That package provides `/usr/sbin/dnsmasq`, which libvirt needs to start the NAT networks. The script requires that binary before `virsh net-start` and does not install the service-owning `dnsmasq` package.
 
 It enables `libvirtd`, creates the `ken-actions` directory pool, and creates two NAT networks:
 

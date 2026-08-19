@@ -65,7 +65,7 @@ readonly SEED_ROOT="${STORAGE_ROOT}/seed"
 readonly KVM_DEVICE="${PROVISION_HOST_KVM_DEVICE:-/dev/kvm}"
 readonly STATE_PARENT="${PROVISION_HOST_STATE_PARENT:-/var/tmp}"
 readonly POOL_NAME=ken-actions
-readonly PACKAGES=(qemu-kvm libvirt-daemon-system libvirt-clients virtinst cloud-image-utils jq nftables)
+readonly PACKAGES=(qemu-kvm libvirt-daemon-system libvirt-clients virtinst cloud-image-utils jq nftables dnsmasq-base)
 readonly GROK_UNITS=(
   actions.runner.Ken-Technology-ken-agents.hetzner-grok-review-ken-agents.service
   actions.runner.Ken-Technology-ken-ai-mcp.hetzner-grok-review-ken-ai-mcp.service
@@ -550,6 +550,7 @@ EOF
   [[ "${autostart}" == yes ]] || virsh net-autostart "${name}" >/dev/null
   active="$(awk -F: '/^Active:/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }' <<<"${info}")"
   if [[ "${active}" != yes ]]; then
+    command -v dnsmasq >/dev/null 2>&1 || die "Unable to find 'dnsmasq' binary in \$PATH"
     virsh net-start "${name}" >/dev/null
   fi
 }
@@ -962,7 +963,7 @@ printf 'Preflight passed: root %s GiB free, /mnt/data %s GiB free, memory %s GiB
 
 cat <<'EOF'
 Approved host changes:
-  packages: qemu-kvm libvirt-daemon-system libvirt-clients virtinst cloud-image-utils jq nftables
+  packages: qemu-kvm libvirt-daemon-system libvirt-clients virtinst cloud-image-utils jq nftables dnsmasq-base
   storage: /mnt/data/libvirt/images and /mnt/data/libvirt/seed
   pool: ken-actions -> /mnt/data/libvirt/images
   networks: ken-ci-net (virbr-ci) and ken-deploy-net (virbr-deploy)

@@ -361,6 +361,14 @@ if [[ "${1:-}" == -s ]]; then
 fi
 if [[ "${1:-}" == install ]]; then
   touch "${FAKE_STATE_ROOT}/packages-installed"
+  if [[ "${FAKE_SSH_PROFILE:-good}" != missing-dnsmasq ]]; then
+    for pkg in "$@"; do
+      if [[ "${pkg}" == dnsmasq-base ]]; then
+        printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${FAKE_BIN}/dnsmasq"
+        chmod +x "${FAKE_BIN}/dnsmasq"
+      fi
+    done
+  fi
 fi
 SH
 
@@ -555,6 +563,10 @@ case "${1:-}" in
     set_flag net "$2" auto "${value}"
     ;;
   net-start)
+    if ! command -v dnsmasq >/dev/null 2>&1; then
+      echo "Unable to find 'dnsmasq' binary in \$PATH" >&2
+      exit 1
+    fi
     [[ "$(flag net "$2" active)" == 0 ]] || { echo 'already active' >&2; exit 1; }
     set_flag net "$2" active 1
     ;;
@@ -591,6 +603,7 @@ SH
 
   reset_fixture() {
     rm -rf "${state_root}" "${data_root}" "${escape_root}"
+    rm -f "${fake_bin}/dnsmasq"
     mkdir -p "${state_root}" "${data_root}" "${escape_root}"
     : >"${ssh_log}"
     : >"${command_log}"
@@ -696,6 +709,7 @@ SH
     grep -Fq "ken-ci-net" <<<"${output}" &&
     grep -Fq "ken-deploy-net" <<<"${output}" &&
     grep -Fq "qemu-kvm" <<<"${output}" &&
+    grep -Fq "dnsmasq-base" <<<"${output}" &&
     [[ "$(grep -Fxc preflight "${ssh_log}")" == 1 ]] &&
     ! grep -Fxq apply "${ssh_log}"; then
     pass "dry run reports the approved plan without apply"
@@ -717,7 +731,7 @@ SH
     [[ "$(grep -Fxc preflight "${ssh_log}")" == 1 ]] &&
     [[ "$(grep -Fxc apply "${ssh_log}")" == 1 ]] &&
     grep -Fq "Host provisioning verified" <<<"${output}" &&
-    grep -Fq 'apt-get install -y --no-install-recommends qemu-kvm libvirt-daemon-system libvirt-clients virtinst cloud-image-utils jq nftables' "${command_log}" &&
+    grep -Fq 'apt-get install -y --no-install-recommends qemu-kvm libvirt-daemon-system libvirt-clients virtinst cloud-image-utils jq nftables dnsmasq-base' "${command_log}" &&
     grep -Fq "Rollback state:" <<<"${output}"; then
     pass "real embedded apply converges with exact packages and rollback evidence"
   else
@@ -777,6 +791,22 @@ SH
     pass "low post-apply memory fails closed"
   else
     fail "low post-apply memory was accepted"
+  fi
+
+  echo "== host dnsmasq dependency =="
+  exercise missing-dnsmasq root@167.235.8.250
+  if (( status != 0 )) &&
+    grep -Fq 'apt-get install' "${command_log}" &&
+    grep -Eq 'virsh net-(define|start)' "${command_log}" &&
+    grep -Fq "Unable to find 'dnsmasq' binary in \$PATH" <<<"${output}" &&
+    grep -Fq 'AUTO_ROLLBACK_STATUS=ok' <<<"${output}" &&
+    [[ ! -e "${state_root}/pool.ken-actions.exists" ]] &&
+    [[ ! -e "${state_root}/net.ken-ci-net.exists" ]] &&
+    [[ ! -e "${state_root}/net.ken-deploy-net.exists" ]]; then
+    pass "missing dnsmasq fails at network start and auto-rolls back"
+  else
+    fail "missing dnsmasq did not fail at network start with automatic rollback"
+    printf '%s\n' "${output}"
   fi
 
   exercise partial-failure root@167.235.8.250
