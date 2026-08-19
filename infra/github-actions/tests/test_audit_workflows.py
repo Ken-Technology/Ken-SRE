@@ -37,6 +37,31 @@ def classify(**overrides):
 
 
 class ScheduledSecretRoutingTests(unittest.TestCase):
+    def test_public_production_publish_secret_routes_to_deploy_vault(self):
+        classified = classify(
+            repo="Ken-SRE",
+            visibility="public",
+            workflow_path=".github/workflows/python-publish.yml",
+            job_id="deploy",
+            triggers=["release"],
+            secrets=["PYPI_API_TOKEN"],
+            text="pypa/gh-action-pypi-publish",
+        )
+        self.assertTrue(classified["production_impact"])
+        self.assertEqual(classified["target_runner_class"], "public-github-hosted")
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "PYPI_API_TOKEN",
+                "Ken-SRE",
+                {"org": [], "repo": ["PYPI_API_TOKEN"], "environment": []},
+                ".github/workflows/python-publish.yml",
+            ),
+            classified,
+        )
+        self.assertEqual(entry["target_vault"], "Ken Deploy Production")
+        self.assertEqual(entry["classification"], "deployment-production")
+        self.assertEqual(entry["consumer"], "public-github-hosted")
+
     def test_ken_agents_eval_weekly_goes_to_ken_deploy(self):
         result = classify(
             repo="ken-agents",
@@ -451,10 +476,7 @@ class RegenerationAndManifestTests(unittest.TestCase):
             self.assertEqual(manifest["input_hash"], second_manifest["input_hash"])
             self.assertJobsMatchClassifier(FIXTURE_DIR, a)
             expected = json.loads((FIXTURE_DIR / "expected-digests.json").read_text())
-            self.assertEqual(
-                aw.semantic_output_digest(first),
-                "b24471a7d5c4f58ddd5ba8ec24279dcd1cb2d7c5b4b1f4c721d626fa74c929de",
-            )
+            self.assertEqual(aw.semantic_output_digest(first), expected["semantic_digest"])
             self.assertEqual(manifest["input_hash"], expected["input_hash"])
 
     def test_non_workflow_input_change_changes_input_hash(self):
@@ -570,6 +592,10 @@ class RegenerationAndManifestTests(unittest.TestCase):
                 {"count": 9, "unchanged_until_teardown_gate": True},
             ),
             "onepassword_vaults": ("onepassword-vaults.json", ["Development", "Probe"]),
+            "authority_evidence": (
+                "authority-evidence.json",
+                {"schema_version": 1, "evidence_id": "probe", "mappings": []},
+            ),
             "collection_meta": (
                 "collection-meta.json",
                 {"collected_at": "2026-08-19T17:00:00Z", "mode": "offline-fixture"},
@@ -921,6 +947,346 @@ jobs:
         self.assertIsNone(entry["consumer"])
         self.assertEqual(entry["authority_status"], "unresolved")
         self.assertIsNone(entry["rotation_required"])
+
+
+class Task6AuthorityEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.empty_scopes = {"org": [], "repo": [], "environment": []}
+        self.production = {
+            "secret_class": "deploy-production",
+            "production_impact": True,
+            "target_runner_class": "ken-deploy-production",
+        }
+        self.ci = {
+            "secret_class": "ci-runtime",
+            "production_impact": False,
+            "target_runner_class": "ken-ci-standard",
+        }
+
+    def _entry(self, classified):
+        return aw.apply_secret_consumer(
+            aw.secret_authority(
+                "CLERK_SECRET_KEY",
+                "ken-frontend",
+                self.empty_scopes,
+                ".github/workflows/deploy.yml",
+            ),
+            classified,
+        )
+
+    def test_verified_onepassword_copy_resolves_exact_trust_scope(self):
+        evidence = {
+            "evidence_id": "task6-authorities-2026-08-19",
+            "sources": {
+                "op-clerk-production-secret": {
+                    "kind": "onepassword",
+                    "vault": "Development",
+                    "item": "Clerk Production API",
+                    "field": "CLERK_SECRET_KEY",
+                    "field_type": "STRING",
+                    "readable": True,
+                    "value_present": True,
+                }
+            },
+            "mappings": [
+                {
+                    "repository": "ken-frontend",
+                    "github_secret_name": "CLERK_SECRET_KEY",
+                    "target_vault": "Ken Deploy Production",
+                    "classification": "credential",
+                    "migration_action": "copy",
+                    "authority_match": "exact-field",
+                    "source_ref": "op-clerk-production-secret",
+                    "downstream_update_steps": [
+                        "Copy through the value-safe Task 6 handoff."
+                    ],
+                }
+            ],
+        }
+        entry = aw.apply_authority_evidence(self._entry(self.production), evidence)
+        self.assertEqual(entry["migration_action"], "copy")
+        self.assertEqual(entry["authority_status"], "verified-readable")
+        self.assertEqual(
+            entry["source_authority"],
+            "op://Development/Clerk Production API/CLERK_SECRET_KEY",
+        )
+        self.assertTrue(entry["source_readable"])
+        self.assertFalse(entry["rotation_required"])
+        self.assertEqual(entry["source_evidence_id"], evidence["evidence_id"])
+
+    def test_production_mapping_does_not_resolve_ci_collision(self):
+        evidence = {
+            "evidence_id": "task6-authorities-2026-08-19",
+            "mappings": [
+                {
+                    "repository": "ken-frontend",
+                    "github_secret_name": "CLERK_SECRET_KEY",
+                    "target_vault": "Ken Deploy Production",
+                    "classification": "credential",
+                    "migration_action": "copy",
+                    "authority_match": "exact-field",
+                    "source": {
+                        "kind": "onepassword",
+                        "vault": "Development",
+                        "item": "Clerk Production API",
+                        "field": "CLERK_SECRET_KEY",
+                        "field_type": "STRING",
+                        "readable": True,
+                        "value_present": True,
+                    },
+                    "downstream_update_steps": ["Copy through the handoff."],
+                }
+            ],
+        }
+        entry = aw.apply_authority_evidence(self._entry(self.ci), evidence)
+        self.assertEqual(entry["migration_action"], "resolve-authority")
+        self.assertEqual(entry["authority_status"], "unresolved")
+        self.assertIsNone(entry["rotation_required"])
+
+    def test_mapping_without_explicit_trust_scope_fails_closed(self):
+        evidence = {
+            "evidence_id": "task6-authorities-2026-08-19",
+            "mappings": [
+                {
+                    "repository": "ken-frontend",
+                    "github_secret_name": "CLERK_SECRET_KEY",
+                    "classification": "credential",
+                    "migration_action": "copy",
+                    "authority_match": "exact-field",
+                    "source": {
+                        "kind": "onepassword",
+                        "vault": "Development",
+                        "item": "Clerk Production API",
+                        "field": "CLERK_SECRET_KEY",
+                        "field_type": "CONCEALED",
+                        "readable": True,
+                        "value_present": True,
+                    },
+                    "downstream_update_steps": ["Copy through the handoff."],
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "explicit target_vault"):
+            aw.apply_authority_evidence(self._entry(self.production), evidence)
+
+    def test_move_to_variable_removes_secret_vault_target(self):
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+                "ken-frontend",
+                self.empty_scopes,
+                ".github/workflows/deploy.yml",
+            ),
+            self.production,
+        )
+        evidence = {
+            "evidence_id": "task6-authorities-2026-08-19",
+            "mappings": [
+                {
+                    "repository": "ken-frontend",
+                    "github_secret_name": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+                    "target_vault": "Ken Deploy Production",
+                    "classification": "identifier",
+                    "migration_action": "move-to-variable",
+                    "authority_match": "exact-field",
+                    "source": {
+                        "kind": "onepassword",
+                        "vault": "Development",
+                        "item": "Clerk Production API",
+                        "field": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+                        "field_type": "STRING",
+                        "readable": True,
+                        "value_present": True,
+                    },
+                    "downstream_update_steps": [
+                        "Create the repository Actions variable and change the workflow to vars."
+                    ],
+                }
+            ],
+        }
+        moved = aw.apply_authority_evidence(entry, evidence)
+        self.assertEqual(moved["migration_action"], "move-to-variable")
+        self.assertIsNone(moved["target_vault"])
+        self.assertEqual(
+            moved["target_item"], "GitHub Actions variables:ken-frontend"
+        )
+        self.assertEqual(
+            moved["target_field"], "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
+        )
+        self.assertEqual(moved["field_type"], "string")
+
+    def test_incomplete_or_value_bearing_evidence_fails_closed(self):
+        evidence = {
+            "evidence_id": "task6-authorities-2026-08-19",
+            "mappings": [
+                {
+                    "repository": "ken-frontend",
+                    "github_secret_name": "CLERK_SECRET_KEY",
+                    "target_vault": "Ken Deploy Production",
+                    "classification": "credential",
+                    "migration_action": "copy",
+                    "authority_match": "exact-field",
+                    "source": {
+                        "kind": "onepassword",
+                        "vault": "Development",
+                        "item": "Clerk Production API",
+                        "field": "CLERK_SECRET_KEY",
+                        "readable": True,
+                        "value_present": True,
+                        "value": "must-never-enter-evidence",
+                    },
+                    "downstream_update_steps": ["Copy through the handoff."],
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "value-bearing"):
+            aw.apply_authority_evidence(self._entry(self.production), evidence)
+
+    def test_generation_hashes_and_applies_authority_evidence(self):
+        import shutil
+        import yaml
+
+        evidence = {
+            "schema_version": 1,
+            "evidence_id": "fixture-authorities",
+            "mappings": [
+                {
+                    "mapping_id": "fixture-example-private-deploy-host",
+                    "repository": "example-private",
+                    "github_secret_name": "DEPLOY_HOST",
+                    "target_vault": "Ken Deploy Production",
+                    "classification": "identifier",
+                    "migration_action": "reconstruct",
+                    "authority_match": "reviewed-semantic",
+                    "source": {
+                        "kind": "evidence-key",
+                        "artifact": "hosts.json",
+                        "key_path": "worldstream.host",
+                        "readable": True,
+                        "exists": True,
+                    },
+                    "downstream_update_steps": [
+                        "Set the deployment host from the approved host inventory."
+                    ],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            collect = Path(tmp) / "collect"
+            first = Path(tmp) / "first"
+            second = Path(tmp) / "second"
+            shutil.copytree(FIXTURE_DIR, collect)
+            (collect / "authority-evidence.json").write_text(json.dumps(evidence))
+            aw.generate(collect, first)
+            secrets = yaml.safe_load((first / "secrets.yaml").read_text())
+            hosts = [
+                entry
+                for entry in secrets["entries"]
+                if entry["github_secret_name"] == "DEPLOY_HOST"
+            ]
+            self.assertTrue(hosts)
+            self.assertTrue(
+                all(entry["migration_action"] == "reconstruct" for entry in hosts)
+            )
+            first_hash = yaml.safe_load(
+                (first / "input-manifest.yaml").read_text()
+            )["input_hash"]
+            evidence["mappings"][0]["source"]["key_path"] = "worldstream.hostname"
+            (collect / "authority-evidence.json").write_text(json.dumps(evidence))
+            aw.generate(collect, second)
+            second_hash = yaml.safe_load(
+                (second / "input-manifest.yaml").read_text()
+            )["input_hash"]
+            self.assertNotEqual(first_hash, second_hash)
+
+    def test_generation_rejects_unused_authority_mapping(self):
+        import shutil
+
+        evidence = {
+            "schema_version": 1,
+            "evidence_id": "fixture-authorities",
+            "mappings": [
+                {
+                    "mapping_id": "fixture-missing-secret",
+                    "repository": "example-private",
+                    "github_secret_name": "NOT_USED_BY_ANY_WORKFLOW",
+                    "target_vault": "Ken Deploy Production",
+                    "classification": "credential",
+                    "migration_action": "copy",
+                    "authority_match": "exact-field",
+                    "source": {
+                        "kind": "onepassword",
+                        "vault": "Development",
+                        "item": "fixture",
+                        "field": "NOT_USED_BY_ANY_WORKFLOW",
+                        "field_type": "CONCEALED",
+                        "readable": True,
+                        "value_present": True,
+                    },
+                    "downstream_update_steps": ["Use a concealed handoff."],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            collect = Path(tmp) / "collect"
+            output = Path(tmp) / "output"
+            shutil.copytree(FIXTURE_DIR, collect)
+            (collect / "authority-evidence.json").write_text(json.dumps(evidence))
+            with self.assertRaisesRegex(ValueError, "unused authority mappings"):
+                aw.generate(collect, output)
+
+    def test_live_collector_registers_sanitized_authority_evidence(self):
+        collector = (
+            ROOT / "infra/github-actions/scripts/audit-workflows.sh"
+        ).read_text()
+        self.assertIn(
+            "inventory/evidence/task-6-authority-metadata.json", collector
+        )
+        self.assertIn('"${COLLECT_DIR}/authority-evidence.json"', collector)
+
+    def test_authority_evidence_builder_emits_only_reviewed_metadata(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        aw._reject_value_bearing_evidence(evidence)
+        self.assertEqual(evidence["schema_version"], 1)
+        self.assertEqual(evidence["evidence_id"], "task6-authorities-2026-08-19")
+        self.assertGreaterEqual(len(evidence["sources"]), 60)
+        self.assertGreaterEqual(len(evidence["mappings"]), 75)
+        self.assertTrue(
+            any(
+                mapping["repository"] == "ken-backend"
+                and mapping["github_secret_name"] == "ANTHROPIC_API_KEY"
+                and mapping["source_ref"]
+                == "worldstream-scraper-api-anthropicconfiguration-apikey"
+                for mapping in evidence["mappings"]
+            )
+        )
+        self.assertTrue(
+            any(
+                mapping["repository"] == "ken-frontend"
+                and mapping["github_secret_name"] == "CLERK_SECRET_KEY"
+                and mapping["target_vault"] == "Ken Deploy Production"
+                for mapping in evidence["mappings"]
+            )
+        )
+        self.assertFalse(
+            any(
+                mapping["repository"] == "ken-frontend"
+                and mapping["github_secret_name"] == "CLERK_SECRET_KEY"
+                and mapping["target_vault"] == "Ken CI Runtime"
+                for mapping in evidence["mappings"]
+            )
+        )
+        edge_client_id = next(
+            mapping
+            for mapping in evidence["mappings"]
+            if mapping["repository"] == "ken-backend"
+            and mapping["github_secret_name"]
+            == "CLOUDFLARE_EDGE_ACCESS_CLIENT_ID"
+        )
+        self.assertEqual(edge_client_id["classification"], "identifier")
+        self.assertEqual(edge_client_id["migration_action"], "move-to-variable")
 
 
 if __name__ == "__main__":

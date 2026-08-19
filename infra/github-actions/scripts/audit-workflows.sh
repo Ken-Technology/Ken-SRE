@@ -9,6 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 LIB="${ROOT}/infra/github-actions/scripts/lib/audit_workflows.py"
 DEFAULT_OUTPUT="${ROOT}/infra/github-actions/inventory"
 DEFAULT_HOST_EVIDENCE="${ROOT}/infra/github-actions/inventory/evidence/hosts-2026-08-19.json"
+DEFAULT_AUTHORITY_EVIDENCE="${ROOT}/infra/github-actions/inventory/evidence/task-6-authority-metadata.json"
 
 ORG="Ken-Technology"
 OFFLINE=0
@@ -212,6 +213,9 @@ if [[ -f "${ROOT}/infra/github-actions/inventory/evidence/onepassword-vaults.jso
 fi
 if [[ -f "${ROOT}/infra/github-actions/inventory/evidence/blacksmith-billing.json" ]]; then
   cp "${ROOT}/infra/github-actions/inventory/evidence/blacksmith-billing.json" "${COLLECT_DIR}/blacksmith-billing.json"
+fi
+if [[ -f "${DEFAULT_AUTHORITY_EVIDENCE}" ]]; then
+  cp "${DEFAULT_AUTHORITY_EVIDENCE}" "${COLLECT_DIR}/authority-evidence.json"
 fi
 
 while IFS= read -r repo; do

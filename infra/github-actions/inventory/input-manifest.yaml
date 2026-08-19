@@ -1,6 +1,6 @@
 schema_version: 1
 collected_at: '2026-08-19T20:13:15Z'
-input_hash: 9158991d393058a8fdc4f6ef24c31e8746a447b7ec0feacc7bb0e44c064bdd75
+input_hash: 29a7f61893047958c71c97e6bb0637c9276ad78719c853149b5f75d51f345ee8
 covered_inputs:
 - org
 - repos_index
@@ -14,6 +14,7 @@ covered_inputs:
 - grok_runners
 - worldstream_runners
 - onepassword_vaults
+- task6_authority_evidence
 - collection_meta
 repositories:
 - name: ken-backend

@@ -398,6 +398,10 @@ def apply_secret_consumer(entry: dict[str, Any], classified: dict[str, Any]) -> 
             if classified.get("production_impact")
             else "deployment-nonproduction"
         )
+    elif secret_class == "public-hosted" and classified.get("production_impact"):
+        entry["target_vault"] = "Ken Deploy Production"
+        entry["consumer"] = classified.get("target_runner_class")
+        entry["classification"] = "deployment-production"
     elif secret_class == "ci-runtime":
         entry["target_vault"] = "Ken CI Runtime"
         entry["consumer"] = classified.get("target_runner_class")
@@ -428,6 +432,145 @@ def apply_secret_consumer(entry: dict[str, Any], classified: dict[str, Any]) -> 
         entry["replacement_required"] = True
         entry["alias_status"] = "not-applicable"
     return entry
+
+
+def _reject_value_bearing_evidence(value: Any, path: str = "evidence") -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if str(key).lower() in {"value", "secret", "password", "token"}:
+                raise ValueError(f"value-bearing authority evidence key at {path}.{key}")
+            _reject_value_bearing_evidence(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_value_bearing_evidence(child, f"{path}[{index}]")
+
+
+def apply_authority_evidence(
+    entry: dict[str, Any], evidence: dict[str, Any] | None
+) -> dict[str, Any]:
+    evidence = evidence or {}
+    _reject_value_bearing_evidence(evidence)
+    matches: list[dict[str, Any]] = []
+    for mapping in evidence.get("mappings") or []:
+        if not isinstance(mapping, dict):
+            raise ValueError("authority evidence mapping must be an object")
+        if mapping.get("repository") != entry.get("repository"):
+            continue
+        if mapping.get("github_secret_name") != entry.get("github_secret_name"):
+            continue
+        mapping_target_vault = mapping.get("target_vault")
+        if not isinstance(mapping_target_vault, str) or not mapping_target_vault.strip():
+            raise ValueError("authority mapping requires explicit target_vault")
+        if mapping.get("workflow") not in {None, entry.get("workflow")}:
+            continue
+        if mapping_target_vault != entry.get("target_vault"):
+            continue
+        matches.append(mapping)
+    if not matches:
+        return entry
+    if len(matches) != 1:
+        raise ValueError(
+            f"multiple authority mappings for {entry.get('repository')}:"
+            f"{entry.get('workflow')}:{entry.get('github_secret_name')}"
+        )
+
+    mapping = matches[0]
+    action = str(mapping.get("migration_action") or "")
+    if action not in {"copy", "reconstruct", "move-to-variable"}:
+        raise ValueError(f"unsupported authority migration action: {action!r}")
+    classification = str(mapping.get("classification") or "")
+    if classification not in {"credential", "identifier", "configuration"}:
+        raise ValueError(f"unsupported authority classification: {classification!r}")
+    authority_match = str(mapping.get("authority_match") or "")
+    if authority_match not in {"exact-field", "reviewed-semantic"}:
+        raise ValueError(f"unsupported authority match: {authority_match!r}")
+    downstream = mapping.get("downstream_update_steps")
+    if not isinstance(downstream, list) or not downstream or not all(
+        isinstance(step, str) and step.strip() for step in downstream
+    ):
+        raise ValueError("resolved authority mapping needs downstream_update_steps")
+    source_ref = mapping.get("source_ref")
+    if source_ref:
+        sources = evidence.get("sources") or {}
+        source = sources.get(source_ref) if isinstance(sources, dict) else None
+    else:
+        source = mapping.get("source")
+    if not isinstance(source, dict) or source.get("readable") is not True:
+        raise ValueError("resolved authority source must be readable")
+
+    kind = source.get("kind")
+    if kind == "onepassword":
+        required = ("vault", "item", "field", "field_type")
+        if not all(source.get(key) for key in required) or source.get("value_present") is not True:
+            raise ValueError("incomplete onepassword authority metadata")
+        authority = f"op://{source['vault']}/{source['item']}/{source['field']}"
+    elif kind == "deployed-config":
+        required = ("host", "file", "key_path", "value_type")
+        if not all(source.get(key) for key in required) or source.get("exists") is not True:
+            raise ValueError("incomplete deployed-config authority metadata")
+        authority = f"deployed://{source['host']}{source['file']}#{source['key_path']}"
+    elif kind == "evidence-key":
+        required = ("artifact", "key_path")
+        if not all(source.get(key) for key in required) or source.get("exists") is not True:
+            raise ValueError("incomplete evidence-key authority metadata")
+        authority = f"evidence://{source['artifact']}#{source['key_path']}"
+    else:
+        raise ValueError(f"unsupported authority source kind: {kind!r}")
+
+    entry["source_authority"] = authority
+    entry["source_readable"] = True
+    entry["source_evidence_id"] = evidence.get("evidence_id")
+    entry["source_ref"] = source_ref
+    if mapping.get("mapping_id"):
+        entry["authority_mapping_id"] = mapping["mapping_id"]
+    entry["authority_status"] = (
+        "verified-reconstructable" if action == "reconstruct" else "verified-readable"
+    )
+    entry["authority_match"] = authority_match
+    entry["data_classification"] = classification
+    entry["migration_action"] = action
+    entry["rotation_required"] = False
+    entry["provider_rotation_steps"] = None
+    entry["downstream_update_steps"] = downstream
+    if action == "move-to-variable":
+        entry["target_vault"] = None
+        entry["target_item"] = f"GitHub Actions variables:{entry['repository']}"
+        entry["target_field"] = entry["github_secret_name"]
+        entry["field_type"] = "string"
+    if mapping.get("target_item"):
+        entry["target_item"] = mapping["target_item"]
+    if mapping.get("target_field"):
+        entry["target_field"] = mapping["target_field"]
+    if mapping.get("alias_group"):
+        entry["alias_group"] = mapping["alias_group"]
+        entry["alias_status"] = "verified-shared-authority"
+    return entry
+
+
+def validate_authority_mapping_coverage(
+    evidence: dict[str, Any], entries: list[dict[str, Any]]
+) -> None:
+    mappings = evidence.get("mappings") or []
+    if not mappings:
+        return
+    mapping_ids: list[str] = []
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            raise ValueError("authority evidence mapping must be an object")
+        mapping_id = str(mapping.get("mapping_id") or "").strip()
+        if not mapping_id:
+            raise ValueError("authority evidence mapping requires mapping_id")
+        mapping_ids.append(mapping_id)
+    if len(mapping_ids) != len(set(mapping_ids)):
+        raise ValueError("duplicate authority mapping_id")
+    used = {
+        str(entry["authority_mapping_id"])
+        for entry in entries
+        if entry.get("authority_mapping_id")
+    }
+    unused = sorted(set(mapping_ids) - used)
+    if unused:
+        raise ValueError(f"unused authority mappings: {', '.join(unused)}")
 
 
 def load_billing_evidence(path: Path) -> dict[str, Any]:
@@ -498,6 +641,7 @@ STATIC_INPUT_SOURCE_REGISTRY = {
     "grok_runners": ("grok-runners.json", {}),
     "worldstream_runners": ("worldstream-runners.json", {}),
     "onepassword_vaults": ("onepassword-vaults.json", []),
+    "authority_evidence": ("authority-evidence.json", {}),
     "collection_meta": ("collection-meta.json", {}),
 }
 DYNAMIC_NON_WORKFLOW_INPUT_KINDS = (
@@ -646,6 +790,9 @@ def load_inventory_inputs(collect_dir: Path) -> LoadedInventoryInputs:
         "onepassword_vaults": raw["onepassword_vaults"]
         if isinstance(raw["onepassword_vaults"], list)
         else [],
+        "authority_evidence": raw["authority_evidence"]
+        if isinstance(raw["authority_evidence"], dict)
+        else {},
         "collection_meta": raw["collection_meta"]
         if isinstance(raw["collection_meta"], dict)
         else {},
@@ -699,6 +846,7 @@ def build_input_manifest(
             "grok_runners",
             "worldstream_runners",
             "onepassword_vaults",
+            "task6_authority_evidence",
             "collection_meta",
         ],
         "repositories": repos_out,
@@ -1356,6 +1504,8 @@ def generate_from_inputs(
     groups_raw = data["runner_groups"]
     org_secrets = data["org_secret_names"]
     org_vars = data["org_variable_names"]
+    authority_evidence = data["authority_evidence"]
+    _reject_value_bearing_evidence(authority_evidence)
     budgets = data["budgets"]
     snapshot_time = data["collection_meta"].get("collected_at")
     if not snapshot_time:
@@ -1517,6 +1667,7 @@ def generate_from_inputs(
                         secret_authority(secret_name, name, listed_secrets, rel),
                         classified,
                     )
+                    entry = apply_authority_evidence(entry, authority_evidence)
                     entry["consuming_jobs"] = [job["id"]]
                     secret_entries_by_key[key] = entry
                     secret_entries.append(entry)
@@ -1547,6 +1698,7 @@ def generate_from_inputs(
         )
 
     repositories.sort(key=lambda item: item["name"].lower())
+    validate_authority_mapping_coverage(authority_evidence, secret_entries)
     private = [r for r in repositories if r["visibility"] == "private"]
     public = [r for r in repositories if r["visibility"] == "public"]
 
@@ -1618,6 +1770,7 @@ def generate_from_inputs(
         "organization_secret_names": org_secrets,
         "organization_variable_names": org_vars,
         "onepassword_visible_vaults": data["onepassword_vaults"],
+        "authority_evidence_id": authority_evidence.get("evidence_id"),
         "entries": secret_entries,
     }
 

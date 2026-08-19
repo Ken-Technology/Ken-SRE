@@ -1,0 +1,2226 @@
+{
+  "evidence_id": "task6-authorities-2026-08-19",
+  "mappings": [
+    {
+      "alias_group": "ken-agents/CLICKUP_API_TOKEN",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLICKUP_API_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLICKUP_API_TOKEN",
+      "mapping_id": "ken-agents-ken-deploy-production-all-workflows-clickup-api-token",
+      "migration_action": "copy",
+      "repository": "ken-agents",
+      "source_ref": "op-development-clickup-api-key-credential",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-agents/LANGFUSE_PUBLIC_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable LANGFUSE_PUBLIC_KEY in ken-agents, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "LANGFUSE_PUBLIC_KEY",
+      "mapping_id": "ken-agents-ken-deploy-production-all-workflows-langfuse-public-key",
+      "migration_action": "move-to-variable",
+      "repository": "ken-agents",
+      "source_ref": "op-development-langfuse-production-api-credentials-public-key",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-agents/LANGFUSE_SECRET_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy LANGFUSE_SECRET_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "LANGFUSE_SECRET_KEY",
+      "mapping_id": "ken-agents-ken-deploy-production-all-workflows-langfuse-secret-key",
+      "migration_action": "copy",
+      "repository": "ken-agents",
+      "source_ref": "op-development-langfuse-production-api-credentials-secret-key",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "worldstream-machine-ssh",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Reconstruct WORLDSTREAM_HOST from the approved metadata source, write it through a concealed handoff, and verify existence only."
+      ],
+      "github_secret_name": "WORLDSTREAM_HOST",
+      "mapping_id": "ken-ai-mcp-ken-deploy-production-all-workflows-worldstream-host",
+      "migration_action": "reconstruct",
+      "repository": "ken-ai-mcp",
+      "source_ref": "inventory-hosts-worldstream-host",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "worldstream-machine-ssh",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy WORLDSTREAM_PASSWORD through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "WORLDSTREAM_PASSWORD",
+      "mapping_id": "ken-ai-mcp-ken-deploy-production-all-workflows-worldstream-password",
+      "migration_action": "copy",
+      "repository": "ken-ai-mcp",
+      "source_ref": "op-development-worldstream-machine-ssh-password",
+      "target_field": "password",
+      "target_item": "worldstream-machine-ssh",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "worldstream-machine-ssh",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable WORLDSTREAM_USER in ken-ai-mcp, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "WORLDSTREAM_USER",
+      "mapping_id": "ken-ai-mcp-ken-deploy-production-all-workflows-worldstream-user",
+      "migration_action": "move-to-variable",
+      "repository": "ken-ai-mcp",
+      "source_ref": "op-development-worldstream-machine-ssh-username",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "worldstream-machine-ssh",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Reconstruct WORLDSTREAM_HOST from the approved metadata source, write it through a concealed handoff, and verify existence only."
+      ],
+      "github_secret_name": "WORLDSTREAM_HOST",
+      "mapping_id": "ken-ai-public-mcp-ken-deploy-production-all-workflows-worldstream-host",
+      "migration_action": "reconstruct",
+      "repository": "ken-ai-public-mcp",
+      "source_ref": "inventory-hosts-worldstream-host",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "worldstream-machine-ssh",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy WORLDSTREAM_PASSWORD through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "WORLDSTREAM_PASSWORD",
+      "mapping_id": "ken-ai-public-mcp-ken-deploy-production-all-workflows-worldstream-password",
+      "migration_action": "copy",
+      "repository": "ken-ai-public-mcp",
+      "source_ref": "op-development-worldstream-machine-ssh-password",
+      "target_field": "password",
+      "target_item": "worldstream-machine-ssh",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "worldstream-machine-ssh",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable WORLDSTREAM_USER in ken-ai-public-mcp, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "WORLDSTREAM_USER",
+      "mapping_id": "ken-ai-public-mcp-ken-deploy-production-all-workflows-worldstream-user",
+      "migration_action": "move-to-variable",
+      "repository": "ken-ai-public-mcp",
+      "source_ref": "op-development-worldstream-machine-ssh-username",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/ANTHROPIC_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy ANTHROPIC_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "ANTHROPIC_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-anthropic-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-anthropicconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/AUTOMATIONS_WEBHOOK_SECRET_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy AUTOMATIONS_WEBHOOK_SECRET_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "AUTOMATIONS_WEBHOOK_SECRET_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-automations-webhook-secret-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-automationswebhookconfiguration-secretkey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/AWS_ACCESS_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy AWS_ACCESS_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "AWS_ACCESS_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-aws-access-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-amazonbedrockconfiguration-awsaccesskeyid",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/AWS_SECRET_ACCESS_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy AWS_SECRET_ACCESS_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "AWS_SECRET_ACCESS_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-aws-secret-access-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-amazonbedrockconfiguration-awssecretaccesskey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/CALCOM_CLIENT_ID",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable CALCOM_CLIENT_ID in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "CALCOM_CLIENT_ID",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-calcom-client-id",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-calcomoauth-clientid",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/CALCOM_CLIENT_SECRET",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CALCOM_CLIENT_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CALCOM_CLIENT_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-calcom-client-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-calcomoauth-clientsecret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/CALENDLY_CLIENT_ID",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable CALENDLY_CLIENT_ID in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "CALENDLY_CLIENT_ID",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-calendly-client-id",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-calendlyoauth-clientid",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/CALENDLY_CLIENT_SECRET",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CALENDLY_CLIENT_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CALENDLY_CLIENT_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-calendly-client-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-calendlyoauth-clientsecret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/CLERK_SECRET_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLERK_SECRET_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLERK_SECRET_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-clerk-secret-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-clerk-secretkey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/CLERK_WEBHOOK_SECRET",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLERK_WEBHOOK_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLERK_WEBHOOK_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-clerk-webhook-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-clerk-webhooksecret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/CLICKUP_API_TOKEN",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLICKUP_API_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLICKUP_API_TOKEN",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-clickup-api-token",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-clickupalerting-apitoken",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/CLICKUP_LIST_ID",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable CLICKUP_LIST_ID in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "CLICKUP_LIST_ID",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-clickup-list-id",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-clickupalerting-listid",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_API_TOKEN",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLOUDFLARE_API_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLOUDFLARE_API_TOKEN",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-api-token",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-api-token",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_EDGE_ACCESS_CLIENT_ID",
+      "authority_match": "exact-field",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable CLOUDFLARE_EDGE_ACCESS_CLIENT_ID in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "CLOUDFLARE_EDGE_ACCESS_CLIENT_ID",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-edge-access-client-id",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-edge-access-client-id",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_EDGE_ACCESS_CLIENT_SECRET",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLOUDFLARE_EDGE_ACCESS_CLIENT_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLOUDFLARE_EDGE_ACCESS_CLIENT_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-edge-access-client-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-edge-access-client-secret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_EDGE_CLICK_INGEST_BEARER",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLOUDFLARE_EDGE_CLICK_INGEST_BEARER through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLOUDFLARE_EDGE_CLICK_INGEST_BEARER",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-edge-click-ingest-bearer",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-edge-click-ingest-bearer",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-edge-click-ingest-hmac-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-edge-click-ingest-hmac-secret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_EDGE_CONTROL_BEARER",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLOUDFLARE_EDGE_CONTROL_BEARER through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLOUDFLARE_EDGE_CONTROL_BEARER",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-edge-control-bearer",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-edge-control-bearer",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_EDGE_CONTROL_HMAC_SECRET",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLOUDFLARE_EDGE_CONTROL_HMAC_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLOUDFLARE_EDGE_CONTROL_HMAC_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-edge-control-hmac-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-edge-control-hmac-secret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_EDGE_PROVIDER_INVENTORY_HMAC_SECRET",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLOUDFLARE_EDGE_PROVIDER_INVENTORY_HMAC_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLOUDFLARE_EDGE_PROVIDER_INVENTORY_HMAC_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-edge-provider-inventory-hmac-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-edge-provider-inventory-hmac-secret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_EDGE_STANDBY_BEARER",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLOUDFLARE_EDGE_STANDBY_BEARER through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLOUDFLARE_EDGE_STANDBY_BEARER",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-edge-standby-bearer",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-edge-standby-bearer",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "cloudflare-edge/CLOUDFLARE_EDGE_STANDBY_HMAC_SECRET",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLOUDFLARE_EDGE_STANDBY_HMAC_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLOUDFLARE_EDGE_STANDBY_HMAC_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-cloudflare-edge-standby-hmac-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-cloudflare-edge-production-secrets-cloudflare-edge-standby-hmac-secret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/DB_CONNECTION_STRING2",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy DB_CONNECTION_STRING2 through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "DB_CONNECTION_STRING2",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-db-connection-string2",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-connectionstrings-kendb",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/DEEPSEEK_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy DEEPSEEK_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "DEEPSEEK_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-deepseek-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-deepseekconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/DEMO_PERSONALIZATION_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy DEMO_PERSONALIZATION_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "DEMO_PERSONALIZATION_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-demo-personalization-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-demopersonalization-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/DEMO_PERSONALIZATION_REF_SIGNING_SECRET",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy DEMO_PERSONALIZATION_REF_SIGNING_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "DEMO_PERSONALIZATION_REF_SIGNING_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-demo-personalization-ref-signing-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-demopersonalization-refsigningsecret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/DOUBLEWORD_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy DOUBLEWORD_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "DOUBLEWORD_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-doubleword-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-doublewordconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/EMAIL_BISON__ADMIN_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy EMAIL_BISON__ADMIN_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "EMAIL_BISON__ADMIN_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-email-bison-admin-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-emailbison-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/ENROW_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy ENROW_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "ENROW_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-enrow-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-enrow-worker-enrowconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/FINDYMAIL_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy FINDYMAIL_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "FINDYMAIL_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-findymail-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-findemail-worker-findymailconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/FIRECRAWL_BASE_URL",
+      "authority_match": "reviewed-semantic",
+      "classification": "configuration",
+      "downstream_update_steps": [
+        "Create repository Actions variable FIRECRAWL_BASE_URL in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "FIRECRAWL_BASE_URL",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-firecrawl-base-url",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-firecrawlconfiguration-baseurl",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/FIREWORKS_ACCOUNT_ID",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable FIREWORKS_ACCOUNT_ID in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "FIREWORKS_ACCOUNT_ID",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-fireworks-account-id",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-fireworksconfiguration-accountid",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/FIREWORKS_AI_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy FIREWORKS_AI_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "FIREWORKS_AI_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-fireworks-ai-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-fireworksconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/HUBSPOT_CLIENT_ID",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable HUBSPOT_CLIENT_ID in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "HUBSPOT_CLIENT_ID",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-hubspot-client-id",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-hubspotcalendaroptions-clientid",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/HUBSPOT_CLIENT_SECRET",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy HUBSPOT_CLIENT_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "HUBSPOT_CLIENT_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-hubspot-client-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-hubspotcalendaroptions-clientsecret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/HYPERTIDE_API_TOKEN",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy HYPERTIDE_API_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "HYPERTIDE_API_TOKEN",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-hypertide-api-token",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-hypertideconfiguration-apitoken",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/ICYPEAS_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy ICYPEAS_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "ICYPEAS_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-icypeas-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-icypeas-worker-icypeasconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/INBOXKIT_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy INBOXKIT_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "INBOXKIT_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-inboxkit-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-inboxkitconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/INBOXKIT_WORKSPACE_ID",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable INBOXKIT_WORKSPACE_ID in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "INBOXKIT_WORKSPACE_ID",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-inboxkit-workspace-id",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-inboxkitconfiguration-workspaceid",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/INSTANTLY_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy INSTANTLY_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "INSTANTLY_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-instantly-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-instantlyconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/JWT_SECRET",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy JWT_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "JWT_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-jwt-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-jwtsettings-secretkey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/KEN_AI_ADMIN_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy KEN_AI_ADMIN_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "KEN_AI_ADMIN_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-ken-ai-admin-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-security-adminapikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/KEN_REDIRECT_BASE_URL",
+      "authority_match": "reviewed-semantic",
+      "classification": "configuration",
+      "downstream_update_steps": [
+        "Create repository Actions variable KEN_REDIRECT_BASE_URL in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "KEN_REDIRECT_BASE_URL",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-ken-redirect-base-url",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-kenredirect-baseurl",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/KEN_REDIRECT_BEARER_TOKEN",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy KEN_REDIRECT_BEARER_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "KEN_REDIRECT_BEARER_TOKEN",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-ken-redirect-bearer-token",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-kenredirect-bearertoken",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/KEN_REDIRECT_CLIENT_PFX_PASSWORD",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy KEN_REDIRECT_CLIENT_PFX_PASSWORD through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "KEN_REDIRECT_CLIENT_PFX_PASSWORD",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-ken-redirect-client-pfx-password",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-kenredirect-clientcertificatepassword",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/KEN_SEARCH_CLERK_USER_ID",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable KEN_SEARCH_CLERK_USER_ID in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "KEN_SEARCH_CLERK_USER_ID",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-ken-search-clerk-user-id",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-kensearch-clerkuserid",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/KEN_SEARCH_INTERNAL_TOKEN",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy KEN_SEARCH_INTERNAL_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "KEN_SEARCH_INTERNAL_TOKEN",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-ken-search-internal-token",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-kensearch-servicebearertoken",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/KITT_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy KITT_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "KITT_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-kitt-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-kittenrichment-worker-kittconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/LANGFUSE_BASE_URL",
+      "authority_match": "reviewed-semantic",
+      "classification": "configuration",
+      "downstream_update_steps": [
+        "Create repository Actions variable LANGFUSE_BASE_URL in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "LANGFUSE_BASE_URL",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-langfuse-base-url",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-langfuse-baseurl",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/LANGFUSE_PUBLIC_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable LANGFUSE_PUBLIC_KEY in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "LANGFUSE_PUBLIC_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-langfuse-public-key",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-langfuse-publickey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/LANGFUSE_SECRET_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy LANGFUSE_SECRET_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "LANGFUSE_SECRET_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-langfuse-secret-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-langfuse-secretkey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/LEAD_MAGIC_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy LEAD_MAGIC_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "LEAD_MAGIC_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-lead-magic-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-leadmagicconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/MAIL_TESTER_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy MAIL_TESTER_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "MAIL_TESTER_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-mail-tester-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-mailtester-worker-mailtesterconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/MONGO_CONNECTION_STRING2",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy MONGO_CONNECTION_STRING2 through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "MONGO_CONNECTION_STRING2",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-mongo-connection-string2",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-mongodbconfiguration-connectionstring",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/MOONSHOT_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy MOONSHOT_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "MOONSHOT_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-moonshot-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-moonshotconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/ONBOARDING_PREFILL_INTERNAL_TOKEN",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy ONBOARDING_PREFILL_INTERNAL_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "ONBOARDING_PREFILL_INTERNAL_TOKEN",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-onboarding-prefill-internal-token",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-onboarding-prefillinternaltoken",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/OPEN_AI_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy OPEN_AI_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "OPEN_AI_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-open-ai-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-openai-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/OPEN_ROUTER_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy OPEN_ROUTER_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "OPEN_ROUTER_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-open-router-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-openrouterconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/OUT_ENGINE_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy OUT_ENGINE_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "OUT_ENGINE_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-out-engine-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-outengineconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/OUT_ENGINE_CUSTOMER_ID",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable OUT_ENGINE_CUSTOMER_ID in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "OUT_ENGINE_CUSTOMER_ID",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-out-engine-customer-id",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-outengineconfiguration-customerid",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/PORKBUN_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy PORKBUN_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "PORKBUN_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-porkbun-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-porkbunregistrar-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/PORKBUN_SECRET_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy PORKBUN_SECRET_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "PORKBUN_SECRET_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-porkbun-secret-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-porkbunregistrar-secretapikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/PROSPEO_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy PROSPEO_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "PROSPEO_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-prospeo-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-prospeo-worker-prospeoconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/READ_REPLICA_CONNECTION_STRING",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy READ_REPLICA_CONNECTION_STRING through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "READ_REPLICA_CONNECTION_STRING",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-read-replica-connection-string",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-connectionstrings-kendbreadreplica",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/SECRET_STORE_KEY_V1",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy SECRET_STORE_KEY_V1 through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "SECRET_STORE_KEY_V1",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-secret-store-key-v1",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-secretstore-keys-1",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/SHORT_IO_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy SHORT_IO_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "SHORT_IO_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-short-io-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-deliverability-api-shortioconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/STRIPE_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy STRIPE_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "STRIPE_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-stripe-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-stripeconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/STRIPE_WEBHOOK_SIGNING_SECRET",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy STRIPE_WEBHOOK_SIGNING_SECRET through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "STRIPE_WEBHOOK_SIGNING_SECRET",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-stripe-webhook-signing-secret",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-stripeconfiguration-webhooksigningsecret",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/SVIX_AUTH_TOKEN",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy SVIX_AUTH_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "SVIX_AUTH_TOKEN",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-svix-auth-token",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-svixconfiguration-authtoken",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/TOGETHER_AI_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy TOGETHER_AI_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "TOGETHER_AI_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-together-ai-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-togetheraiconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/TWENTY_CRM_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy TWENTY_CRM_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "TWENTY_CRM_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-twenty-crm-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-twentycrm-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/UNIPILE_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy UNIPILE_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "UNIPILE_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-unipile-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-unipile-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/WEBHOOK_SECURITY_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy WEBHOOK_SECURITY_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "WEBHOOK_SECURITY_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-webhook-security-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-webhooksecurity-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "worldstream-machine-ssh",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Reconstruct WORLDSTREAM_HOST from the approved metadata source, write it through a concealed handoff, and verify existence only."
+      ],
+      "github_secret_name": "WORLDSTREAM_HOST",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-worldstream-host",
+      "migration_action": "reconstruct",
+      "repository": "ken-backend",
+      "source_ref": "inventory-hosts-worldstream-host",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "worldstream-machine-ssh",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy WORLDSTREAM_PASSWORD through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "WORLDSTREAM_PASSWORD",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-worldstream-password",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "op-development-worldstream-machine-ssh-password",
+      "target_field": "password",
+      "target_item": "worldstream-machine-ssh",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "worldstream-machine-ssh",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable WORLDSTREAM_USER in ken-backend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "WORLDSTREAM_USER",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-worldstream-user",
+      "migration_action": "move-to-variable",
+      "repository": "ken-backend",
+      "source_ref": "op-development-worldstream-machine-ssh-username",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-backend/xAI_API_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy xAI_API_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "xAI_API_KEY",
+      "mapping_id": "ken-backend-ken-deploy-production-all-workflows-xai-api-key",
+      "migration_action": "copy",
+      "repository": "ken-backend",
+      "source_ref": "worldstream-scraper-api-xaiconfiguration-apikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-frontend/CLERK_SECRET_KEY",
+      "authority_match": "exact-field",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLERK_SECRET_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLERK_SECRET_KEY",
+      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-clerk-secret-key",
+      "migration_action": "copy",
+      "repository": "ken-frontend",
+      "source_ref": "op-development-clerk-production-api-clerk-secret-key",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-frontend/DEPLOY_HOST",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable DEPLOY_HOST in ken-frontend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "DEPLOY_HOST",
+      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-deploy-host",
+      "migration_action": "move-to-variable",
+      "repository": "ken-frontend",
+      "source_ref": "op-development-frontend-server-hostname",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-frontend/DEPLOY_SSH_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy DEPLOY_SSH_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "DEPLOY_SSH_KEY",
+      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-deploy-ssh-key",
+      "migration_action": "copy",
+      "repository": "ken-frontend",
+      "source_ref": "op-development-frontend-server-private-key",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-frontend/DEPLOY_USER",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable DEPLOY_USER in ken-frontend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "DEPLOY_USER",
+      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-deploy-user",
+      "migration_action": "move-to-variable",
+      "repository": "ken-frontend",
+      "source_ref": "op-development-frontend-server-username",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-frontend/GHCR_PULL_TOKEN",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy GHCR_PULL_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "GHCR_PULL_TOKEN",
+      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-ghcr-pull-token",
+      "migration_action": "copy",
+      "repository": "ken-frontend",
+      "source_ref": "op-development-ghcr-pull-token-credential",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-frontend/LANGFUSE_BASE_URL",
+      "authority_match": "reviewed-semantic",
+      "classification": "configuration",
+      "downstream_update_steps": [
+        "Create repository Actions variable LANGFUSE_BASE_URL in ken-frontend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "LANGFUSE_BASE_URL",
+      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-langfuse-base-url",
+      "migration_action": "move-to-variable",
+      "repository": "ken-frontend",
+      "source_ref": "op-development-langfuse-production-api-credentials-base-url",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-frontend/LANGFUSE_PUBLIC_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable LANGFUSE_PUBLIC_KEY in ken-frontend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "LANGFUSE_PUBLIC_KEY",
+      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-langfuse-public-key",
+      "migration_action": "move-to-variable",
+      "repository": "ken-frontend",
+      "source_ref": "op-development-langfuse-production-api-credentials-public-key",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-frontend/LANGFUSE_SECRET_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy LANGFUSE_SECRET_KEY through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "LANGFUSE_SECRET_KEY",
+      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-langfuse-secret-key",
+      "migration_action": "copy",
+      "repository": "ken-frontend",
+      "source_ref": "op-development-langfuse-production-api-credentials-secret-key",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-frontend/NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+      "authority_match": "exact-field",
+      "classification": "identifier",
+      "downstream_update_steps": [
+        "Create repository Actions variable NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in ken-frontend, update the workflow reference from secrets to vars, and verify without printing the setting."
+      ],
+      "github_secret_name": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-next-public-clerk-publishable-key",
+      "migration_action": "move-to-variable",
+      "repository": "ken-frontend",
+      "source_ref": "op-development-clerk-production-api-next-public-clerk-publishable-key",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
+      "alias_group": "ken-search/CLICKUP_API_TOKEN",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy CLICKUP_API_TOKEN through a concealed 1Password-to-GitHub handoff and verify existence only; never print the value."
+      ],
+      "github_secret_name": "CLICKUP_API_TOKEN",
+      "mapping_id": "ken-search-ken-deploy-production-all-workflows-clickup-api-token",
+      "migration_action": "copy",
+      "repository": "ken-search",
+      "source_ref": "op-development-clickup-api-key-credential",
+      "target_vault": "Ken Deploy Production"
+    }
+  ],
+  "policy": "Value-free metadata only. Sources record labels, key paths, types, and existence/readability booleans; no values were retrieved or stored.",
+  "schema_version": 1,
+  "sources": {
+    "inventory-hosts-worldstream-host": {
+      "artifact": "hosts-2026-08-19.json",
+      "exists": true,
+      "key_path": "worldstream.host",
+      "kind": "evidence-key",
+      "readable": true
+    },
+    "op-development-clerk-production-api-clerk-secret-key": {
+      "field": "CLERK_SECRET_KEY",
+      "field_type": "CONCEALED",
+      "item": "Clerk Production API",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-clerk-production-api-next-public-clerk-publishable-key": {
+      "field": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+      "field_type": "STRING",
+      "item": "Clerk Production API",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-clickup-api-key-credential": {
+      "field": "credential",
+      "field_type": "CONCEALED",
+      "item": "ClickUp API Key",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-api-token": {
+      "field": "CLOUDFLARE_API_TOKEN",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-edge-access-client-id": {
+      "field": "CLOUDFLARE_EDGE_ACCESS_CLIENT_ID",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-edge-access-client-secret": {
+      "field": "CLOUDFLARE_EDGE_ACCESS_CLIENT_SECRET",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-edge-click-ingest-bearer": {
+      "field": "CLOUDFLARE_EDGE_CLICK_INGEST_BEARER",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-edge-click-ingest-hmac-secret": {
+      "field": "CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-edge-control-bearer": {
+      "field": "CLOUDFLARE_EDGE_CONTROL_BEARER",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-edge-control-hmac-secret": {
+      "field": "CLOUDFLARE_EDGE_CONTROL_HMAC_SECRET",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-edge-provider-inventory-hmac-secret": {
+      "field": "CLOUDFLARE_EDGE_PROVIDER_INVENTORY_HMAC_SECRET",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-edge-standby-bearer": {
+      "field": "CLOUDFLARE_EDGE_STANDBY_BEARER",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-cloudflare-edge-production-secrets-cloudflare-edge-standby-hmac-secret": {
+      "field": "CLOUDFLARE_EDGE_STANDBY_HMAC_SECRET",
+      "field_type": "CONCEALED",
+      "item": "Cloudflare Edge Production Secrets",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-frontend-server-hostname": {
+      "field": "hostname",
+      "field_type": "STRING",
+      "item": "Frontend Server",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-frontend-server-private-key": {
+      "field": "private key",
+      "field_type": "CONCEALED",
+      "item": "Frontend Server",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-frontend-server-username": {
+      "field": "username",
+      "field_type": "STRING",
+      "item": "Frontend Server",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-ghcr-pull-token-credential": {
+      "field": "credential",
+      "field_type": "CONCEALED",
+      "item": "GHCR_PULL_TOKEN",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-langfuse-production-api-credentials-base-url": {
+      "field": "Base Url",
+      "field_type": "STRING",
+      "item": "Langfuse Production API Credentials",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-langfuse-production-api-credentials-public-key": {
+      "field": "Public Key",
+      "field_type": "STRING",
+      "item": "Langfuse Production API Credentials",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-langfuse-production-api-credentials-secret-key": {
+      "field": "Secret Key",
+      "field_type": "CONCEALED",
+      "item": "Langfuse Production API Credentials",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-worldstream-machine-ssh-password": {
+      "field": "password",
+      "field_type": "CONCEALED",
+      "item": "worldstream machine ssh",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "op-development-worldstream-machine-ssh-username": {
+      "field": "username",
+      "field_type": "STRING",
+      "item": "worldstream machine ssh",
+      "kind": "onepassword",
+      "readable": true,
+      "value_present": true,
+      "vault": "Development"
+    },
+    "worldstream-deliverability-api-shortioconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/deliverability.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "ShortIoConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-enrow-worker-enrowconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/enrow.worker/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "EnrowConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-findemail-worker-findymailconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/findemail.worker/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "FindymailConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-icypeas-worker-icypeasconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/icypeas.worker/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "IcypeasConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-kittenrichment-worker-kittconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/kittenrichment.worker/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "KittConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-mailtester-worker-mailtesterconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/mailtester.worker/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "MailTesterConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-prospeo-worker-prospeoconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/prospeo.worker/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "ProspeoConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-amazonbedrockconfiguration-awsaccesskeyid": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "AmazonBedrockConfiguration.AwsAccessKeyId",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-amazonbedrockconfiguration-awssecretaccesskey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "AmazonBedrockConfiguration.AwsSecretAccessKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-anthropicconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "AnthropicConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-automationswebhookconfiguration-secretkey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "AutomationsWebhookConfiguration.SecretKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-calcomoauth-clientid": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "CalComOAuth.ClientId",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-calcomoauth-clientsecret": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "CalComOAuth.ClientSecret",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-calendlyoauth-clientid": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "CalendlyOAuth.ClientId",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-calendlyoauth-clientsecret": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "CalendlyOAuth.ClientSecret",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-clerk-secretkey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "Clerk.SecretKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-clerk-webhooksecret": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "Clerk.WebhookSecret",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-clickupalerting-apitoken": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "ClickUpAlerting.ApiToken",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-clickupalerting-listid": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "ClickUpAlerting.ListId",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-connectionstrings-kendb": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "ConnectionStrings.KenDb",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-connectionstrings-kendbreadreplica": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "ConnectionStrings.KenDbReadReplica",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-deepseekconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "DeepSeekConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-demopersonalization-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "DemoPersonalization.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-demopersonalization-refsigningsecret": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "DemoPersonalization.RefSigningSecret",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-doublewordconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "DoublewordConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-emailbison-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "EmailBison.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-firecrawlconfiguration-baseurl": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "FirecrawlConfiguration.BaseUrl",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-fireworksconfiguration-accountid": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "FireworksConfiguration.AccountId",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-fireworksconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "FireworksConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-hubspotcalendaroptions-clientid": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "HubSpotCalendarOptions.ClientId",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-hubspotcalendaroptions-clientsecret": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "HubSpotCalendarOptions.ClientSecret",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-hypertideconfiguration-apitoken": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "HypertideConfiguration.ApiToken",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-inboxkitconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "InboxkitConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-inboxkitconfiguration-workspaceid": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "InboxkitConfiguration.WorkspaceId",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-instantlyconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "InstantlyConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-jwtsettings-secretkey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "JwtSettings.SecretKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-kenredirect-baseurl": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "KenRedirect.BaseUrl",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-kenredirect-bearertoken": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "KenRedirect.BearerToken",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-kenredirect-clientcertificatepassword": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "KenRedirect.ClientCertificatePassword",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-kensearch-clerkuserid": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "KenSearch.ClerkUserId",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-kensearch-servicebearertoken": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "KenSearch.ServiceBearerToken",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-langfuse-baseurl": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "Langfuse.BaseUrl",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-langfuse-publickey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "Langfuse.PublicKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-langfuse-secretkey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "Langfuse.SecretKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-leadmagicconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "LeadMagicConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-mongodbconfiguration-connectionstring": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "MongoDbConfiguration.ConnectionString",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-moonshotconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "MoonshotConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-onboarding-prefillinternaltoken": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "Onboarding.PrefillInternalToken",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-openai-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "OpenAi.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-openrouterconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "OpenRouterConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-outengineconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "OutEngineConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-outengineconfiguration-customerid": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "OutEngineConfiguration.CustomerId",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-porkbunregistrar-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "PorkbunRegistrar.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-porkbunregistrar-secretapikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "PorkbunRegistrar.SecretApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-secretstore-keys-1": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "SecretStore.Keys.1",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-security-adminapikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "Security.AdminApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-stripeconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "StripeConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-stripeconfiguration-webhooksigningsecret": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "StripeConfiguration.WebhookSigningSecret",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-svixconfiguration-authtoken": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "SvixConfiguration.AuthToken",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-togetheraiconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "TogetherAiConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-twentycrm-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "TwentyCrm.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-unipile-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "Unipile.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-webhooksecurity-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "WebhookSecurity.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    },
+    "worldstream-scraper-api-xaiconfiguration-apikey": {
+      "exists": true,
+      "file": "/var/www/scraper.api/appsettings.Production.json",
+      "host": "185.183.35.189",
+      "key_path": "XAIConfiguration.ApiKey",
+      "kind": "deployed-config",
+      "readable": true,
+      "scoped_user": "qa",
+      "value_type": "string"
+    }
+  },
+  "unresolved_observations": [
+    {
+      "items": [
+        "client-system-env",
+        "gtm-env",
+        "ken-agents-env",
+        "ken-automations-env",
+        "ken-cms-env",
+        "ken-frontend-env",
+        "ken-search-env"
+      ],
+      "kind": "onepassword-notes-only",
+      "reason": "Only a notes field was visible; notes were not parsed because doing so could expose values."
+    },
+    {
+      "github_secret_name": "CLERK_SECRET_KEY",
+      "kind": "trust-boundary",
+      "reason": "The production Clerk authority must not be copied into the nonproduction CI trust domain without a separate approved authority.",
+      "repository": "ken-frontend",
+      "target_vault": "Ken CI Runtime"
+    }
+  ]
+}
