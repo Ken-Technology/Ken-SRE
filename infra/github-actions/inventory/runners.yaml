@@ -1,0 +1,260 @@
+schema_version: 1
+organization: Ken-Technology
+generated_at: '2026-08-19T16:32:25Z'
+snapshot_time: '2026-08-19T16:27:01Z'
+organization_plan:
+  name: free
+  private_hosted_minutes_allowance: 2000
+  actions_overage_budget_usd: 0
+  prevent_further_usage: true
+  allowance_note: Official GitHub-hosted private minutes for the current Free plan are 2,000. Do not assume Team's 3,000-minute
+    allowance.
+billing:
+  actions_overage_budget_usd: 0
+  prevent_further_usage: true
+  private_hosted_minutes_allowance: 2000
+  blacksmith_previous_month_usd: 130
+  blacksmith_previous_month_status: unverified-planning-baseline
+  blacksmith_current_unbilled: unavailable
+current:
+  snapshot_time: '2026-08-19T16:27:01Z'
+  total_count: 549
+  blacksmith_offline_count: 549
+  grouped_by_labels_status_busy:
+  - count: 62
+    labels:
+    - X64
+    - blacksmith-2vcpu-ubuntu-2404
+    - linux
+    status: offline
+    busy: false
+  - count: 57
+    labels:
+    - X64
+    - blacksmith-4vcpu-ubuntu-2404
+    - linux
+    status: offline
+    busy: false
+  - count: 54
+    labels:
+    - X64
+    - blacksmith-16vcpu-ubuntu-2204
+    - linux
+    status: offline
+    busy: false
+  - count: 54
+    labels:
+    - X64
+    - blacksmith-16vcpu-ubuntu-2404
+    - linux
+    status: offline
+    busy: false
+  - count: 54
+    labels:
+    - X64
+    - blacksmith-2vcpu-ubuntu-2204
+    - linux
+    status: offline
+    busy: false
+  - count: 54
+    labels:
+    - X64
+    - blacksmith-32vcpu-ubuntu-2204
+    - linux
+    status: offline
+    busy: false
+  - count: 54
+    labels:
+    - X64
+    - blacksmith-4vcpu-ubuntu-2204
+    - linux
+    status: offline
+    busy: false
+  - count: 54
+    labels:
+    - X64
+    - blacksmith-8vcpu-ubuntu-2204
+    - linux
+    status: offline
+    busy: false
+  - count: 54
+    labels:
+    - X64
+    - blacksmith-8vcpu-ubuntu-2404
+    - linux
+    status: offline
+    busy: false
+  - count: 52
+    labels:
+    - X64
+    - blacksmith-32vcpu-ubuntu-2404
+    - linux
+    status: offline
+    busy: false
+  label_counts:
+    X64: 549
+    blacksmith-2vcpu-ubuntu-2204: 54
+    linux: 549
+    blacksmith-4vcpu-ubuntu-2204: 54
+    blacksmith-8vcpu-ubuntu-2204: 54
+    blacksmith-16vcpu-ubuntu-2204: 54
+    blacksmith-32vcpu-ubuntu-2204: 54
+    blacksmith-8vcpu-ubuntu-2404: 54
+    blacksmith-16vcpu-ubuntu-2404: 54
+    blacksmith-2vcpu-ubuntu-2404: 62
+    blacksmith-4vcpu-ubuntu-2404: 57
+    blacksmith-32vcpu-ubuntu-2404: 52
+  note: Count is a point-in-time organization API snapshot and is not a forever invariant.
+runner_groups:
+- id: 1
+  name: Default
+  visibility: all
+  allows_public_repositories: false
+  default: true
+  workflow_restrictions_read_only: false
+  restricted_to_workflows: false
+  selected_workflows: []
+  runners_url: https://api.github.com/orgs/Ken-Technology/actions/runner-groups/1/runners
+  hosted_runners_url: https://api.github.com/orgs/Ken-Technology/actions/runner-groups/1/hosted-runners
+  inherited: false
+- id: 3
+  name: Blacksmith runners 01KMA42CQV45Q23V4DP7YXPZRF
+  visibility: all
+  allows_public_repositories: true
+  default: false
+  workflow_restrictions_read_only: false
+  restricted_to_workflows: false
+  selected_workflows: []
+  runners_url: https://api.github.com/orgs/Ken-Technology/actions/runner-groups/3/runners
+  hosted_runners_url: https://api.github.com/orgs/Ken-Technology/actions/runner-groups/3/hosted-runners
+  inherited: false
+target:
+  ci:
+    count: 10
+    vm: ken-ci
+    names:
+    - ken-ci-standard-01
+    - ken-ci-standard-02
+    - ken-ci-standard-03
+    - ken-ci-standard-04
+    - ken-ci-standard-05
+    - ken-ci-standard-06
+    - ken-ci-standard-07
+    - ken-ci-standard-08
+    - ken-ci-heavy-01
+    - ken-ci-heavy-02
+    reserved_disabled:
+    - ken-ci-standard-09
+    - ken-ci-standard-10
+    labels:
+      standard:
+      - self-hosted
+      - linux
+      - x64
+      - ken-ci
+      - standard
+      heavy:
+      - self-hosted
+      - linux
+      - x64
+      - ken-ci
+      - heavy
+    resources:
+      standard:
+        vcpu: 2
+        memory_gib: 8
+        cpu_quota: 200%
+        memory_max: 8G
+      heavy:
+        vcpu: 4
+        memory_gib: 16
+        cpu_quota: 400%
+        memory_max: 16G
+  deploy:
+    count: 2
+    vm: ken-deploy
+    names:
+    - ken-deploy-nonproduction-01
+    - ken-deploy-production-01
+    labels:
+      nonproduction:
+      - self-hosted
+      - linux
+      - x64
+      - ken-deploy
+      - nonproduction
+      production:
+      - self-hosted
+      - linux
+      - x64
+      - ken-deploy
+      - production
+preserved:
+  grok_review:
+    count: 6
+    class: existing-grok-review
+    labels:
+    - self-hosted
+    - grok-review
+    unchanged: true
+    host: devws
+    snapshot_time: '2026-08-19T15:58:16Z'
+    names:
+    - hetzner-grok-review-ken-agents
+    - hetzner-grok-review-ken-ai-mcp
+    - hetzner-grok-review-ken-backend
+    - hetzner-grok-review-ken-frontend
+    - hetzner-grok-review-ken-scraping
+    - hetzner-grok-review-ken-search
+    units:
+    - actions.runner.Ken-Technology-ken-agents.hetzner-grok-review-ken-agents.service
+    - actions.runner.Ken-Technology-ken-ai-mcp.hetzner-grok-review-ken-ai-mcp.service
+    - actions.runner.Ken-Technology-ken-backend.hetzner-grok-review-ken-backend.service
+    - actions.runner.Ken-Technology-ken-frontend.hetzner-grok-review-ken-frontend.service
+    - actions.runner.Ken-Technology-ken-scraping.hetzner-grok-review-ken-scraping.service
+    - actions.runner.Ken-Technology-ken-search.hetzner-grok-review-ken-search.service
+legacy:
+  worldstream_ken_ci:
+    count: 10
+    class: legacy-worldstream-ken-ci
+    unchanged_until_teardown_gate: true
+    host: worldstream
+    snapshot_time: '2026-08-19T15:59:15Z'
+    units:
+    - actions.runner.Ken-Technology-ken-agents.ws-ken-ci-ken-agents-1.service
+    - actions.runner.Ken-Technology-ken-ai-mcp.ws-ken-ci-ken-ai-mcp-1.service
+    - actions.runner.Ken-Technology-ken-backend.ws-ken-ci-ken-backend-1.service
+    - actions.runner.Ken-Technology-ken-backend.ws-ken-ci-ken-backend-2.service
+    - actions.runner.Ken-Technology-ken-backend.ws-ken-ci-ken-backend-3.service
+    - actions.runner.Ken-Technology-ken-frontend.ws-ken-ci-ken-frontend-1.service
+    - actions.runner.Ken-Technology-ken-frontend.ws-ken-ci-ken-frontend-2.service
+    - actions.runner.Ken-Technology-ken-frontend.ws-ken-ci-ken-frontend-3.service
+    - actions.runner.Ken-Technology-ken-scraping.ws-ken-ci-ken-scraping-1.service
+    - actions.runner.Ken-Technology-ken-search.ws-ken-ci-ken-search-1.service
+hosts:
+  captured_at: '2026-08-19T16:05:06Z'
+  source: task-2-hosts-report.md read-only SSH and GitHub organization API
+  devws:
+    host: 167.235.8.250
+    hostname: Ubuntu-2404-noble-amd64-base
+    vcpu: 64
+    ram_gib: 251
+    mem_available_gib_range:
+    - 190
+    - 195
+    swap_gib: 11
+    swap_state: essentially full
+    root_free_gib_range:
+    - 60
+    - 62
+    mnt_data_free_tib: 1.9
+    kvm: true
+    libvirt: false
+    note: KVM device present; libvirt/virsh not installed. Host carries live Elasticsearch and Grok runners.
+  worldstream:
+    host: 185.183.35.189
+    hostname: NLDW4-5-46-31
+    role: production application and database host
+    legacy_runner_units_active: 10
+    mem_available_gib: 25
+    swap_state: essentially full

@@ -1,0 +1,22 @@
+name: grok review
+on:
+  pull_request:
+  issue_comment:
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+jobs:
+  gate:
+    runs-on: [self-hosted, ken-ci]
+    steps:
+      - uses: actions/checkout@v4
+  review:
+    needs: [gate]
+    runs-on: [self-hosted, grok-review]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        env:
+          TOKEN: ${{ secrets.GROK_REVIEW_GH_TOKEN }}

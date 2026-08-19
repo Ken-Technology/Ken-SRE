@@ -1,0 +1,14 @@
+[
+  {
+    "name": "example-private",
+    "visibility": "PRIVATE",
+    "isArchived": false,
+    "defaultBranchRef": { "name": "main" }
+  },
+  {
+    "name": "example-public",
+    "visibility": "PUBLIC",
+    "isArchived": false,
+    "defaultBranchRef": { "name": "main" }
+  }
+]

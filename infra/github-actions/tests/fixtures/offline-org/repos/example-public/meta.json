@@ -1,0 +1,7 @@
+{
+  "name": "example-public",
+  "visibility": "public",
+  "archived": false,
+  "default_branch": "main",
+  "default_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

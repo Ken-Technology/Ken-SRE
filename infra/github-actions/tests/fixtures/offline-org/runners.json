@@ -1,0 +1,27 @@
+{
+  "total_count": 2,
+  "runners": [
+    {
+      "name": "blacksmith-fixture-1",
+      "os": "Linux",
+      "status": "offline",
+      "busy": false,
+      "labels": [
+        { "name": "X64" },
+        { "name": "linux" },
+        { "name": "blacksmith-2vcpu-ubuntu-2404" }
+      ]
+    },
+    {
+      "name": "blacksmith-fixture-2",
+      "os": "Linux",
+      "status": "offline",
+      "busy": false,
+      "labels": [
+        { "name": "X64" },
+        { "name": "linux" },
+        { "name": "blacksmith-4vcpu-ubuntu-2404" }
+      ]
+    }
+  ]
+}

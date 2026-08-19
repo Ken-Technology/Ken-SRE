@@ -1,0 +1,12 @@
+name: public-ci
+on:
+  pull_request:
+  push:
+jobs:
+  build-web:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/setup-node@v4

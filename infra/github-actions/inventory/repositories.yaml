@@ -1,0 +1,5211 @@
+schema_version: 1
+organization: Ken-Technology
+generated_at: '2026-08-19T16:32:25Z'
+authority: live GitHub default-branch workflow YAML and environment metadata; names only
+counts:
+  active_repositories: 25
+  private_repositories: 22
+  public_repositories: 3
+organization_plan:
+  name: free
+  private_hosted_minutes_allowance: 2000
+  actions_overage_budget_usd: 0
+  prevent_further_usage: true
+  allowance_note: Official GitHub-hosted private minutes for the current Free plan are 2,000. Do not assume Team's 3,000-minute
+    allowance.
+repositories:
+- name: client-system
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: fbc58247f00254876a908352d5f2ac1eb4fef62f
+  workflow_count: 0
+  job_count: 0
+  workflows: []
+- name: cold-email-skills
+  visibility: public
+  archived: false
+  default_branch: main
+  default_sha: 162983c13042324b1919848ff0c3952eb19e01cc
+  workflow_count: 0
+  job_count: 0
+  workflows: []
+- name: dev-workstation
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 3a726954e04e38a4aec18f6807dabc4b74eb3747
+  workflow_count: 0
+  job_count: 0
+  workflows: []
+- name: gtm
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 272e1788f8ffd721f07b6aff0ede09fe26bf8fbb
+  workflow_count: 0
+  job_count: 0
+  workflows: []
+- name: ken-agents
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: cd9421a175a99d88fe957f659e344326b71f940b
+  workflow_count: 5
+  job_count: 8
+  workflows:
+  - path: .github/workflows/ci.yml
+    name: CI
+    triggers:
+    - pull_request
+    - push
+    permissions: null
+    concurrency:
+      group: ci-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: ci
+      name: CI
+      runs_on: blacksmith-2vcpu-ubuntu-2404-arm
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404-arm
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - astral-sh/setup-uv@v5
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy.yml
+    name: Deploy
+    triggers:
+    - workflow_run
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: deploy-ken-agents
+      cancel-in-progress: false
+    secret_names:
+    - GITHUB_TOKEN
+    - DEPLOY_HOST
+    - DEPLOY_USER
+    - DEPLOY_SSH_KEY
+    - LANGSMITH_API_KEY
+    - KEN_AGENTS_PLATFORM_DB_PASSWORD
+    - KEN_AGENTS_INTERNAL_KEY
+    - XAI_API_KEY
+    - XAI_PROXY_URL
+    - ZAI_API_KEY
+    - DEEPSEEK_API_KEY
+    - MOONSHOT_API_KEY
+    - OPENAI_API_KEY
+    - WORKSPACE_SETUP_CREDIT_COST
+    - KEN_AI_MCP_URL
+    - KEN_AI_ADMIN_API_KEY
+    - KEN_AGENTS_BACKEND_URL
+    - LANGFUSE_PUBLIC_KEY
+    - LANGFUSE_SECRET_KEY
+    - LANGGRAPH_OAUTH_CLIENT_ID
+    - LANGGRAPH_OAUTH_CLIENT_SECRET
+    - OAUTH2_PROXY_COOKIE_SECRET_LANGGRAPH
+    - CLICKUP_WEBHOOK_URL
+    variable_names: []
+    jobs:
+    - id: build-image
+      name: Build & push langgraph-api image
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        contents: read
+        packages: write
+      uses:
+      - actions/checkout@v4
+      - docker/setup-buildx-action@v3
+      - astral-sh/setup-uv@v5
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: deploy
+      name: Deploy to backend server
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs:
+      - build-image
+      permissions:
+        contents: read
+        packages: read
+      uses:
+      - appleboy/ssh-action@v1
+      secret_names:
+      - GITHUB_TOKEN
+      - DEPLOY_HOST
+      - DEPLOY_USER
+      - DEPLOY_SSH_KEY
+      - LANGSMITH_API_KEY
+      - KEN_AGENTS_PLATFORM_DB_PASSWORD
+      - KEN_AGENTS_INTERNAL_KEY
+      - XAI_API_KEY
+      - XAI_PROXY_URL
+      - ZAI_API_KEY
+      - DEEPSEEK_API_KEY
+      - MOONSHOT_API_KEY
+      - OPENAI_API_KEY
+      - WORKSPACE_SETUP_CREDIT_COST
+      - KEN_AI_MCP_URL
+      - KEN_AI_ADMIN_API_KEY
+      - KEN_AGENTS_BACKEND_URL
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      - LANGGRAPH_OAUTH_CLIENT_ID
+      - LANGGRAPH_OAUTH_CLIENT_SECRET
+      - OAUTH2_PROXY_COOKIE_SECRET_LANGGRAPH
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      - Langfuse
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: notify
+      name: Notify ClickUp
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs:
+      - deploy
+      permissions: null
+      uses: []
+      secret_names:
+      - CLICKUP_WEBHOOK_URL
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - ClickUp
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/eval-weekly.yml
+    name: Weekly eval scoreboard
+    triggers:
+    - schedule
+    - schedule:0 7 * * 1
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: eval-weekly
+      cancel-in-progress: true
+    secret_names:
+    - LANGFUSE_PUBLIC_KEY
+    - LANGFUSE_SECRET_KEY
+    - CLICKUP_API_TOKEN
+    variable_names: []
+    jobs:
+    - id: scoreboard
+      name: Weekly eval pass-rate
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - astral-sh/setup-uv@v5
+      secret_names:
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      - CLICKUP_API_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - ClickUp
+      - Langfuse
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/grok-pr-review.yml
+    name: Grok PR Review
+    triggers:
+    - pull_request
+    - issue_comment
+    - workflow_dispatch
+    permissions: &id001
+      contents: read
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: "${{\n  (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '/grok-review'))\n  &&\
+        \ format('grok-pr-review-noop-{0}', github.run_id)\n  || format('grok-pr-review-{0}', github.event.pull_request.number\
+        \ || github.event.issue.number || inputs.pr_number || github.run_id)\n}}"
+      cancel-in-progress: true
+    secret_names:
+    - GROK_REVIEW_GH_TOKEN
+    variable_names: []
+    jobs:
+    - id: gate
+      name: Should review?
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id001
+      uses:
+      - actions/checkout@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: existing-grok-review-gate
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+    - id: review
+      name: Grok review (self-hosted)
+      runs_on: '[self-hosted, grok-review]'
+      resolved_runs_on:
+      - '[self-hosted, grok-review]'
+      environment: null
+      environment_name: null
+      needs:
+      - gate
+      permissions: *id001
+      uses:
+      - actions/checkout@v4
+      - actions/upload-artifact@v4
+      secret_names:
+      - GROK_REVIEW_GH_TOKEN
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v4
+      target_hints: []
+      classification: existing-grok-review
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, grok-review]'
+      secret_class: grok-review-unchanged
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+  - path: .github/workflows/prompt-parity.yml
+    name: Prompt parity
+    triggers:
+    - schedule
+    - schedule:0 6 * * *
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: prompt-parity
+      cancel-in-progress: true
+    secret_names:
+    - LANGFUSE_PUBLIC_KEY
+    - LANGFUSE_SECRET_KEY
+    variable_names: []
+    jobs:
+    - id: parity
+      name: Langfuse prompt parity
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - astral-sh/setup-uv@v5
+      secret_names:
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - Langfuse
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+- name: ken-ai-mcp
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: c3ab123e6efc876e945712d84072e1f1a376f054
+  workflow_count: 4
+  job_count: 7
+  workflows:
+  - path: .github/workflows/contracts-drift.yml
+    name: Backend Contract Drift
+    triggers:
+    - schedule
+    - schedule:0 6 * * *
+    - workflow_dispatch
+    permissions: &id002
+      contents: read
+      issues: write
+    concurrency: null
+    secret_names:
+    - KEN_BACKEND_READ_TOKEN
+    variable_names: []
+    jobs:
+    - id: drift-check
+      name: drift-check
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id002
+      uses:
+      - actions/checkout@v4
+      - actions/setup-python@v5
+      - actions/github-script@v7
+      secret_names:
+      - KEN_BACKEND_READ_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy.yml
+    name: Deploy Ken AI MCP Server to Worldstream
+    triggers:
+    - schedule
+    - schedule:0 7 * * *
+    - workflow_dispatch
+    permissions: &id003
+      contents: read
+      actions: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    secret_names:
+    - KEN_CLERK_DOMAIN
+    - KEN_CLERK_CLIENT_ID
+    - KEN_CLERK_CLIENT_SECRET
+    - WORLDSTREAM_HOST
+    - WORLDSTREAM_USER
+    - WORLDSTREAM_PASSWORD
+    - DB_HOST
+    - DB_PORT
+    - DB_USER
+    - DB_PASSWORD
+    - DB_NAME
+    - MONGO_CONNECTION_STRING
+    - MONGO_DATABASE
+    - MCP_SMOKE_URL
+    - MCP_SMOKE_TOKEN
+    variable_names:
+    - KEN_CLERK_REDIRECT_PATH
+    - KEN_CLERK_SCOPES
+    - KEN_MCP_CLIENT_FACING
+    - KEN_MCP_ALLOW_APIKEY
+    jobs:
+    - id: should-deploy
+      name: should-deploy
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id003
+      uses: []
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: deploy-gate
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment:
+        name: Prod
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: Prod
+      needs:
+      - should-deploy
+      permissions: *id003
+      uses:
+      - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+      - appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634
+      - appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17
+      secret_names:
+      - KEN_CLERK_DOMAIN
+      - KEN_CLERK_CLIENT_ID
+      - KEN_CLERK_CLIENT_SECRET
+      - WORLDSTREAM_HOST
+      - WORLDSTREAM_USER
+      - WORLDSTREAM_PASSWORD
+      - DB_HOST
+      - DB_PORT
+      - DB_USER
+      - DB_PASSWORD
+      - DB_NAME
+      - MONGO_CONNECTION_STRING
+      - MONGO_DATABASE
+      - MCP_SMOKE_URL
+      - MCP_SMOKE_TOKEN
+      variable_names:
+      - KEN_CLERK_REDIRECT_PATH
+      - KEN_CLERK_SCOPES
+      - KEN_MCP_CLIENT_FACING
+      - KEN_MCP_ALLOW_APIKEY
+      artifacts: []
+      target_hints:
+      - Worldstream
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/grok-pr-review.yml
+    name: Grok PR Review
+    triggers:
+    - pull_request
+    - issue_comment
+    - workflow_dispatch
+    permissions: &id004
+      contents: read
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: "${{\n  (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '/grok-review'))\n  &&\
+        \ format('grok-pr-review-noop-{0}', github.run_id)\n  || format('grok-pr-review-{0}', github.event.pull_request.number\
+        \ || github.event.issue.number || inputs.pr_number || github.run_id)\n}}"
+      cancel-in-progress: true
+    secret_names:
+    - GROK_REVIEW_GH_TOKEN
+    variable_names: []
+    jobs:
+    - id: gate
+      name: Should review?
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id004
+      uses:
+      - actions/checkout@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: existing-grok-review-gate
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+    - id: review
+      name: Grok review (self-hosted)
+      runs_on: '[self-hosted, grok-review]'
+      resolved_runs_on:
+      - '[self-hosted, grok-review]'
+      environment: null
+      environment_name: null
+      needs:
+      - gate
+      permissions: *id004
+      uses:
+      - actions/checkout@v4
+      - actions/upload-artifact@v4
+      secret_names:
+      - GROK_REVIEW_GH_TOKEN
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v4
+      target_hints: []
+      classification: existing-grok-review
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, grok-review]'
+      secret_class: grok-review-unchanged
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+  - path: .github/workflows/tests.yml
+    name: Tests
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency:
+      group: tests-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    secret_names:
+    - KEN_BACKEND_READ_TOKEN
+    variable_names: []
+    jobs:
+    - id: tests
+      name: tests
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-python@v5
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+    - id: contracts-fresh
+      name: contracts-fresh
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-python@v5
+      secret_names:
+      - KEN_BACKEND_READ_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - SECRET_BEARING_PR
+- name: ken-ai-optimizer
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 034b947e8ef09a8c5f44324dbe1d36d61eb69eb1
+  workflow_count: 0
+  job_count: 0
+  workflows: []
+- name: ken-ai-plugin
+  visibility: public
+  archived: false
+  default_branch: main
+  default_sha: 62ab880db28eaffcc05931c21f81fb137deb2781
+  workflow_count: 2
+  job_count: 2
+  workflows:
+  - path: .github/workflows/check-mcp-urls.yml
+    name: Check MCP URLs
+    triggers:
+    - pull_request
+    - push
+    - schedule
+    - schedule:0 7 * * *
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: check-mcp-urls-${{ github.event_name }}-${{ github.ref }}
+      cancel-in-progress: true
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: check
+      name: check
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-node@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: public-standard-ci
+      target_runner_class: public-github-hosted
+      target_runs_on: ubuntu-latest
+      secret_class: github-token-only
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/publish-cold-email-skills.yml
+    name: Publish cold-email-skills
+    triggers:
+    - push
+    permissions: null
+    concurrency:
+      group: publish-cold-email-skills
+      cancel-in-progress: true
+    secret_names:
+    - COLD_EMAIL_SKILLS_DEPLOY_KEY
+    variable_names: []
+    jobs:
+    - id: publish
+      name: publish
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-node@v4
+      secret_names:
+      - COLD_EMAIL_SKILLS_DEPLOY_KEY
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: public-production-impact-deploy
+      target_runner_class: public-github-hosted
+      target_runs_on: ubuntu-latest
+      secret_class: public-hosted
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+- name: ken-ai-public-mcp
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: df0dd6120d1b3bc32aad69ad11e8d414cf203c86
+  workflow_count: 1
+  job_count: 1
+  workflows:
+  - path: .github/workflows/deploy.yml
+    name: Deploy Ken Public MCP Server to Worldstream
+    triggers:
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - WORLDSTREAM_HOST
+    - WORLDSTREAM_USER
+    - WORLDSTREAM_PASSWORD
+    variable_names: []
+    jobs:
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment:
+        name: Prod
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: Prod
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v3
+      - actions/setup-python@v4
+      - appleboy/scp-action@master
+      - appleboy/ssh-action@master
+      secret_names:
+      - WORLDSTREAM_HOST
+      - WORLDSTREAM_USER
+      - WORLDSTREAM_PASSWORD
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - Worldstream
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+- name: ken-analytics
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: c88b85e101bd6b0b74e3330019b43093911834d8
+  workflow_count: 2
+  job_count: 4
+  workflows:
+  - path: .github/workflows/ci.yml
+    name: CI
+    triggers:
+    - pull_request
+    - push
+    permissions: &id005
+      contents: read
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: validate
+      name: Validate repository config
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id005
+      uses:
+      - actions/checkout@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy-production.yml
+    name: Deploy production
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: &id006
+      contents: read
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    secret_names:
+    - DEPLOY_USER
+    - DEPLOY_SSH_KEY
+    variable_names:
+    - DEPLOY_HOST
+    - DEPLOY_PORT
+    - DEPLOY_PATH
+    - ANALYTICS_URL
+    jobs:
+    - id: validate
+      name: Validate repository config
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id006
+      uses:
+      - actions/checkout@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: deploy
+      name: Deploy to analytics VM
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment:
+        name: production
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: production
+      needs:
+      - validate
+      permissions: *id006
+      uses:
+      - actions/checkout@v4
+      secret_names:
+      - DEPLOY_USER
+      - DEPLOY_SSH_KEY
+      variable_names:
+      - DEPLOY_HOST
+      - DEPLOY_PORT
+      - DEPLOY_PATH
+      - ANALYTICS_URL
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: no_stack_yet
+      name: Skip deploy until stack exists
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs:
+      - validate
+      permissions: *id006
+      uses: []
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+- name: ken-automations
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 81d4f5fd279fa314c70fdf22c4b9c23afa6f3ce4
+  workflow_count: 0
+  job_count: 0
+  workflows: []
+- name: ken-backend
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 103be85127b1a0442a4a95f71f99d1362cdd1bd9
+  workflow_count: 13
+  job_count: 15
+  workflows:
+  - path: .github/workflows/ci-guardrails.yml
+    name: CI Guardrails
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency:
+      group: ci-guardrails-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: guardrails
+      name: guardrails
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      - actions/cache@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - NuGet
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+  - path: .github/workflows/contract-export-check.yml
+    name: Contract Export Check
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency:
+      group: contract-export-check-${{ github.ref }}
+      cancel-in-progress: true
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: verify-contracts
+      name: verify-contracts
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+  - path: .github/workflows/deploy-cloudflare-redirector.yml
+    name: Deploy Cloudflare redirector
+    triggers:
+    - workflow_dispatch
+    permissions: &id007
+      contents: read
+    concurrency:
+      group: cloudflare-edge-production
+      cancel-in-progress: false
+    secret_names:
+    - CLOUDFLARE_EDGE_RESOURCE_CONTRACT_VERSION
+    - CLOUDFLARE_EDGE_RESOURCE_MANIFEST_BASE64
+    - CLOUDFLARE_EDGE_PHASE0_EVIDENCE_BASE64
+    - CLOUDFLARE_EDGE_PROVIDER_INVENTORY_BASE64
+    - CLOUDFLARE_API_TOKEN
+    - CLOUDFLARE_EDGE_PROVIDER_INVENTORY_HMAC_SECRET
+    - CLOUDFLARE_EDGE_CONTROL_HMAC_SECRET
+    - CLOUDFLARE_EDGE_CONTROL_BEARER
+    - CLOUDFLARE_EDGE_ACCESS_CLIENT_ID
+    - CLOUDFLARE_EDGE_ACCESS_CLIENT_SECRET
+    - CLOUDFLARE_EDGE_STANDBY_BEARER
+    - CLOUDFLARE_EDGE_STANDBY_HMAC_SECRET
+    - CLOUDFLARE_EDGE_CLICK_INGEST_BEARER
+    - CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET
+    - CLOUDFLARE_EDGE_SPEND_GUARD_API_TOKEN
+    - json
+    variable_names: []
+    jobs:
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment:
+        name: cloudflare-edge-production
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: cloudflare-edge-production
+      needs: []
+      permissions: *id007
+      uses:
+      - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a
+      - actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      secret_names:
+      - CLOUDFLARE_EDGE_RESOURCE_CONTRACT_VERSION
+      - CLOUDFLARE_EDGE_RESOURCE_MANIFEST_BASE64
+      - CLOUDFLARE_EDGE_PHASE0_EVIDENCE_BASE64
+      - CLOUDFLARE_EDGE_PROVIDER_INVENTORY_BASE64
+      - CLOUDFLARE_API_TOKEN
+      - CLOUDFLARE_EDGE_PROVIDER_INVENTORY_HMAC_SECRET
+      - CLOUDFLARE_EDGE_CONTROL_HMAC_SECRET
+      - CLOUDFLARE_EDGE_CONTROL_BEARER
+      - CLOUDFLARE_EDGE_ACCESS_CLIENT_ID
+      - CLOUDFLARE_EDGE_ACCESS_CLIENT_SECRET
+      - CLOUDFLARE_EDGE_STANDBY_BEARER
+      - CLOUDFLARE_EDGE_STANDBY_HMAC_SECRET
+      - CLOUDFLARE_EDGE_CLICK_INGEST_BEARER
+      - CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET
+      - CLOUDFLARE_EDGE_SPEND_GUARD_API_TOKEN
+      - json
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      target_hints:
+      - Cloudflare
+      - npm
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy-redirector.yml
+    name: Deploy isolated redirector
+    triggers:
+    - workflow_dispatch
+    permissions: &id008
+      contents: read
+      packages: write
+    concurrency:
+      group: deploy-production-redirector
+      cancel-in-progress: false
+    secret_names:
+    - CLOUDFLARE_REDIRECT_INTERNAL_BEARER
+    - CLOUDFLARE_REDIRECT_HMAC_KEY
+    - GITHUB_TOKEN
+    - REDIRECT_RELEASE_SIGNING_PRIVATE_KEY
+    - REDIRECT_DEPLOY_SSH_KEY
+    - REDIRECT_DEPLOY_HOST
+    - REDIRECT_DEPLOY_HOST_KEY
+    variable_names:
+    - CLOUDFLARE_REDIRECT_INGRESS_ENABLED
+    jobs:
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment:
+        name: Production
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: Production
+      needs: []
+      permissions: *id008
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      - docker/login-action@v3
+      - docker/setup-buildx-action@v3
+      - docker/build-push-action@v6
+      secret_names:
+      - CLOUDFLARE_REDIRECT_INTERNAL_BEARER
+      - CLOUDFLARE_REDIRECT_HMAC_KEY
+      - GITHUB_TOKEN
+      - REDIRECT_RELEASE_SIGNING_PRIVATE_KEY
+      - REDIRECT_DEPLOY_SSH_KEY
+      - REDIRECT_DEPLOY_HOST
+      - REDIRECT_DEPLOY_HOST_KEY
+      variable_names:
+      - CLOUDFLARE_REDIRECT_INGRESS_ENABLED
+      artifacts: []
+      target_hints:
+      - Cloudflare
+      - GHCR
+      - ghcr.io
+      - OVH
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/deploy-staging.yml
+    name: Deploy API & Gateway to Staging
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: &id009
+      contents: read
+    concurrency:
+      group: deploy-backend-staging
+      cancel-in-progress: false
+    secret_names:
+    - STAGING_BACKEND_HOST
+    - STAGING_BACKEND_SSH_KEY
+    variable_names: []
+    jobs:
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment:
+        name: Staging
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: Staging
+      needs: []
+      permissions: *id009
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      - appleboy/scp-action@v1.0.0
+      - appleboy/ssh-action@v1.2.2
+      secret_names:
+      - STAGING_BACKEND_HOST
+      - STAGING_BACKEND_SSH_KEY
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: nonproduction-deploy
+      target_runner_class: ken-deploy-nonproduction
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, nonproduction]'
+      secret_class: deploy-nonproduction
+      production_impact: false
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/deploy.yml
+    name: Deploy API, Gateway & Workers to Worldstream
+    triggers:
+    - schedule
+    - schedule:0 6 * * *
+    - workflow_dispatch
+    permissions: &id010
+      contents: read
+      actions: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    secret_names:
+    - DB_CONNECTION_STRING2
+    - READ_REPLICA_CONNECTION_STRING
+    - MONGO_CONNECTION_STRING2
+    - sh
+    - WORLDSTREAM_HOST
+    - SCHEMA_TUNNEL_USER
+    - SCHEMA_TUNNEL_PRIVATE_KEY
+    - SCHEMA_TUNNEL_KNOWN_HOSTS
+    - CLOUDFLARE_REDIRECT_ACCESS_CLIENT_ID
+    - CLOUDFLARE_REDIRECT_ACCESS_CLIENT_SECRET
+    - CLOUDFLARE_REDIRECT_INTERNAL_BEARER
+    - CLOUDFLARE_REDIRECT_HMAC_KEY
+    - CLOUDFLARE_REDIRECT_ORIGIN_PULL_CA_BASE64
+    - CLOUDFLARE_REDIRECT_INGRESS_CERT_BASE64
+    - CLOUDFLARE_REDIRECT_INGRESS_KEY_BASE64
+    - CLOUDFLARE_REDIRECT_ORIGIN_ALLOWLIST_BASE64
+    - REDIRECT_SYNC_SERVER_CERT_BASE64
+    - REDIRECT_SYNC_SERVER_KEY_BASE64
+    - REDIRECT_SYNC_CLIENT_CA_BASE64
+    - REDIRECT_SYNC_SOURCE_ALLOWLIST_BASE64
+    - CLICKUP_API_TOKEN
+    - CLICKUP_LIST_ID
+    - AWS_ACCESS_KEY
+    - AWS_SECRET_ACCESS_KEY
+    - SHORT_IO_API_KEY
+    - DELIVERABILITY_ADMIN_API_KEY
+    - DELIVERABILITY_INTERNAL_API_KEY
+    - PORKBUN_API_KEY
+    - PORKBUN_SECRET_API_KEY
+    - SPAMHAUS_DQS_KEY
+    - ABUSEIPDB_API_KEY
+    - UNIPILE_API_KEY
+    - EMAIL_BISON__ADMIN_API_KEY
+    - HYPERTIDE_API_TOKEN
+    - JWT_SECRET
+    - INSTANTLY_API_KEY
+    - OPEN_AI_API_KEY
+    - ANTHROPIC_API_KEY
+    - xAI_API_KEY
+    - OPEN_ROUTER_API_KEY
+    - TOGETHER_AI_API_KEY
+    - FIREWORKS_AI_API_KEY
+    - FIREWORKS_ACCOUNT_ID
+    - MOONSHOT_API_KEY
+    - DOUBLEWORD_API_KEY
+    - DEEPSEEK_API_KEY
+    - PLUSVIBE_API_KEY
+    - PLUSVIBE_WORKSPACE_ID
+    - LANGFUSE_PUBLIC_KEY
+    - LANGFUSE_SECRET_KEY
+    - LANGFUSE_BASE_URL
+    - WEBHOOK_SECURITY_API_KEY
+    - CLERK_WEBHOOK_SECRET
+    - CLERK_SECRET_KEY
+    - KEN_SEARCH_INTERNAL_TOKEN
+    - REDIRECT_INGEST_INTERNAL_TOKEN
+    - INBOXKIT_API_KEY
+    - INBOXKIT_WORKSPACE_ID
+    - OUT_ENGINE_API_KEY
+    - OUT_ENGINE_CUSTOMER_ID
+    - FIRECRAWL_BASE_URL
+    - AUTOMATIONS_WEBHOOK_SECRET_KEY
+    - KEN_SEARCH_CLERK_USER_ID
+    - SVIX_AUTH_TOKEN
+    - KEN_AI_ADMIN_API_KEY
+    - STRIPE_API_KEY
+    - STRIPE_WEBHOOK_SIGNING_SECRET
+    - MISTRAL_API_KEY
+    - ONBOARDING_PREFILL_INTERNAL_TOKEN
+    - LEAD_MAGIC_API_KEY
+    - DEMO_PERSONALIZATION_API_KEY
+    - DEMO_PERSONALIZATION_REF_SIGNING_SECRET
+    - TWENTY_CRM_API_KEY
+    - KEN_REDIRECT_BASE_URL
+    - KEN_REDIRECT_BEARER_TOKEN
+    - KEN_REDIRECT_CLIENT_PFX_PASSWORD
+    - REDIRECT_WATCHDOG_ALERT_TOKEN_SHA256
+    - CALENDLY_CLIENT_ID
+    - CALENDLY_CLIENT_SECRET
+    - HUBSPOT_CLIENT_ID
+    - HUBSPOT_CLIENT_SECRET
+    - CALCOM_CLIENT_ID
+    - CALCOM_CLIENT_SECRET
+    - CLOUDFLARE_EDGE_CLICK_INGEST_BEARER_PRODUCTION
+    - ICYPEAS_API_KEY
+    - APIFY_API_KEY
+    - PROSPEO_API_KEY
+    - KITT_API_KEY
+    - ENROW_API_KEY
+    - FINDYMAIL_API_KEY
+    - MAIL_TESTER_API_KEY
+    - BACKBLAZE_KEY_ID
+    - BACKBLAZE_APPLICATION_KEY
+    - BACKBLAZE_BUCKET_NAME
+    - RESEND_API_KEY
+    - RESEND_CONTACT_SYNC_ENABLED
+    - RESEND_FREE_SEGMENT_ID
+    - RESEND_STARTER_SEGMENT_ID
+    - RESEND_GROWTH_SEGMENT_ID
+    - SECRET_STORE_KEY_V1
+    - WORLDSTREAM_USER
+    - WORLDSTREAM_PASSWORD
+    - KEN_REDIRECT_CLIENT_PFX_BASE64
+    variable_names:
+    - CLOUDFLARE_REDIRECT_INGRESS_ENABLED
+    - CLOUDFLARE_REDIRECT_INGRESS_HOSTNAME
+    - CLOUDFLARE_REDIRECT_STANDBY_HOSTNAME
+    - REDIRECT_SYNC_INGRESS_ENABLED
+    - REDIRECT_SYNC_STANDBY_HOSTNAME
+    - CampaignTechnologyDetection__Enabled
+    - CampaignTechnologyDetection__AllowedClientIds__0
+    - TechnologyObservationOutbox__Enabled
+    - TechnologyObservationOutbox__AllowedClientIds__0
+    - KenSearch__Enabled
+    - QuartzJobConfiguration__Jobs__2__Enabled
+    jobs:
+    - id: should-deploy
+      name: should-deploy
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id010
+      uses: []
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: deploy-gate
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment:
+        name: Preprod
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: Preprod
+      needs:
+      - should-deploy
+      permissions: *id010
+      uses:
+      - actions/checkout@v3
+      - actions/setup-dotnet@v4
+      - actions/cache@v4
+      - appleboy/scp-action@master
+      - appleboy/ssh-action@master
+      secret_names:
+      - DB_CONNECTION_STRING2
+      - READ_REPLICA_CONNECTION_STRING
+      - MONGO_CONNECTION_STRING2
+      - sh
+      - WORLDSTREAM_HOST
+      - SCHEMA_TUNNEL_USER
+      - SCHEMA_TUNNEL_PRIVATE_KEY
+      - SCHEMA_TUNNEL_KNOWN_HOSTS
+      - CLOUDFLARE_REDIRECT_ACCESS_CLIENT_ID
+      - CLOUDFLARE_REDIRECT_ACCESS_CLIENT_SECRET
+      - CLOUDFLARE_REDIRECT_INTERNAL_BEARER
+      - CLOUDFLARE_REDIRECT_HMAC_KEY
+      - CLOUDFLARE_REDIRECT_ORIGIN_PULL_CA_BASE64
+      - CLOUDFLARE_REDIRECT_INGRESS_CERT_BASE64
+      - CLOUDFLARE_REDIRECT_INGRESS_KEY_BASE64
+      - CLOUDFLARE_REDIRECT_ORIGIN_ALLOWLIST_BASE64
+      - REDIRECT_SYNC_SERVER_CERT_BASE64
+      - REDIRECT_SYNC_SERVER_KEY_BASE64
+      - REDIRECT_SYNC_CLIENT_CA_BASE64
+      - REDIRECT_SYNC_SOURCE_ALLOWLIST_BASE64
+      - CLICKUP_API_TOKEN
+      - CLICKUP_LIST_ID
+      - AWS_ACCESS_KEY
+      - AWS_SECRET_ACCESS_KEY
+      - SHORT_IO_API_KEY
+      - DELIVERABILITY_ADMIN_API_KEY
+      - DELIVERABILITY_INTERNAL_API_KEY
+      - PORKBUN_API_KEY
+      - PORKBUN_SECRET_API_KEY
+      - SPAMHAUS_DQS_KEY
+      - ABUSEIPDB_API_KEY
+      - UNIPILE_API_KEY
+      - EMAIL_BISON__ADMIN_API_KEY
+      - HYPERTIDE_API_TOKEN
+      - JWT_SECRET
+      - INSTANTLY_API_KEY
+      - OPEN_AI_API_KEY
+      - ANTHROPIC_API_KEY
+      - xAI_API_KEY
+      - OPEN_ROUTER_API_KEY
+      - TOGETHER_AI_API_KEY
+      - FIREWORKS_AI_API_KEY
+      - FIREWORKS_ACCOUNT_ID
+      - MOONSHOT_API_KEY
+      - DOUBLEWORD_API_KEY
+      - DEEPSEEK_API_KEY
+      - PLUSVIBE_API_KEY
+      - PLUSVIBE_WORKSPACE_ID
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      - LANGFUSE_BASE_URL
+      - WEBHOOK_SECURITY_API_KEY
+      - CLERK_WEBHOOK_SECRET
+      - CLERK_SECRET_KEY
+      - KEN_SEARCH_INTERNAL_TOKEN
+      - REDIRECT_INGEST_INTERNAL_TOKEN
+      - INBOXKIT_API_KEY
+      - INBOXKIT_WORKSPACE_ID
+      - OUT_ENGINE_API_KEY
+      - OUT_ENGINE_CUSTOMER_ID
+      - FIRECRAWL_BASE_URL
+      - AUTOMATIONS_WEBHOOK_SECRET_KEY
+      - KEN_SEARCH_CLERK_USER_ID
+      - SVIX_AUTH_TOKEN
+      - KEN_AI_ADMIN_API_KEY
+      - STRIPE_API_KEY
+      - STRIPE_WEBHOOK_SIGNING_SECRET
+      - MISTRAL_API_KEY
+      - ONBOARDING_PREFILL_INTERNAL_TOKEN
+      - LEAD_MAGIC_API_KEY
+      - DEMO_PERSONALIZATION_API_KEY
+      - DEMO_PERSONALIZATION_REF_SIGNING_SECRET
+      - TWENTY_CRM_API_KEY
+      - KEN_REDIRECT_BASE_URL
+      - KEN_REDIRECT_BEARER_TOKEN
+      - KEN_REDIRECT_CLIENT_PFX_PASSWORD
+      - REDIRECT_WATCHDOG_ALERT_TOKEN_SHA256
+      - CALENDLY_CLIENT_ID
+      - CALENDLY_CLIENT_SECRET
+      - HUBSPOT_CLIENT_ID
+      - HUBSPOT_CLIENT_SECRET
+      - CALCOM_CLIENT_ID
+      - CALCOM_CLIENT_SECRET
+      - CLOUDFLARE_EDGE_CLICK_INGEST_BEARER_PRODUCTION
+      - ICYPEAS_API_KEY
+      - APIFY_API_KEY
+      - PROSPEO_API_KEY
+      - KITT_API_KEY
+      - ENROW_API_KEY
+      - FINDYMAIL_API_KEY
+      - MAIL_TESTER_API_KEY
+      - BACKBLAZE_KEY_ID
+      - BACKBLAZE_APPLICATION_KEY
+      - BACKBLAZE_BUCKET_NAME
+      - RESEND_API_KEY
+      - RESEND_CONTACT_SYNC_ENABLED
+      - RESEND_FREE_SEGMENT_ID
+      - RESEND_STARTER_SEGMENT_ID
+      - RESEND_GROWTH_SEGMENT_ID
+      - SECRET_STORE_KEY_V1
+      - WORLDSTREAM_USER
+      - WORLDSTREAM_PASSWORD
+      - KEN_REDIRECT_CLIENT_PFX_BASE64
+      variable_names:
+      - CLOUDFLARE_REDIRECT_INGRESS_ENABLED
+      - CLOUDFLARE_REDIRECT_INGRESS_HOSTNAME
+      - CLOUDFLARE_REDIRECT_STANDBY_HOSTNAME
+      - REDIRECT_SYNC_INGRESS_ENABLED
+      - REDIRECT_SYNC_STANDBY_HOSTNAME
+      - CampaignTechnologyDetection__Enabled
+      - CampaignTechnologyDetection__AllowedClientIds__0
+      - TechnologyObservationOutbox__Enabled
+      - TechnologyObservationOutbox__AllowedClientIds__0
+      - KenSearch__Enabled
+      - QuartzJobConfiguration__Jobs__2__Enabled
+      artifacts: []
+      target_hints:
+      - Worldstream
+      - Cloudflare
+      - NuGet
+      - ClickUp
+      - Langfuse
+      - OVH
+      - api.getken.ai
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/grok-pr-review.yml
+    name: Grok PR Review
+    triggers:
+    - pull_request
+    - issue_comment
+    - workflow_dispatch
+    permissions: &id011
+      contents: read
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: "${{\n  (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '/grok-review'))\n  &&\
+        \ format('grok-pr-review-noop-{0}', github.run_id)\n  || format('grok-pr-review-{0}', github.event.pull_request.number\
+        \ || github.event.issue.number || inputs.pr_number || github.run_id)\n}}"
+      cancel-in-progress: true
+    secret_names:
+    - GROK_REVIEW_GH_TOKEN
+    variable_names: []
+    jobs:
+    - id: gate
+      name: Should review?
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id011
+      uses:
+      - actions/checkout@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: existing-grok-review-gate
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+    - id: review
+      name: Grok review (self-hosted)
+      runs_on: '[self-hosted, grok-review]'
+      resolved_runs_on:
+      - '[self-hosted, grok-review]'
+      environment: null
+      environment_name: null
+      needs:
+      - gate
+      permissions: *id011
+      uses:
+      - actions/checkout@v4
+      - actions/upload-artifact@v4
+      secret_names:
+      - GROK_REVIEW_GH_TOKEN
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v4
+      target_hints: []
+      classification: existing-grok-review
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, grok-review]'
+      secret_class: grok-review-unchanged
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+  - path: .github/workflows/pin-guarded-wave-tooling.yml
+    name: Pin guarded-wave tooling
+    triggers:
+    - workflow_dispatch
+    permissions: &id012
+      contents: read
+    concurrency:
+      group: pin-guarded-wave-tooling
+      cancel-in-progress: false
+    secret_names:
+    - REDIRECT_RELEASE_SIGNING_PRIVATE_KEY
+    - REDIRECT_DEPLOY_SSH_KEY
+    - REDIRECT_DEPLOY_HOST
+    - REDIRECT_DEPLOY_HOST_KEY
+    variable_names: []
+    jobs:
+    - id: pin
+      name: pin
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment:
+        name: Production
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: Production
+      needs: []
+      permissions: *id012
+      uses:
+      - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      secret_names:
+      - REDIRECT_RELEASE_SIGNING_PRIVATE_KEY
+      - REDIRECT_DEPLOY_SSH_KEY
+      - REDIRECT_DEPLOY_HOST
+      - REDIRECT_DEPLOY_HOST_KEY
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/production-database-ops.yml
+    name: Production database operational guardrails
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency:
+      group: production-database-ops-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    secret_names:
+    - sh
+    variable_names: []
+    jobs:
+    - id: validate
+      name: validate
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      secret_names:
+      - sh
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - SECRET_BEARING_PR
+  - path: .github/workflows/publish-auth-api-keys.yml
+    name: Publish Ken.Auth.ApiKeys
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: &id013
+      contents: read
+      packages: write
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: publish
+      name: publish
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id013
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - NuGet
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/sql-migration-lint.yml
+    name: SQL Migration Lint
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: lint
+      name: lint
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+  - path: .github/workflows/test-cloudflare-redirector.yml
+    name: Test Cloudflare redirector
+    triggers:
+    - pull_request
+    permissions: &id014
+      contents: read
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: test
+      name: test
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id014
+      uses:
+      - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a
+      - actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - npm
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/test-redirector-python.yml
+    name: Redirector Python tests
+    triggers:
+    - pull_request
+    - push
+    permissions: &id015
+      contents: read
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: test
+      name: test
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id015
+      uses:
+      - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+- name: ken-brain
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: f1aebc6c88957df6ae61dddc6799d84dd42cb241
+  workflow_count: 1
+  job_count: 2
+  workflows:
+  - path: .github/workflows/ci.yml
+    name: CI
+    triggers:
+    - push
+    - pull_request
+    permissions: null
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    secret_names:
+    - SSH_KEY
+    - SSH_KNOWN_HOSTS
+    - SSH_HOST
+    - SSH_USER
+    variable_names: []
+    jobs:
+    - id: test
+      name: test
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - astral-sh/setup-uv@v5
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment:
+        name: Prod
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: Prod
+      needs:
+      - test
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      secret_names:
+      - SSH_KEY
+      - SSH_KNOWN_HOSTS
+      - SSH_HOST
+      - SSH_USER
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - Hetzner
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+- name: ken-cms
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 3aee469137a5f7675c4d9b6dda2b07a87e12d54e
+  workflow_count: 1
+  job_count: 1
+  workflows:
+  - path: .github/workflows/deploy.yml
+    name: Deploy CMS
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: cms-production
+      cancel-in-progress: false
+    secret_names:
+    - GITHUB_TOKEN
+    - SSH_HOST
+    - SSH_USER
+    - SSH_KEY
+    - SSH_PORT
+    - PAYLOAD_SECRET
+    - CMS_REVALIDATE_SECRET
+    - POSTGRES_PASSWORD
+    - POSTGRES_USER
+    - POSTGRES_DB
+    - OAUTH2_PROXY_CLIENT_ID
+    - OAUTH2_PROXY_CLIENT_SECRET
+    - OAUTH2_PROXY_COOKIE_SECRET
+    variable_names: []
+    jobs:
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        contents: read
+        packages: write
+      uses:
+      - actions/checkout@v4
+      - docker/setup-buildx-action@v3
+      - docker/login-action@v3
+      - docker/build-push-action@v6
+      - appleboy/scp-action@v1.0.0
+      - appleboy/ssh-action@v1.2.5
+      secret_names:
+      - GITHUB_TOKEN
+      - SSH_HOST
+      - SSH_USER
+      - SSH_KEY
+      - SSH_PORT
+      - PAYLOAD_SECRET
+      - CMS_REVALIDATE_SECRET
+      - POSTGRES_PASSWORD
+      - POSTGRES_USER
+      - POSTGRES_DB
+      - OAUTH2_PROXY_CLIENT_ID
+      - OAUTH2_PROXY_CLIENT_SECRET
+      - OAUTH2_PROXY_COOKIE_SECRET
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+- name: ken-daily
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: f27ab878ca53c9acd6a83c7a4c3aa0117037596b
+  workflow_count: 2
+  job_count: 3
+  workflows:
+  - path: .github/workflows/ci.yml
+    name: CI
+    triggers:
+    - push
+    - pull_request
+    permissions: null
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: test
+      name: Lint & test
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - astral-sh/setup-uv@v5
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy.yml
+    name: Deploy
+    triggers:
+    - workflow_run
+    permissions: null
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    secret_names:
+    - DEPLOY_HOST
+    - DEPLOY_USER
+    - DEPLOY_SSH_KEY
+    - CLICKUP_WEBHOOK_URL
+    variable_names: []
+    jobs:
+    - id: deploy
+      name: Build on server & deploy
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - appleboy/ssh-action@v1
+      secret_names:
+      - DEPLOY_HOST
+      - DEPLOY_USER
+      - DEPLOY_SSH_KEY
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+    - id: notify
+      name: Notify ClickUp
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs:
+      - deploy
+      permissions: null
+      uses: []
+      secret_names:
+      - CLICKUP_WEBHOOK_URL
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - ClickUp
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+- name: ken-email-deliverability-dashboard
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 97678badbd37fb4a0d9119da218717b93fba06ce
+  workflow_count: 0
+  job_count: 0
+  workflows: []
+- name: ken-frontend
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: f36a3861ca682ef4068b275ddc2f0a34a7421c57
+  workflow_count: 4
+  job_count: 8
+  workflows:
+  - path: .github/workflows/ci.yml
+    name: CI
+    triggers:
+    - pull_request
+    - push
+    permissions: null
+    concurrency:
+      group: ci-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    secret_names:
+    - CLERK_SECRET_KEY
+    variable_names: []
+    jobs:
+    - id: ci
+      name: CI
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v7
+      - pnpm/action-setup@v4
+      - actions/setup-node@v6
+      - actions/upload-artifact@v7
+      secret_names:
+      - CLERK_SECRET_KEY
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v7
+      target_hints:
+      - npm
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - SECRET_BEARING_PR
+    - id: security
+      name: Security Scan
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v7
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+  - path: .github/workflows/deploy.yml
+    name: Deploy
+    triggers:
+    - schedule
+    - schedule:0 7 * * *
+    - workflow_dispatch
+    permissions: &id016
+      contents: read
+      actions: read
+      packages: write
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    secret_names:
+    - GITHUB_TOKEN
+    - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+    - NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
+    - POSTHOG_PERSONAL_API_KEY
+    - POSTHOG_PROJECT_ID
+    - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+    - GHCR_PULL_TOKEN
+    - CLICKUP_WEBHOOK_URL
+    - DEPLOY_HOST
+    - DEPLOY_USER
+    - DEPLOY_SSH_KEY
+    - CLERK_SECRET_KEY
+    - BACKEND_API_URL
+    - KEN_SEARCH_URL
+    - APP_ORIGINS
+    - XAI_API_KEY
+    - MOONSHOT_API_KEY
+    - ZAI_API_KEY
+    - DEEPSEEK_API_KEY
+    - DOUBLEWORD_API_KEY
+    - FIREWORKS_API_KEY
+    - OPENROUTER_API_KEY
+    - KEN_AI_MCP_URL
+    - KEN_AI_ADMIN_API_KEY
+    - LANGFUSE_PUBLIC_KEY
+    - LANGFUSE_SECRET_KEY
+    - LANGFUSE_BASE_URL
+    - ONBOARDING_PREFILL_INTERNAL_TOKEN
+    - KEN_AGENTS_INTERNAL_KEY
+    variable_names:
+    - NEXT_PUBLIC_TECHNOLOGY_FILTER_ENABLED
+    - NEXT_PUBLIC_TECHNOLOGY_FILTER_ALLOWED_CLIENT_IDS
+    - NEXT_PUBLIC_EXPERIMENTS_ALLOWED_CLIENT_IDS
+    jobs:
+    - id: should-deploy
+      name: should-deploy
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id016
+      uses: []
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: deploy-gate
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+    - id: build-image
+      name: Build & push image
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment:
+        name: production
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: production
+      needs:
+      - should-deploy
+      permissions: *id016
+      uses:
+      - actions/checkout@v7
+      - docker/setup-buildx-action@v4
+      - docker/login-action@v4
+      - docker/build-push-action@v6
+      secret_names:
+      - GITHUB_TOKEN
+      - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+      - NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
+      - POSTHOG_PERSONAL_API_KEY
+      - POSTHOG_PROJECT_ID
+      - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+      variable_names:
+      - NEXT_PUBLIC_TECHNOLOGY_FILTER_ENABLED
+      - NEXT_PUBLIC_TECHNOLOGY_FILTER_ALLOWED_CLIENT_IDS
+      - NEXT_PUBLIC_EXPERIMENTS_ALLOWED_CLIENT_IDS
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+    - id: deploy
+      name: Deploy to Server
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment:
+        name: production
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: production
+      needs:
+      - build-image
+      permissions: *id016
+      uses:
+      - appleboy/ssh-action@v1
+      secret_names:
+      - GHCR_PULL_TOKEN
+      - CLICKUP_WEBHOOK_URL
+      - DEPLOY_HOST
+      - DEPLOY_USER
+      - DEPLOY_SSH_KEY
+      - CLERK_SECRET_KEY
+      - BACKEND_API_URL
+      - KEN_SEARCH_URL
+      - APP_ORIGINS
+      - XAI_API_KEY
+      - MOONSHOT_API_KEY
+      - ZAI_API_KEY
+      - DEEPSEEK_API_KEY
+      - DOUBLEWORD_API_KEY
+      - FIREWORKS_API_KEY
+      - OPENROUTER_API_KEY
+      - KEN_AI_MCP_URL
+      - KEN_AI_ADMIN_API_KEY
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      - LANGFUSE_BASE_URL
+      - ONBOARDING_PREFILL_INTERNAL_TOKEN
+      - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+      - KEN_AGENTS_INTERNAL_KEY
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      - ClickUp
+      - Langfuse
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+  - path: .github/workflows/grok-pr-review.yml
+    name: Grok PR Review
+    triggers:
+    - pull_request
+    - issue_comment
+    - workflow_dispatch
+    permissions: &id017
+      contents: read
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: "${{\n  (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '/grok-review'))\n  &&\
+        \ format('grok-pr-review-noop-{0}', github.run_id)\n  || format('grok-pr-review-{0}', github.event.pull_request.number\
+        \ || github.event.issue.number || inputs.pr_number || github.run_id)\n}}"
+      cancel-in-progress: true
+    secret_names:
+    - GROK_REVIEW_GH_TOKEN
+    variable_names: []
+    jobs:
+    - id: gate
+      name: Should review?
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id017
+      uses:
+      - actions/checkout@v7
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: existing-grok-review-gate
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+    - id: review
+      name: Grok review (self-hosted)
+      runs_on: '[self-hosted, grok-review]'
+      resolved_runs_on:
+      - '[self-hosted, grok-review]'
+      environment: null
+      environment_name: null
+      needs:
+      - gate
+      permissions: *id017
+      uses:
+      - actions/checkout@v7
+      - actions/upload-artifact@v7
+      secret_names:
+      - GROK_REVIEW_GH_TOKEN
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v7
+      target_hints: []
+      classification: existing-grok-review
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, grok-review]'
+      secret_class: grok-review-unchanged
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+  - path: .github/workflows/publish-campaign-build-prompts.yml
+    name: Publish campaign-build prompts
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: publish-campaign-build-prompts
+      cancel-in-progress: false
+    secret_names:
+    - LANGFUSE_PUBLIC_KEY
+    - LANGFUSE_SECRET_KEY
+    variable_names: []
+    jobs:
+    - id: publish
+      name: Publish to Langfuse (production)
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v7
+      - pnpm/action-setup@v4
+      - actions/setup-node@v6
+      secret_names:
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - npm
+      - Langfuse
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+- name: ken-help
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: cc1586f7f8e52762502750dbde68a445596a0898
+  workflow_count: 1
+  job_count: 2
+  workflows:
+  - path: .github/workflows/ci.yml
+    name: CI
+    triggers:
+    - push
+    - pull_request
+    permissions: null
+    concurrency: null
+    secret_names:
+    - DEPLOY_SSH_KEY
+    - DEPLOY_KNOWN_HOSTS
+    - DEPLOY_USER
+    - DEPLOY_HOST
+    - DEPLOY_PATH
+    variable_names: []
+    jobs:
+    - id: build
+      name: Lint, content-check & build
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - pnpm/action-setup@v4
+      - actions/setup-node@v4
+      - actions/upload-artifact@v4
+      secret_names: []
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v4
+      target_hints:
+      - npm
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: deploy
+      name: Deploy to help.ken.so
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs:
+      - build
+      permissions: null
+      uses:
+      - actions/download-artifact@v4
+      secret_names:
+      - DEPLOY_SSH_KEY
+      - DEPLOY_KNOWN_HOSTS
+      - DEPLOY_USER
+      - DEPLOY_HOST
+      - DEPLOY_PATH
+      variable_names: []
+      artifacts:
+      - actions/download-artifact@v4
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+- name: ken-hermes-clickup
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 751028fa9eb65920c5588996234cab99482a71e0
+  workflow_count: 2
+  job_count: 5
+  workflows:
+  - path: .github/workflows/ci.yml
+    name: CI
+    triggers:
+    - pull_request
+    - push
+    - workflow_call
+    - workflow_dispatch
+    permissions: &id018
+      contents: read
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: test
+      name: tests
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id018
+      uses:
+      - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: static
+      name: syntax
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id018
+      uses:
+      - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: secrets-guard
+      name: secret hygiene
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id018
+      uses:
+      - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - ClickUp
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy.yml
+    name: Deploy
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: &id019
+      contents: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    secret_names:
+    - DEPLOY_HOST
+    - DEPLOY_USER
+    - DEPLOY_SSH_KEY
+    - DEPLOY_SSH_KNOWN_HOSTS
+    variable_names: []
+    jobs:
+    - id: test
+      name: test
+      runs_on: ''
+      resolved_runs_on: []
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id019
+      uses:
+      - ./.github/workflows/ci.yml
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: reusable-workflow-call
+      target_runner_class: inherit-called-workflow
+      target_runs_on: ''
+      secret_class: inherit
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags: []
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment:
+        name: production
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: production
+      needs:
+      - test
+      permissions: *id019
+      uses:
+      - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      secret_names:
+      - DEPLOY_HOST
+      - DEPLOY_USER
+      - DEPLOY_SSH_KEY
+      - DEPLOY_SSH_KNOWN_HOSTS
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - ClickUp
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+- name: ken-plugins
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 26b9d9f521c711ad168febf61f08832155ace355
+  workflow_count: 0
+  job_count: 0
+  workflows: []
+- name: ken-scraping
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 8f991a8604a734fa7f479e86ac7fc559349efc34
+  workflow_count: 32
+  job_count: 38
+  workflows:
+  - path: .github/workflows/deploy-camoufox.yml
+    name: Deploy Camoufox to GHCR
+    triggers:
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: build
+      name: build
+      runs_on: ${{ matrix.runner }}
+      resolved_runs_on:
+      - ${{ matrix.runner }}
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@main
+      - useblacksmith/setup-docker-builder@ef12d5b165b596e3aa44ea8198d8fde563eab402
+      - docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+      - useblacksmith/build-push-action@30c71162f16ea2c27c3e21523255d209b8b538c1
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - COMBINED_BUILD_AND_DEPLOY
+    - id: manifest
+      name: manifest
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs:
+      - build
+      permissions: null
+      uses:
+      - docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy-go-service.yaml
+    name: Deploy Go Service to GHCR
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: push-app-image
+      name: push-app-image
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@main
+      - useblacksmith/setup-docker-builder@v1
+      - docker/login-action@v3
+      - useblacksmith/build-push-action@v2
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/deploy-image-staging.yml
+    name: STAGING Deploy Images to GHCR
+    triggers:
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: push-app-image
+      name: push-app-image
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@main
+      - docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: nonproduction-deploy
+      target_runner_class: ken-deploy-nonproduction
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, nonproduction]'
+      secret_class: deploy-nonproduction
+      production_impact: false
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/deploy-image.yml
+    name: Deploy Images to GHCR
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: &id020
+      contents: read
+      packages: write
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: build
+      name: build
+      runs_on: ${{ matrix.runner }}
+      resolved_runs_on:
+      - ${{ matrix.runner }}
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id020
+      uses:
+      - actions/checkout@main
+      - useblacksmith/setup-docker-builder@ef12d5b165b596e3aa44ea8198d8fde563eab402
+      - docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+      - useblacksmith/build-push-action@30c71162f16ea2c27c3e21523255d209b8b538c1
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - COMBINED_BUILD_AND_DEPLOY
+    - id: manifest
+      name: manifest
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs:
+      - build
+      permissions: *id020
+      uses:
+      - docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy-nuq-postgres.yml
+    name: Deploy NuQ Postgres to GHCR
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: push-app-image
+      name: push-app-image
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@main
+      - docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/deploy-ovh.yml
+    name: Deploy to OVH
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: deploy-ovh
+      cancel-in-progress: false
+    secret_names:
+    - OVH_DEPLOY_SSH_KEY
+    - OVH_HOST_KEY
+    - OVH_ENV_USE_DB_AUTHENTICATION
+    - OVH_ENV_SEARXNG_ENDPOINT
+    - OVH_ENV_REDIS_PASSWORD
+    - OVH_ENV_REDIS_URL
+    - OVH_ENV_REDIS_RATE_LIMIT_URL
+    - OVH_ENV_RABBITMQ_DEFAULT_USER
+    - OVH_ENV_RABBITMQ_DEFAULT_PASS
+    - OVH_ENV_SEARXNG_SECRET_KEY
+    - OVH_ENV_POSTGRES_USER
+    - OVH_ENV_POSTGRES_PASSWORD
+    - OVH_ENV_POSTGRES_DB
+    - OVH_ENV_NUQ_WORKER_COUNT
+    - OVH_ENV_CRAWL_CONCURRENT_REQUESTS
+    - OVH_ENV_MAX_CPU
+    - OVH_ENV_MAX_RAM
+    - OVH_ENV_BLOCK_MEDIA
+    - OVH_ENV_NUM_WORKERS_PER_QUEUE
+    - OVH_ENV_MAX_CONCURRENT_JOBS
+    - OVH_ENV_BROWSER_POOL_SIZE
+    - OVH_ENV_PROXY_CHEAP_API_KEY
+    - OVH_ENV_PROXY_CHEAP_API_SECRET
+    - OVH_ENV_PROXY_CHEAP_REFRESH_INTERVAL_MS
+    - OVH_ENV_CAPTCHA_API_KEY
+    variable_names: []
+    jobs:
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses: []
+      secret_names:
+      - OVH_DEPLOY_SSH_KEY
+      - OVH_HOST_KEY
+      - OVH_ENV_USE_DB_AUTHENTICATION
+      - OVH_ENV_SEARXNG_ENDPOINT
+      - OVH_ENV_REDIS_PASSWORD
+      - OVH_ENV_REDIS_URL
+      - OVH_ENV_REDIS_RATE_LIMIT_URL
+      - OVH_ENV_RABBITMQ_DEFAULT_USER
+      - OVH_ENV_RABBITMQ_DEFAULT_PASS
+      - OVH_ENV_SEARXNG_SECRET_KEY
+      - OVH_ENV_POSTGRES_USER
+      - OVH_ENV_POSTGRES_PASSWORD
+      - OVH_ENV_POSTGRES_DB
+      - OVH_ENV_NUQ_WORKER_COUNT
+      - OVH_ENV_CRAWL_CONCURRENT_REQUESTS
+      - OVH_ENV_MAX_CPU
+      - OVH_ENV_MAX_RAM
+      - OVH_ENV_BLOCK_MEDIA
+      - OVH_ENV_NUM_WORKERS_PER_QUEUE
+      - OVH_ENV_MAX_CONCURRENT_JOBS
+      - OVH_ENV_BROWSER_POOL_SIZE
+      - OVH_ENV_PROXY_CHEAP_API_KEY
+      - OVH_ENV_PROXY_CHEAP_API_SECRET
+      - OVH_ENV_PROXY_CHEAP_REFRESH_INTERVAL_MS
+      - OVH_ENV_CAPTCHA_API_KEY
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - OVH
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy-playwright.yml
+    name: Deploy Playwright to GHCR
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: build
+      name: build
+      runs_on: ${{ matrix.runner }}
+      resolved_runs_on:
+      - ${{ matrix.runner }}
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@main
+      - useblacksmith/setup-docker-builder@ef12d5b165b596e3aa44ea8198d8fde563eab402
+      - docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+      - useblacksmith/build-push-action@30c71162f16ea2c27c3e21523255d209b8b538c1
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - COMBINED_BUILD_AND_DEPLOY
+    - id: manifest
+      name: manifest
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs:
+      - build
+      permissions: null
+      uses:
+      - docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy-redis.yml
+    name: Deploy Redis to GHCR
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: push-app-image
+      name: push-app-image
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@main
+      - docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      - ghcr.io
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/eval-prod.yml
+    name: Run Eval Benchmark Prod
+    triggers:
+    - workflow_run
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - EVAL_API_URL
+    - EVAL_API_KEY
+    - EVAL_BENCHMARK_EXPERIMENT_ID
+    variable_names: []
+    jobs:
+    - id: run-eval-benchmark-prod
+      name: run-eval-benchmark-prod
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/ghcr-clean.yml
+    name: Cleanup Untagged Images
+    triggers:
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: delete-untagged-images
+      name: Delete Untagged Images
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - bots-house/ghcr-delete-image-action@3827559c68cb4dcdf54d813ea9853be6d468d3a4
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - GHCR
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/grok-pr-review.yml
+    name: Grok PR Review
+    triggers:
+    - pull_request
+    - issue_comment
+    - workflow_dispatch
+    permissions: &id021
+      contents: read
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: "${{\n  (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '/grok-review'))\n  &&\
+        \ format('grok-pr-review-noop-{0}', github.run_id)\n  || format('grok-pr-review-{0}', github.event.pull_request.number\
+        \ || github.event.issue.number || inputs.pr_number || github.run_id)\n}}"
+      cancel-in-progress: true
+    secret_names:
+    - GROK_REVIEW_GH_TOKEN
+    variable_names: []
+    jobs:
+    - id: gate
+      name: Should review?
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id021
+      uses:
+      - actions/checkout@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: existing-grok-review-gate
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+    - id: review
+      name: Grok review (self-hosted)
+      runs_on: '[self-hosted, grok-review]'
+      resolved_runs_on:
+      - '[self-hosted, grok-review]'
+      environment: null
+      environment_name: null
+      needs:
+      - gate
+      permissions: *id021
+      uses:
+      - actions/checkout@v4
+      - actions/upload-artifact@v4
+      secret_names:
+      - GROK_REVIEW_GH_TOKEN
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v4
+      target_hints: []
+      classification: existing-grok-review
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, grok-review]'
+      secret_class: grok-review-unchanged
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+  - path: .github/workflows/lint-workflows.yml
+    name: Lint Workflows
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: &id022
+      contents: read
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: actionlint
+      name: actionlint
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id022
+      uses:
+      - actions/checkout@v5
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/npm-audit.yml
+    name: Audit NPM Packages
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: audit
+      name: audit
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - npm
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/publish-dotnet-sdk.yml
+    name: Publish .NET SDK
+    triggers:
+    - workflow_dispatch
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - NUGET_API_KEY
+    variable_names: []
+    jobs:
+    - id: publish
+      name: Publish to NuGet
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - actions/setup-python@v5
+      - actions/setup-dotnet@v4
+      secret_names:
+      - NUGET_API_KEY
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - NuGet
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/publish-elixir-sdk.yml
+    name: Publish Elixir SDK
+    triggers:
+    - schedule
+    - schedule:0 6 * * *
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - HEX_API_KEY
+    variable_names: []
+    jobs:
+    - id: regenerate
+      name: regenerate
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - erlef/setup-beam@ee09b1e59bb240681c382eb1f0abc6a04af72764
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: nonproduction-deploy
+      target_runner_class: ken-deploy-nonproduction
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, nonproduction]'
+      secret_class: deploy-nonproduction
+      production_impact: false
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: publish
+      name: publish
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - erlef/setup-beam@ee09b1e59bb240681c382eb1f0abc6a04af72764
+      secret_names:
+      - HEX_API_KEY
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/publish-go-sdk.yml
+    name: Publish Go SDK
+    triggers:
+    - workflow_dispatch
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: publish
+      name: Tag and index on pkg.go.dev
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        contents: write
+      uses:
+      - actions/checkout@v4
+      - actions/setup-go@v5
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/publish-java-sdk.yml
+    name: Publish Java SDK
+    triggers:
+    - workflow_dispatch
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - MAVEN_USERNAME
+    - MAVEN_PASSWORD
+    - GPG_SIGNING_KEY
+    - GPG_SIGNING_PASSWORD
+    variable_names: []
+    jobs:
+    - id: publish
+      name: Publish to Maven Central
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - actions/setup-python@v5
+      - actions/setup-java@v4
+      - actions/cache@v4
+      secret_names:
+      - MAVEN_USERNAME
+      - MAVEN_PASSWORD
+      - GPG_SIGNING_KEY
+      - GPG_SIGNING_PASSWORD
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - Maven
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/publish-js-sdk.yml
+    name: Publish JS SDK
+    triggers:
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - TEST_API_KEY
+    - NPM_TOKEN
+    variable_names: []
+    jobs:
+    - id: publish
+      name: Publish
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - actions/setup-node@v4
+      secret_names:
+      - NPM_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - npm
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/publish-php-sdk.yml
+    name: Publish PHP SDK
+    triggers:
+    - workflow_dispatch
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - PHP_SDK_DEPLOY_KEY
+    - PACKAGIST_USERNAME
+    - PACKAGIST_TOKEN
+    variable_names: []
+    jobs:
+    - id: publish
+      name: Publish to Packagist
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - actions/setup-python@v5
+      - shivammathur/setup-php@v2
+      - webfactory/ssh-agent@v0.9.0
+      secret_names:
+      - PHP_SDK_DEPLOY_KEY
+      - PACKAGIST_USERNAME
+      - PACKAGIST_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/publish-python-sdk.yml
+    name: Publish Python SDK
+    triggers:
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - PYPI_USERNAME
+    - PYPI_PASSWORD
+    variable_names: []
+    jobs:
+    - id: build-and-publish
+      name: build-and-publish
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - actions/setup-python@v5
+      secret_names:
+      - PYPI_USERNAME
+      - PYPI_PASSWORD
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - PyPI
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/publish-ruby-sdk.yml
+    name: Publish Ruby SDK
+    triggers:
+    - workflow_dispatch
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - RUBYGEMS_API_KEY
+    variable_names: []
+    jobs:
+    - id: publish
+      name: Publish to RubyGems
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - actions/setup-python@v5
+      - ruby/setup-ruby@v1
+      secret_names:
+      - RUBYGEMS_API_KEY
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/publish-rust-sdk.yml
+    name: Publish Rust SDK
+    triggers:
+    - workflow_dispatch
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - CRATES_IO_TOKEN
+    variable_names: []
+    jobs:
+    - id: publish
+      name: Publish to crates.io
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-python@v5
+      - dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      - actions/cache@v4
+      secret_names:
+      - CRATES_IO_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/scrape-evals.yml
+    name: Scrape Evals
+    triggers:
+    - issue_comment
+    - pull_request
+    permissions: null
+    concurrency: null
+    secret_names:
+    - SCRAPE_EVALS_PAT
+    variable_names: []
+    jobs:
+    - id: quality-eval
+      name: quality-eval
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/github-script@v7
+      secret_names:
+      - SCRAPE_EVALS_PAT
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+    - id: ocr-eval
+      name: ocr-eval
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/github-script@v7
+      secret_names:
+      - SCRAPE_EVALS_PAT
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+  - path: .github/workflows/test-dotnet-sdk.yml
+    name: .NET SDK Test Suite
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: build-and-test
+      name: Build and Test
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      - dorny/test-reporter@3eeb9fc888e82e8be2fb356bbeec2750231672bc
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/test-go-sdk.yml
+    name: Go SDK Check
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: build-and-vet
+      name: Build and Vet
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-go@v5
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/test-java-sdk.yml
+    name: Java SDK Test Suite
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - FIRECRAWL_API_KEY
+    variable_names: []
+    jobs:
+    - id: build-and-test
+      name: Build and Test
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-java@v4
+      - actions/cache@v4
+      - dorny/test-reporter@3eeb9fc888e82e8be2fb356bbeec2750231672bc
+      secret_names:
+      - FIRECRAWL_API_KEY
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+  - path: .github/workflows/test-js-sdk.yml
+    name: JS SDK Test Suite
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency: null
+    secret_names:
+    - IDMUX_URL
+    - TS_OAUTH_CLIENT_ID
+    - TS_OAUTH_SECRET
+    variable_names: []
+    jobs:
+    - id: test
+      name: Run tests
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - actions/setup-node@v4
+      - tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+      secret_names:
+      - TS_OAUTH_CLIENT_ID
+      - TS_OAUTH_SECRET
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - npm
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+  - path: .github/workflows/test-php-sdk.yml
+    name: PHP SDK Test Suite
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names:
+    - FIRECRAWL_API_KEY
+    variable_names: []
+    jobs:
+    - id: build-and-test
+      name: Build and Test
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - shivammathur/setup-php@v2
+      - actions/cache@v4
+      secret_names:
+      - FIRECRAWL_API_KEY
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+  - path: .github/workflows/test-ruby-sdk.yml
+    name: Ruby SDK Test Suite
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: build-and-test
+      name: Build and Test
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - ruby/setup-ruby@v1
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/test-rust-sdk.yml
+    name: Rust SDK Test Suite
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: test
+      name: Build and Test
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      - actions/cache@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/test-server.yml
+    name: Server Test Suite
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency:
+      group: ci=${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    secret_names:
+    - OPENAI_API_KEY
+    - GOOGLE_GENERATIVE_AI_API_KEY
+    - PROXY_SERVER
+    - PROXY_USERNAME
+    - PROXY_PASSWORD
+    - BULL_AUTH_KEY
+    - REDIS_URL
+    - SUPABASE_ANON_TOKEN
+    - SUPABASE_SERVICE_TOKEN
+    - SUPABASE_URL
+    - SUPABASE_REPLICA_URL
+    - INDEX_SUPABASE_SERVICE_TOKEN
+    - INDEX_SUPABASE_ANON_TOKEN
+    - INDEX_SUPABASE_URL
+    - TEST_API_KEY
+    - TEST_TEAM_ID
+    - TEST_API_KEY_CONCURRENCY
+    - TEST_TEAM_ID_CONCURRENCY
+    - TEST_API_KEY_ZDR
+    - TEST_TEAM_ID_ZDR
+    - FIRE_ENGINE_BETA_URL
+    - FIRE_ENGINE_STAGING_URL
+    - ENV
+    - RUNPOD_MU_POD_ID
+    - RUNPOD_MUV2_POD_ID
+    - RUNPOD_MU_API_KEY
+    - GCS_CREDENTIALS
+    - GCS_BUCKET_NAME
+    - GCS_INDEX_BUCKET_NAME
+    - GCS_MEDIA_BUCKET_NAME
+    - GROQ_API_KEY
+    - ANTHROPIC_API_KEY
+    - VERTEX_CREDENTIALS
+    - IDMUX_URL
+    - LOG_ENCRYPTION_KEY
+    - TEST_SUITE_WEBSITE
+    - TS_OAUTH_CLIENT_ID
+    - TS_OAUTH_SECRET
+    variable_names: []
+    jobs:
+    - id: self-host
+      name: Self-hosted environment tests
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      - actions/setup-node@v6
+      - actions/cache/restore@v4
+      - actions/cache/save@v4
+      - actions/setup-go@v6
+      - actions/upload-artifact@v4
+      secret_names:
+      - OPENAI_API_KEY
+      - GOOGLE_GENERATIVE_AI_API_KEY
+      - PROXY_SERVER
+      - PROXY_USERNAME
+      - PROXY_PASSWORD
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v4
+      target_hints:
+      - npm
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+  - path: .github/workflows/validate-lockfiles.yml
+    name: Validate Lockfiles
+    triggers:
+    - pull_request
+    permissions: null
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: validate
+      name: validate
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v5
+      - pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - npm
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+- name: ken-search
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 0c2488ecead8b4e11724cd07fdccee55ccb1b6fb
+  workflow_count: 7
+  job_count: 9
+  workflows:
+  - path: .github/workflows/database-files-check.yml
+    name: Database files check
+    triggers:
+    - pull_request
+    - push
+    permissions: null
+    concurrency: null
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: check-database-files
+      name: check-database-files
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy.yml
+    name: Deploy Ken Search API, Gateway & Ingestion to Worldstream
+    triggers:
+    - schedule
+    - schedule:0 7 * * *
+    - workflow_dispatch
+    permissions: &id023
+      contents: read
+      actions: read
+      packages: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    secret_names:
+    - KEN_GITHUB_PACKAGES_READ_TOKEN
+    - GITHUB_TOKEN
+    - DB_CONNECTION_STRING
+    - ELASTICSEARCH_API_KEY
+    - ELASTICSEARCH_CERT_FINGERPRINT
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+    - CLICKUP_API_TOKEN
+    - CLICKUP_LIST_ID
+    - DEEPSEEK_API_KEY
+    - KEN_SEARCH_CLERK_SECRET_KEY
+    - KEN_SEARCH_INTERNAL_TOKEN
+    - VPS_HOST
+    - VPS_SSH_KEY
+    variable_names:
+    - KEN_SEARCH_CLERK_AUTHORITY
+    - TechnologySearch__TechnologyFiltersEnabled
+    - TechnologySearch__AllowedClientIds__0
+    jobs:
+    - id: should-deploy
+      name: should-deploy
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id023
+      uses: []
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: deploy-gate
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - LEGACY_KEN_CI
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment:
+        name: Preprod
+        required_reviewers: []
+        prevent_self_review: false
+        wait_timer: 0
+        deployment_branches: unrestricted
+        protection_available: true
+        external_hard_stop: false
+        note: ''
+      environment_name: Preprod
+      needs:
+      - should-deploy
+      permissions: *id023
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      - appleboy/scp-action@master
+      - appleboy/ssh-action@master
+      secret_names:
+      - KEN_GITHUB_PACKAGES_READ_TOKEN
+      - GITHUB_TOKEN
+      - DB_CONNECTION_STRING
+      - ELASTICSEARCH_API_KEY
+      - ELASTICSEARCH_CERT_FINGERPRINT
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - CLICKUP_API_TOKEN
+      - CLICKUP_LIST_ID
+      - DEEPSEEK_API_KEY
+      - KEN_SEARCH_CLERK_SECRET_KEY
+      - KEN_SEARCH_INTERNAL_TOKEN
+      - VPS_HOST
+      - VPS_SSH_KEY
+      variable_names:
+      - KEN_SEARCH_CLERK_AUTHORITY
+      - TechnologySearch__TechnologyFiltersEnabled
+      - TechnologySearch__AllowedClientIds__0
+      artifacts: []
+      target_hints:
+      - NuGet
+      - ClickUp
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/grok-pr-review.yml
+    name: Grok PR Review
+    triggers:
+    - pull_request
+    - issue_comment
+    - workflow_dispatch
+    permissions: &id024
+      contents: read
+      pull-requests: write
+      issues: write
+    concurrency:
+      group: "${{\n  (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '/grok-review'))\n  &&\
+        \ format('grok-pr-review-noop-{0}', github.run_id)\n  || format('grok-pr-review-{0}', github.event.pull_request.number\
+        \ || github.event.issue.number || inputs.pr_number || github.run_id)\n}}"
+      cancel-in-progress: true
+    secret_names:
+    - GROK_REVIEW_GH_TOKEN
+    variable_names: []
+    jobs:
+    - id: gate
+      name: Should review?
+      runs_on: '[self-hosted, ken-ci]'
+      resolved_runs_on:
+      - '[self-hosted, ken-ci]'
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id024
+      uses:
+      - actions/checkout@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: existing-grok-review-gate
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+    - id: review
+      name: Grok review (self-hosted)
+      runs_on: '[self-hosted, grok-review]'
+      resolved_runs_on:
+      - '[self-hosted, grok-review]'
+      environment: null
+      environment_name: null
+      needs:
+      - gate
+      permissions: *id024
+      uses:
+      - actions/checkout@v4
+      - actions/upload-artifact@v4
+      secret_names:
+      - GROK_REVIEW_GH_TOKEN
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v4
+      target_hints: []
+      classification: existing-grok-review
+      target_runner_class: existing-grok-review
+      target_runs_on: '[self-hosted, grok-review]'
+      secret_class: grok-review-unchanged
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
+      - PRESERVE_GROK_REVIEW_CLASS
+  - path: .github/workflows/projection-mysql-tests.yml
+    name: Projection MySQL acceptance
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: projection-mysql-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    secret_names:
+    - KEN_GITHUB_PACKAGES_READ_TOKEN
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: projection-mysql
+      name: projection-mysql
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        contents: read
+        packages: read
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      secret_names:
+      - KEN_GITHUB_PACKAGES_READ_TOKEN
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - NuGet
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+  - path: .github/workflows/residual-mysql-tests.yml
+    name: Residual MySQL acceptance
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: residual-mysql-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    secret_names:
+    - KEN_GITHUB_PACKAGES_READ_TOKEN
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: residual-mysql
+      name: residual-mysql
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        contents: read
+        packages: read
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      secret_names:
+      - KEN_GITHUB_PACKAGES_READ_TOKEN
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - NuGet
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+  - path: .github/workflows/technology-full-schedule-mysql-tests.yml
+    name: Technology full schedule MySQL acceptance
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: technology-full-schedule-mysql-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    secret_names:
+    - KEN_GITHUB_PACKAGES_READ_TOKEN
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: technology-full-schedule-mysql
+      name: technology-full-schedule-mysql
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        contents: read
+        packages: read
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      secret_names:
+      - KEN_GITHUB_PACKAGES_READ_TOKEN
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - NuGet
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+  - path: .github/workflows/technology-refresh-mysql-tests.yml
+    name: Technology refresh MySQL acceptance
+    triggers:
+    - pull_request
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: technology-refresh-mysql-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    secret_names:
+    - KEN_GITHUB_PACKAGES_READ_TOKEN
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: technology-refresh-mysql
+      name: technology-refresh-mysql
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        contents: read
+        packages: read
+      uses:
+      - actions/checkout@v4
+      - actions/setup-dotnet@v4
+      secret_names:
+      - KEN_GITHUB_PACKAGES_READ_TOKEN
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - NuGet
+      classification: heavy-ci
+      target_runner_class: ken-ci-heavy
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+- name: Ken-SRE
+  visibility: public
+  archived: false
+  default_branch: main
+  default_sha: 61622aa518666c30db703acb939cd4ab7f58d128
+  workflow_count: 6
+  job_count: 6
+  workflows:
+  - path: .github/workflows/build-web.yml
+    name: Build Web Application
+    triggers:
+    - pull_request
+    - push
+    permissions: null
+    concurrency:
+      group: ${{ github.event.number || github.run_id }}
+      cancel-in-progress: true
+    secret_names: []
+    variable_names: []
+    jobs:
+    - id: build-web
+      name: build-web
+      runs_on: ${{ matrix.os }}
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      - macos-latest
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - actions/setup-node@v4
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: public-standard-ci
+      target_runner_class: public-github-hosted
+      target_runs_on: ubuntu-latest
+      secret_class: github-token-only
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/close-issue.yml
+    name: Close inactive issues
+    triggers:
+    - schedule
+    - schedule:00 21 * * *
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: close-issues
+      name: close-issues
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        issues: write
+        pull-requests: write
+      uses:
+      - actions/stale@v5
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: public-standard-ci
+      target_runner_class: public-github-hosted
+      target_runs_on: ubuntu-latest
+      secret_class: github-token-only
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/homebrew.yml
+    name: Publish to Homebrew
+    triggers:
+    - push
+    permissions: null
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: homebrew
+      name: homebrew
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - actions/checkout@v4
+      - peter-evans/create-pull-request@v5
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: public-standard-ci
+      target_runner_class: public-github-hosted
+      target_runs_on: ubuntu-latest
+      secret_class: github-token-only
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/pr-labeler.yml
+    name: Pull request labeler
+    triggers:
+    - pull_request_target
+    permissions: &id025
+      contents: read
+      pull-requests: write
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: main
+      name: main
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id025
+      uses:
+      - release-drafter/release-drafter@v5
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: public-standard-ci
+      target_runner_class: public-github-hosted
+      target_runs_on: ubuntu-latest
+      secret_class: github-token-only
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+      - SECRET_BEARING_PR
+  - path: .github/workflows/python-publish.yml
+    name: Upload Python Package
+    triggers:
+    - release
+    - workflow_dispatch
+    permissions: &id026
+      contents: read
+    concurrency: null
+    secret_names:
+    - PYPI_API_TOKEN
+    variable_names: []
+    jobs:
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id026
+      uses:
+      - actions/checkout@v3
+      - actions/setup-python@v3
+      - actions/upload-artifact@v3
+      - pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
+      secret_names:
+      - PYPI_API_TOKEN
+      variable_names: []
+      artifacts:
+      - actions/upload-artifact@v3
+      target_hints:
+      - PyPI
+      classification: public-production-impact-deploy
+      target_runner_class: public-github-hosted
+      target_runs_on: ubuntu-latest
+      secret_class: public-hosted
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY
+  - path: .github/workflows/release-drafter.yml
+    name: Update draft releases
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: &id027
+      contents: write
+      pull-requests: read
+    concurrency: null
+    secret_names:
+    - GITHUB_TOKEN
+    variable_names: []
+    jobs:
+    - id: main
+      name: main
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: *id027
+      uses:
+      - release-drafter/release-drafter@v5
+      secret_names:
+      - GITHUB_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: public-standard-ci
+      target_runner_class: public-github-hosted
+      target_runs_on: ubuntu-latest
+      secret_class: github-token-only
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+- name: ken-vexa-mcp-auth
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: 10abbdfc68349ee01a6050412888cabc9a025f74
+  workflow_count: 1
+  job_count: 2
+  workflows:
+  - path: .github/workflows/deploy.yml
+    name: Deploy
+    triggers:
+    - push
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: vexa-mcp-auth-production
+      cancel-in-progress: false
+    secret_names:
+    - OP_SERVICE_ACCOUNT_TOKEN
+    variable_names: []
+    jobs:
+    - id: test
+      name: test
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        contents: read
+      uses:
+      - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - astral-sh/setup-uv@v5
+      secret_names: []
+      variable_names: []
+      artifacts: []
+      target_hints: []
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: none
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs:
+      - test
+      permissions:
+        contents: read
+      uses:
+      - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259
+      - appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+      - appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+      secret_names:
+      - OP_SERVICE_ACCOUNT_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - 1Password
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+- name: ken-website
+  visibility: private
+  archived: false
+  default_branch: main
+  default_sha: e554db05eafbb8f0aaea67714c43255bca610dd8
+  workflow_count: 2
+  job_count: 2
+  workflows:
+  - path: .github/workflows/beehiiv-sync.yml
+    name: Sync beehiiv posts
+    triggers:
+    - schedule
+    - schedule:0 7 * * *
+    - workflow_dispatch
+    permissions: null
+    concurrency:
+      group: beehiiv-sync
+      cancel-in-progress: false
+    secret_names:
+    - OP_SERVICE_ACCOUNT_TOKEN
+    variable_names: []
+    jobs:
+    - id: sync
+      name: sync
+      runs_on: blacksmith-2vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-2vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions: null
+      uses:
+      - 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259
+      - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      secret_names:
+      - OP_SERVICE_ACCOUNT_TOKEN
+      variable_names: []
+      artifacts: []
+      target_hints:
+      - npm
+      - 1Password
+      - beehiiv
+      classification: standard-ci
+      target_runner_class: ken-ci-standard
+      target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
+      secret_class: ci-runtime
+      production_impact: false
+      deploys_or_publishes: false
+      combined_build_and_deploy: false
+      flags:
+      - BLACKSMITH
+  - path: .github/workflows/deploy.yml
+    name: Deploy Website
+    triggers:
+    - push
+    - schedule
+    - schedule:5 7 13 7 *
+    - schedule:5 7 1 8 *
+    permissions: null
+    concurrency:
+      group: website-production
+      cancel-in-progress: false
+    secret_names:
+    - OP_SERVICE_ACCOUNT_TOKEN
+    variable_names:
+    - NEXT_PUBLIC_CF_STREAM_CUSTOMER
+    - NEXT_PUBLIC_CF_STREAM_FILM_UID
+    - NEXT_PUBLIC_CF_STREAM_LOOP_UID
+    - NEXT_PUBLIC_TURNSTILE_SITE_KEY
+    jobs:
+    - id: deploy
+      name: deploy
+      runs_on: blacksmith-4vcpu-ubuntu-2404
+      resolved_runs_on:
+      - blacksmith-4vcpu-ubuntu-2404
+      environment: null
+      environment_name: null
+      needs: []
+      permissions:
+        contents: read
+      uses:
+      - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259
+      - useblacksmith/setup-docker-builder@a592b831ebb20e68f7cf47329cf2c3c67b8a7655
+      - appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+      - appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+      secret_names:
+      - OP_SERVICE_ACCOUNT_TOKEN
+      variable_names:
+      - NEXT_PUBLIC_CF_STREAM_CUSTOMER
+      - NEXT_PUBLIC_CF_STREAM_FILM_UID
+      - NEXT_PUBLIC_CF_STREAM_LOOP_UID
+      - NEXT_PUBLIC_TURNSTILE_SITE_KEY
+      artifacts: []
+      target_hints:
+      - Cloudflare
+      - npm
+      - 1Password
+      classification: production-impact-deploy
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
+      deploys_or_publishes: true
+      combined_build_and_deploy: true
+      flags:
+      - BLACKSMITH
+      - COMBINED_BUILD_AND_DEPLOY

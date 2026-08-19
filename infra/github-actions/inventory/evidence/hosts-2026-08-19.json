@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-08-19T16:05:06Z",
+  "source": "task-2-hosts-report.md read-only SSH and GitHub organization API",
+  "devws": {
+    "host": "167.235.8.250",
+    "hostname": "Ubuntu-2404-noble-amd64-base",
+    "vcpu": 64,
+    "ram_gib": 251,
+    "mem_available_gib_range": [190, 195],
+    "swap_gib": 11,
+    "swap_state": "essentially full",
+    "root_free_gib_range": [60, 62],
+    "mnt_data_free_tib": 1.9,
+    "kvm": true,
+    "libvirt": false,
+    "note": "KVM device present; libvirt/virsh not installed. Host carries live Elasticsearch and Grok runners."
+  },
+  "worldstream": {
+    "host": "185.183.35.189",
+    "hostname": "NLDW4-5-46-31",
+    "role": "production application and database host",
+    "legacy_runner_units_active": 10,
+    "mem_available_gib": 25,
+    "swap_state": "essentially full"
+  }
+}

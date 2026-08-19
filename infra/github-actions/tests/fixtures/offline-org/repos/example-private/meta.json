@@ -1,0 +1,7 @@
+{
+  "name": "example-private",
+  "visibility": "private",
+  "archived": false,
+  "default_branch": "main",
+  "default_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
