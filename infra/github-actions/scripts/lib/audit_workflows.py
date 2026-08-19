@@ -1084,7 +1084,9 @@ def parse_workflow(path: str, text: str) -> dict[str, Any]:
                     "raw_text": effective_job_text,
                 }
             )
-    wf_text = text
+    # Scan the parsed document so commented-out jobs and examples cannot become
+    # workflow references. Job-level extraction above uses the same principle.
+    wf_text = yaml.safe_dump(data, sort_keys=False)
     return {
         "path": path,
         "name": data.get("name"),

@@ -1,6 +1,6 @@
 schema_version: 1
 organization: Ken-Technology
-generated_at: '2026-08-19T16:27:01Z'
+generated_at: '2026-08-19T20:13:15Z'
 authority: live GitHub default-branch workflow YAML and environment metadata; names only
 counts:
   active_repositories: 25
@@ -471,7 +471,7 @@ repositories:
   visibility: private
   archived: false
   default_branch: main
-  default_sha: c3ab123e6efc876e945712d84072e1f1a376f054
+  default_sha: 8334f228da6f4a89fb5d85a53ed06d0e7f4d4eab
   workflow_count: 4
   job_count: 7
   workflows:
@@ -1215,7 +1215,7 @@ repositories:
   visibility: private
   archived: false
   default_branch: main
-  default_sha: 103be85127b1a0442a4a95f71f99d1362cdd1bd9
+  default_sha: f055bec4a3421de00a9de35875762d8c00e830de
   workflow_count: 13
   job_count: 15
   workflows:
@@ -1336,7 +1336,6 @@ repositories:
     - CLOUDFLARE_EDGE_CLICK_INGEST_BEARER
     - CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET
     - CLOUDFLARE_EDGE_SPEND_GUARD_API_TOKEN
-    - json
     variable_names: []
     jobs:
     - id: deploy
@@ -1376,7 +1375,6 @@ repositories:
       - CLOUDFLARE_EDGE_CLICK_INGEST_BEARER
       - CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET
       - CLOUDFLARE_EDGE_SPEND_GUARD_API_TOKEN
-      - json
       variable_names: []
       artifacts:
       - actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -1566,7 +1564,6 @@ repositories:
     - DB_CONNECTION_STRING2
     - READ_REPLICA_CONNECTION_STRING
     - MONGO_CONNECTION_STRING2
-    - sh
     - WORLDSTREAM_HOST
     - SCHEMA_TUNNEL_USER
     - SCHEMA_TUNNEL_PRIVATE_KEY
@@ -1738,7 +1735,6 @@ repositories:
       - DB_CONNECTION_STRING2
       - READ_REPLICA_CONNECTION_STRING
       - MONGO_CONNECTION_STRING2
-      - sh
       - WORLDSTREAM_HOST
       - SCHEMA_TUNNEL_USER
       - SCHEMA_TUNNEL_PRIVATE_KEY
@@ -2054,8 +2050,7 @@ repositories:
     concurrency:
       group: production-database-ops-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: true
-    secret_names:
-    - sh
+    secret_names: []
     variable_names: []
     jobs:
     - id: validate
@@ -2069,8 +2064,7 @@ repositories:
       permissions: null
       uses:
       - actions/checkout@v4
-      secret_names:
-      - sh
+      secret_names: []
       variable_names: []
       artifacts: []
       target_hints: []
@@ -2085,14 +2079,13 @@ repositories:
       classification: standard-ci
       target_runner_class: ken-ci-standard
       target_runs_on: '[self-hosted, linux, x64, ken-ci, standard]'
-      secret_class: ci-runtime
+      secret_class: none
       production_impact: false
       deploys_or_publishes: false
       combined_build_and_deploy: false
       flags:
       - LEGACY_KEN_CI
       - UNTRUSTED_PR_ON_PERSISTENT_SELF_HOSTED
-      - SECRET_BEARING_PR
   - path: .github/workflows/publish-auth-api-keys.yml
     name: Publish Ken.Auth.ApiKeys
     triggers:
@@ -2629,7 +2622,7 @@ repositories:
   visibility: private
   archived: false
   default_branch: main
-  default_sha: f36a3861ca682ef4068b275ddc2f0a34a7421c57
+  default_sha: 0952ac075f658acd1bc15a3253032507581e1f0d
   workflow_count: 4
   job_count: 8
   workflows:
@@ -3995,7 +3988,10 @@ repositories:
       permissions: null
       uses:
       - actions/checkout@v5
-      secret_names: []
+      secret_names:
+      - EVAL_API_URL
+      - EVAL_API_KEY
+      - EVAL_BENCHMARK_EXPERIMENT_ID
       variable_names: []
       artifacts: []
       target_hints: []
@@ -4007,15 +4003,16 @@ repositories:
         host_variable_names: []
         registry_or_package: null
         unknown_reason: no action, host expression, secret/variable host, or registry/package signal for .github/workflows/eval-prod.yml#run-eval-benchmark-prod
-      classification: heavy-ci
-      target_runner_class: ken-ci-heavy
-      target_runs_on: '[self-hosted, linux, x64, ken-ci, heavy]'
-      secret_class: none
-      production_impact: false
+      classification: production-secret-workflow
+      target_runner_class: ken-deploy-production
+      target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
+      secret_class: deploy-production
+      production_impact: true
       deploys_or_publishes: false
       combined_build_and_deploy: false
       flags:
       - BLACKSMITH
+      - PRODUCTION_SECRET_WORKFLOW_FAIL_CLOSED
   - path: .github/workflows/ghcr-clean.yml
     name: Cleanup Untagged Images
     triggers:
@@ -4492,6 +4489,7 @@ repositories:
       - pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
       - actions/setup-node@v4
       secret_names:
+      - TEST_API_KEY
       - NPM_TOKEN
       variable_names: []
       artifacts: []
@@ -4956,6 +4954,7 @@ repositories:
       - actions/setup-node@v4
       - tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
       secret_names:
+      - IDMUX_URL
       - TS_OAUTH_CLIENT_ID
       - TS_OAUTH_SECRET
       variable_names: []
@@ -5129,39 +5128,6 @@ repositories:
     - PROXY_SERVER
     - PROXY_USERNAME
     - PROXY_PASSWORD
-    - BULL_AUTH_KEY
-    - REDIS_URL
-    - SUPABASE_ANON_TOKEN
-    - SUPABASE_SERVICE_TOKEN
-    - SUPABASE_URL
-    - SUPABASE_REPLICA_URL
-    - INDEX_SUPABASE_SERVICE_TOKEN
-    - INDEX_SUPABASE_ANON_TOKEN
-    - INDEX_SUPABASE_URL
-    - TEST_API_KEY
-    - TEST_TEAM_ID
-    - TEST_API_KEY_CONCURRENCY
-    - TEST_TEAM_ID_CONCURRENCY
-    - TEST_API_KEY_ZDR
-    - TEST_TEAM_ID_ZDR
-    - FIRE_ENGINE_BETA_URL
-    - FIRE_ENGINE_STAGING_URL
-    - ENV
-    - RUNPOD_MU_POD_ID
-    - RUNPOD_MUV2_POD_ID
-    - RUNPOD_MU_API_KEY
-    - GCS_CREDENTIALS
-    - GCS_BUCKET_NAME
-    - GCS_INDEX_BUCKET_NAME
-    - GCS_MEDIA_BUCKET_NAME
-    - GROQ_API_KEY
-    - ANTHROPIC_API_KEY
-    - VERTEX_CREDENTIALS
-    - IDMUX_URL
-    - LOG_ENCRYPTION_KEY
-    - TEST_SUITE_WEBSITE
-    - TS_OAUTH_CLIENT_ID
-    - TS_OAUTH_SECRET
     variable_names: []
     jobs:
     - id: self-host
@@ -5257,7 +5223,7 @@ repositories:
   visibility: private
   archived: false
   default_branch: main
-  default_sha: 0c2488ecead8b4e11724cd07fdccee55ccb1b6fb
+  default_sha: 11c27e990d20d312fda0dc23b0e1e71ee1afb9fa
   workflow_count: 7
   job_count: 9
   workflows:
@@ -6263,4 +6229,4 @@ repositories:
       - COMBINED_BUILD_AND_DEPLOY
       - SCHEDULED_LONG_LIVED_SECRET
       - OP_BOOTSTRAP_TOKEN
-input_hash: ce02ebe691885dae4825c596babbb2c165a3c3c22d385e4558f6ade2d8b33c4b
+input_hash: 9158991d393058a8fdc4f6ef24c31e8746a447b7ec0feacc7bb0e44c064bdd75

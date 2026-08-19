@@ -1,6 +1,6 @@
 schema_version: 1
-collected_at: '2026-08-19T16:27:01Z'
-input_hash: ce02ebe691885dae4825c596babbb2c165a3c3c22d385e4558f6ade2d8b33c4b
+collected_at: '2026-08-19T20:13:15Z'
+input_hash: 9158991d393058a8fdc4f6ef24c31e8746a447b7ec0feacc7bb0e44c064bdd75
 covered_inputs:
 - org
 - repos_index
@@ -18,7 +18,7 @@ covered_inputs:
 repositories:
 - name: ken-backend
   default_branch: main
-  default_sha: 103be85127b1a0442a4a95f71f99d1362cdd1bd9
+  default_sha: f055bec4a3421de00a9de35875762d8c00e830de
   workflows:
   - path: .github/workflows/ci-guardrails.yml
     sha: 729f58102507aa9c281692ba59d56888c8530923
@@ -46,21 +46,9 @@ repositories:
     sha: a4bbbcb4a7a4284f44cf6c7ff7a9c6b71823d603
   - path: .github/workflows/test-redirector-python.yml
     sha: f7908a7b297919c26deb5305a32b0dcbd0bb8270
-- name: ken-ai-mcp
-  default_branch: main
-  default_sha: c3ab123e6efc876e945712d84072e1f1a376f054
-  workflows:
-  - path: .github/workflows/contracts-drift.yml
-    sha: d1918f9a2cd002cc6239ffb8596b86a89ece2f6a
-  - path: .github/workflows/deploy.yml
-    sha: 1bd577f40396e688aa7679c33b75ac4eb7a8d335
-  - path: .github/workflows/grok-pr-review.yml
-    sha: 9fbfd60c6b67180c797c7b8cdf786d67c7611901
-  - path: .github/workflows/tests.yml
-    sha: e07a547f6e7f7beeeba964a6c3dd606447230193
 - name: ken-frontend
   default_branch: main
-  default_sha: f36a3861ca682ef4068b275ddc2f0a34a7421c57
+  default_sha: 0952ac075f658acd1bc15a3253032507581e1f0d
   workflows:
   - path: .github/workflows/ci.yml
     sha: d850b0f970650f1c1b687a627e3eefb7983503d4
@@ -70,6 +58,36 @@ repositories:
     sha: 6773376456685c10a634a670fb6e7a3d87a44c98
   - path: .github/workflows/publish-campaign-build-prompts.yml
     sha: 553e74034938d5256bc757935066ff526344eb2c
+- name: ken-search
+  default_branch: main
+  default_sha: 11c27e990d20d312fda0dc23b0e1e71ee1afb9fa
+  workflows:
+  - path: .github/workflows/database-files-check.yml
+    sha: 6f58cf55c3d739c4ed0cc88561dc3e810c648369
+  - path: .github/workflows/deploy.yml
+    sha: 1f22583b08d02b090e418f47f618f5363e2396fd
+  - path: .github/workflows/grok-pr-review.yml
+    sha: 9fbfd60c6b67180c797c7b8cdf786d67c7611901
+  - path: .github/workflows/projection-mysql-tests.yml
+    sha: ab5c099b51087224eaf2ff687011ae3d1de600c4
+  - path: .github/workflows/residual-mysql-tests.yml
+    sha: fd3cf6d26ffbd878c6e01fd20988612f51d50bbf
+  - path: .github/workflows/technology-full-schedule-mysql-tests.yml
+    sha: 4cdf905501311045806781956c062c1b4325acdc
+  - path: .github/workflows/technology-refresh-mysql-tests.yml
+    sha: b2376784177e1b10add6771cda7ed8194bb6515e
+- name: ken-ai-mcp
+  default_branch: main
+  default_sha: 8334f228da6f4a89fb5d85a53ed06d0e7f4d4eab
+  workflows:
+  - path: .github/workflows/contracts-drift.yml
+    sha: d1918f9a2cd002cc6239ffb8596b86a89ece2f6a
+  - path: .github/workflows/deploy.yml
+    sha: 1bd577f40396e688aa7679c33b75ac4eb7a8d335
+  - path: .github/workflows/grok-pr-review.yml
+    sha: 9fbfd60c6b67180c797c7b8cdf786d67c7611901
+  - path: .github/workflows/tests.yml
+    sha: e07a547f6e7f7beeeba964a6c3dd606447230193
 - name: ken-agents
   default_branch: main
   default_sha: cd9421a175a99d88fe957f659e344326b71f940b
@@ -152,24 +170,6 @@ repositories:
     sha: 2002b926bd5cbb1c0f1822e8c20d741d6f71dce3
   - path: .github/workflows/validate-lockfiles.yml
     sha: 2637821c84ad5d7a8737094c8e817ccfa902d966
-- name: ken-search
-  default_branch: main
-  default_sha: 0c2488ecead8b4e11724cd07fdccee55ccb1b6fb
-  workflows:
-  - path: .github/workflows/database-files-check.yml
-    sha: 6f58cf55c3d739c4ed0cc88561dc3e810c648369
-  - path: .github/workflows/deploy.yml
-    sha: 1f22583b08d02b090e418f47f618f5363e2396fd
-  - path: .github/workflows/grok-pr-review.yml
-    sha: 9fbfd60c6b67180c797c7b8cdf786d67c7611901
-  - path: .github/workflows/projection-mysql-tests.yml
-    sha: ab5c099b51087224eaf2ff687011ae3d1de600c4
-  - path: .github/workflows/residual-mysql-tests.yml
-    sha: fd3cf6d26ffbd878c6e01fd20988612f51d50bbf
-  - path: .github/workflows/technology-full-schedule-mysql-tests.yml
-    sha: 4cdf905501311045806781956c062c1b4325acdc
-  - path: .github/workflows/technology-refresh-mysql-tests.yml
-    sha: b2376784177e1b10add6771cda7ed8194bb6515e
 - name: ken-plugins
   default_branch: main
   default_sha: 26b9d9f521c711ad168febf61f08832155ace355

@@ -754,42 +754,26 @@ jobs:
         self.assertEqual(parsed["secret_names"], ["REAL_TOKEN"])
         self.assertEqual(parsed["jobs"][0]["secret_names"], ["REAL_TOKEN"])
 
-    def test_all_38_ken_scraping_workflow_env_references_are_inherited(self):
-        test_server_names = [
-            "ANTHROPIC_API_KEY",
-            "BULL_AUTH_KEY",
-            "ENV",
-            "FIRE_ENGINE_BETA_URL",
-            "FIRE_ENGINE_STAGING_URL",
-            "GCS_BUCKET_NAME",
-            "GCS_CREDENTIALS",
-            "GCS_INDEX_BUCKET_NAME",
-            "GCS_MEDIA_BUCKET_NAME",
-            "GROQ_API_KEY",
-            "IDMUX_URL",
-            "INDEX_SUPABASE_ANON_TOKEN",
-            "INDEX_SUPABASE_SERVICE_TOKEN",
-            "INDEX_SUPABASE_URL",
-            "LOG_ENCRYPTION_KEY",
-            "REDIS_URL",
-            "RUNPOD_MUV2_POD_ID",
-            "RUNPOD_MU_API_KEY",
-            "RUNPOD_MU_POD_ID",
-            "SUPABASE_ANON_TOKEN",
-            "SUPABASE_REPLICA_URL",
-            "SUPABASE_SERVICE_TOKEN",
-            "SUPABASE_URL",
-            "TEST_API_KEY",
-            "TEST_API_KEY_CONCURRENCY",
-            "TEST_API_KEY_ZDR",
-            "TEST_SUITE_WEBSITE",
-            "TEST_TEAM_ID",
-            "TEST_TEAM_ID_CONCURRENCY",
-            "TEST_TEAM_ID_ZDR",
-            "TS_OAUTH_CLIENT_ID",
-            "TS_OAUTH_SECRET",
-            "VERTEX_CREDENTIALS",
-        ]
+    def test_commented_out_jobs_do_not_create_workflow_secret_references(self):
+        workflow = """
+on: push
+jobs:
+  active:
+    runs-on: ubuntu-latest
+    env:
+      ACTIVE_TOKEN: ${{ secrets.ACTIVE_TOKEN }}
+    steps:
+      - run: true
+  # disabled:
+  #   runs-on: ubuntu-latest
+  #   env:
+  #     RETIRED_TOKEN: ${{ secrets.RETIRED_TOKEN }}
+"""
+        parsed = aw.parse_workflow(".github/workflows/test.yml", workflow)
+        self.assertEqual(parsed["secret_names"], ["ACTIVE_TOKEN"])
+        self.assertEqual(parsed["jobs"][0]["secret_names"], ["ACTIVE_TOKEN"])
+
+    def test_active_ken_scraping_workflow_env_references_are_inherited(self):
         references = {
             "eval-prod.yml": [
                 "EVAL_API_URL",
@@ -798,9 +782,8 @@ jobs:
             ],
             "publish-js-sdk.yml": ["TEST_API_KEY"],
             "test-js-sdk.yml": ["IDMUX_URL"],
-            "test-server.yml": test_server_names,
         }
-        self.assertEqual(sum(len(names) for names in references.values()), 38)
+        self.assertEqual(sum(len(names) for names in references.values()), 5)
         for workflow_name, names in references.items():
             env = "\n".join(
                 f"  {name}: ${{{{ secrets.{name} }}}}" for name in names
