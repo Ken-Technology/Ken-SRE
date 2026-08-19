@@ -217,6 +217,18 @@ fi
 if [[ -f "${DEFAULT_AUTHORITY_EVIDENCE}" ]]; then
   cp "${DEFAULT_AUTHORITY_EVIDENCE}" "${COLLECT_DIR}/authority-evidence.json"
 fi
+if [[ -f "${ROOT}/infra/github-actions/inventory/evidence/task-6-op-env-key-metadata.json" ]]; then
+  cp "${ROOT}/infra/github-actions/inventory/evidence/task-6-op-env-key-metadata.json" "${COLLECT_DIR}/op-env-key-metadata.json"
+fi
+if [[ -f "${ROOT}/infra/github-actions/inventory/evidence/task-6-op-field-metadata.json" ]]; then
+  cp "${ROOT}/infra/github-actions/inventory/evidence/task-6-op-field-metadata.json" "${COLLECT_DIR}/op-field-metadata.json"
+fi
+if [[ -f "${ROOT}/infra/github-actions/inventory/evidence/task-6-worldstream-key-metadata.json" ]]; then
+  cp "${ROOT}/infra/github-actions/inventory/evidence/task-6-worldstream-key-metadata.json" "${COLLECT_DIR}/worldstream-key-metadata.json"
+fi
+if [[ -f "${ROOT}/infra/github-actions/inventory/evidence/task-6-connection-structure.json" ]]; then
+  cp "${ROOT}/infra/github-actions/inventory/evidence/task-6-connection-structure.json" "${COLLECT_DIR}/connection-structure.json"
+fi
 
 while IFS= read -r repo; do
   [[ -n "${repo}" ]] || continue

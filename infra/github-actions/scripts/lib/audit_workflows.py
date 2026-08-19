@@ -407,6 +407,8 @@ def apply_secret_consumer(entry: dict[str, Any], classified: dict[str, Any]) -> 
         entry["consumer"] = classified.get("target_runner_class")
         entry["classification"] = "ci-nonproduction"
     elif secret_class == "grok-review-unchanged":
+        for key in ("resolution_class", "authority_owner", "unresolved_reason"):
+            entry.pop(key, None)
         entry["target_vault"] = None
         entry["target_item"] = None
         entry["target_field"] = None
@@ -421,6 +423,8 @@ def apply_secret_consumer(entry: dict[str, Any], classified: dict[str, Any]) -> 
         entry["migration_action"] = "preserve"
         entry["alias_status"] = "not-applicable"
     if entry.get("github_secret_name") == OP_BOOTSTRAP_SECRET:
+        for key in ("resolution_class", "authority_owner", "unresolved_reason"):
+            entry.pop(key, None)
         entry["target_vault"] = None
         entry["target_item"] = None
         entry["target_field"] = None
@@ -514,6 +518,29 @@ def apply_authority_evidence(
         if not all(source.get(key) for key in required) or source.get("exists") is not True:
             raise ValueError("incomplete evidence-key authority metadata")
         authority = f"evidence://{source['artifact']}#{source['key_path']}"
+    elif kind == "onepassword-env-key":
+        required = ("vault", "item", "name", "declared_type", "metadata_artifact")
+        if not all(source.get(key) for key in required) or source.get("value_present") is not True:
+            raise ValueError("incomplete onepassword env authority metadata")
+        authority = f"op-env://{source['vault']}/{source['item']}#{source['name']}"
+    elif kind == "onepassword-document":
+        required = ("vault", "item", "file_name", "metadata_artifact")
+        if not all(source.get(key) for key in required) or source.get("exists") is not True:
+            raise ValueError("incomplete onepassword document authority metadata")
+        authority = f"op-file://{source['vault']}/{source['item']}/{source['file_name']}"
+    elif kind == "onepassword-item-title-component":
+        required = ("vault", "item", "component", "metadata_artifact")
+        if not all(source.get(key) for key in required) or source.get("exists") is not True:
+            raise ValueError("incomplete onepassword title authority metadata")
+        authority = f"op-title://{source['vault']}/{source['item']}#{source['component']}"
+    elif kind == "deployed-connection-component":
+        required = ("host", "file", "key_path", "component", "metadata_artifact")
+        if not all(source.get(key) for key in required) or source.get("exists") is not True:
+            raise ValueError("incomplete deployed connection authority metadata")
+        authority = (
+            f"deployed-component://{source['host']}{source['file']}#"
+            f"{source['key_path']}[{source['component']}]"
+        )
     else:
         raise ValueError(f"unsupported authority source kind: {kind!r}")
 
@@ -547,11 +574,90 @@ def apply_authority_evidence(
     return entry
 
 
+def apply_unresolved_annotation(
+    entry: dict[str, Any], evidence: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Attach a value-free recovery route without pretending authority is resolved."""
+    if entry.get("authority_status") != "unresolved":
+        return entry
+    evidence = evidence or {}
+    _reject_value_bearing_evidence(evidence)
+    matches: list[dict[str, Any]] = []
+    for annotation in evidence.get("unresolved_annotations") or []:
+        if not isinstance(annotation, dict):
+            raise ValueError("unresolved authority annotation must be an object")
+        if annotation.get("repository") != entry.get("repository"):
+            continue
+        if annotation.get("github_secret_name") != entry.get("github_secret_name"):
+            continue
+        if "target_vault" not in annotation:
+            raise ValueError("unresolved authority annotation requires explicit target_vault")
+        if annotation.get("target_vault") != entry.get("target_vault"):
+            continue
+        if annotation.get("workflow") not in {None, entry.get("workflow")}:
+            continue
+        matches.append(annotation)
+    if not matches:
+        return entry
+    if len(matches) != 1:
+        raise ValueError(
+            f"multiple unresolved annotations for {entry.get('repository')}:"
+            f"{entry.get('workflow')}:{entry.get('github_secret_name')}"
+        )
+
+    annotation = matches[0]
+    annotation_id = str(annotation.get("annotation_id") or "").strip()
+    resolution_class = str(annotation.get("resolution_class") or "").strip()
+    owner = str(annotation.get("authority_owner") or "").strip()
+    handoff_group = str(annotation.get("handoff_group") or "").strip()
+    reason = str(annotation.get("unresolved_reason") or "").strip()
+    allowed_classes = {
+        "provider-rotation",
+        "target-system-readback",
+        "operator-supplied-config",
+        "independent-trust-authority",
+        "workflow-reference-removal",
+        "unknown-authority",
+    }
+    if (
+        not annotation_id
+        or resolution_class not in allowed_classes
+        or not owner
+        or not handoff_group
+        or not reason
+    ):
+        raise ValueError("incomplete unresolved authority annotation")
+    steps = annotation.get("provider_rotation_steps")
+    if resolution_class == "provider-rotation":
+        if not isinstance(steps, list) or not steps or not all(
+            isinstance(step, str) and step.strip() for step in steps
+        ):
+            raise ValueError("provider rotation annotation requires a concrete rotation procedure")
+        entry["rotation_required"] = True
+        entry["migration_action"] = "rotate-at-provider"
+    elif steps is not None:
+        raise ValueError("provider rotation steps require provider-rotation classification")
+    elif resolution_class == "workflow-reference-removal":
+        entry["rotation_required"] = False
+        entry["migration_action"] = "remove-unused-reference"
+
+    entry["authority_annotation_id"] = annotation_id
+    entry["resolution_class"] = resolution_class
+    entry["authority_owner"] = owner
+    entry["handoff_group"] = handoff_group
+    entry["unresolved_reason"] = reason
+    entry["provider_rotation_steps"] = steps
+    if annotation.get("data_classification"):
+        entry["data_classification"] = annotation["data_classification"]
+    return entry
+
+
 def validate_authority_mapping_coverage(
     evidence: dict[str, Any], entries: list[dict[str, Any]]
 ) -> None:
     mappings = evidence.get("mappings") or []
-    if not mappings:
+    annotations = evidence.get("unresolved_annotations") or []
+    if not mappings and not annotations:
         return
     mapping_ids: list[str] = []
     for mapping in mappings:
@@ -571,6 +677,25 @@ def validate_authority_mapping_coverage(
     unused = sorted(set(mapping_ids) - used)
     if unused:
         raise ValueError(f"unused authority mappings: {', '.join(unused)}")
+
+    annotation_ids: list[str] = []
+    for annotation in annotations:
+        if not isinstance(annotation, dict):
+            raise ValueError("unresolved authority annotation must be an object")
+        annotation_id = str(annotation.get("annotation_id") or "").strip()
+        if not annotation_id:
+            raise ValueError("unresolved authority annotation requires annotation_id")
+        annotation_ids.append(annotation_id)
+    if len(annotation_ids) != len(set(annotation_ids)):
+        raise ValueError("duplicate authority annotation_id")
+    used_annotations = {
+        str(entry["authority_annotation_id"])
+        for entry in entries
+        if entry.get("authority_annotation_id")
+    }
+    unused_annotations = sorted(set(annotation_ids) - used_annotations)
+    if unused_annotations:
+        raise ValueError(f"unused authority annotations: {', '.join(unused_annotations)}")
 
 
 def load_billing_evidence(path: Path) -> dict[str, Any]:
@@ -642,6 +767,10 @@ STATIC_INPUT_SOURCE_REGISTRY = {
     "worldstream_runners": ("worldstream-runners.json", {}),
     "onepassword_vaults": ("onepassword-vaults.json", []),
     "authority_evidence": ("authority-evidence.json", {}),
+    "op_env_key_metadata": ("op-env-key-metadata.json", {}),
+    "op_field_metadata": ("op-field-metadata.json", {}),
+    "worldstream_key_metadata": ("worldstream-key-metadata.json", {}),
+    "connection_structure": ("connection-structure.json", {}),
     "collection_meta": ("collection-meta.json", {}),
 }
 DYNAMIC_NON_WORKFLOW_INPUT_KINDS = (
@@ -793,6 +922,18 @@ def load_inventory_inputs(collect_dir: Path) -> LoadedInventoryInputs:
         "authority_evidence": raw["authority_evidence"]
         if isinstance(raw["authority_evidence"], dict)
         else {},
+        "op_env_key_metadata": raw["op_env_key_metadata"]
+        if isinstance(raw["op_env_key_metadata"], dict)
+        else {},
+        "op_field_metadata": raw["op_field_metadata"]
+        if isinstance(raw["op_field_metadata"], dict)
+        else {},
+        "worldstream_key_metadata": raw["worldstream_key_metadata"]
+        if isinstance(raw["worldstream_key_metadata"], dict)
+        else {},
+        "connection_structure": raw["connection_structure"]
+        if isinstance(raw["connection_structure"], dict)
+        else {},
         "collection_meta": raw["collection_meta"]
         if isinstance(raw["collection_meta"], dict)
         else {},
@@ -847,6 +988,10 @@ def build_input_manifest(
             "worldstream_runners",
             "onepassword_vaults",
             "task6_authority_evidence",
+            "task6_op_env_key_metadata",
+            "task6_op_field_metadata",
+            "task6_worldstream_key_metadata",
+            "task6_connection_structure",
             "collection_meta",
         ],
         "repositories": repos_out,
@@ -1389,6 +1534,11 @@ def secret_authority(
         "source_authority": authority,
         "source_readable": False,
         "authority_status": "unresolved",
+        "resolution_class": "unknown-authority",
+        "authority_owner": "Unidentified",
+        "unresolved_reason": (
+            "No readable matching authority or source-proven rotation procedure was found."
+        ),
         "rotation_required": None,
         "target_vault": None,
         "target_item": repo,
@@ -1668,6 +1818,7 @@ def generate_from_inputs(
                         classified,
                     )
                     entry = apply_authority_evidence(entry, authority_evidence)
+                    entry = apply_unresolved_annotation(entry, authority_evidence)
                     entry["consuming_jobs"] = [job["id"]]
                     secret_entries_by_key[key] = entry
                     secret_entries.append(entry)

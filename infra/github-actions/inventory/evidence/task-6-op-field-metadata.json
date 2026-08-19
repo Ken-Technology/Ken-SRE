@@ -1,0 +1,1958 @@
+{
+  "schema_version": 1,
+  "collection_policy": "1Password item JSON streamed through value-blind field parser; only vault/item/category, field labels/types/purpose/section/presence, and file names are retained.",
+  "items": [
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "EMAIL",
+          "label": "email",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Abuse IPDB",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "First Name",
+          "purpose": null,
+          "section": "Saved on www.abuseipdb.com",
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "Last Name",
+          "purpose": null,
+          "section": "Saved on www.abuseipdb.com",
+          "value_present": true
+        },
+        {
+          "field_type": "EMAIL",
+          "label": "E-Mail Address",
+          "purpose": null,
+          "section": "Saved on www.abuseipdb.com",
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "Company Name (if Applicable)",
+          "purpose": null,
+          "section": "Saved on www.abuseipdb.com",
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "API Key - Production",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "API Key - Development",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "AbuseIPDB",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "email",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "API KEY",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Apify",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "Backblaze",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "CLERK_SECRET_KEY",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Clerk Production API",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "ClickUp API Key",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "SECURE_NOTE",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_D1_ALLOCATION_JSON",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_API_TOKEN",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_ACCESS_CLIENT_ID",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_ACCESS_CLIENT_SECRET",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "CLOUDFLARE_EDGE_ACCESS_SERVICE_TOKEN_ID",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "CLOUDFLARE_EDGE_ACCESS_SERVICE_TOKEN_EXPIRES_AT",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_CONTROL_HMAC_SECRET",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_CONTROL_BEARER",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_STANDBY_HMAC_SECRET",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_STANDBY_BEARER",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_CLICK_INGEST_BEARER",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_PROVIDER_INVENTORY_HMAC_SECRET",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "CLOUDFLARE_EDGE_QUEUE_ALLOCATION_JSON",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Cloudflare Edge Production Secrets",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "API KEY",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "Dev API Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "DeepSeek",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "email",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "Fireworks",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "Fireworks.ai Dev",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "SSH_KEY",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "public key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "fingerprint",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "SSHKEY",
+          "label": "private key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "key type",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "Frontend SSH Key",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "SECURE_NOTE",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "server",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "private key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Frontend Server",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "GHCR_PULL_TOKEN",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "client_id",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "client_secret",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "authorization_server",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "mcp_url",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Ken AI MCP - Clerk OAuth client",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "Ken Search Database",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "SECURE_NOTE",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "jwt_secret",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "secret_store_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "server_actions_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "basic_auth_username",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "basic_auth_password",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "mysql_username",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "mysql_password",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "backend_deploy_private_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "backend_deploy_public_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "frontend_deploy_private_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "frontend_deploy_public_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "mongo_username",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "mongo_password",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "Clerk Secret Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "Clerk Authority",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "Clerk Publishable Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Ken Staging Secrets",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "Kimi.ai Moonshot  - Development",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "Kimi.ai Moonshot  - Production",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "Secret Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "Public Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "URL",
+          "label": "Base Url",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Langfuse Production API Credentials",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "email",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "API Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "API Secret",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Proxy-cheap",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "OTP",
+          "label": "one-time password",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "Dev API Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "Prod API Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Resend",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "SECURE_NOTE",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "private_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "public_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "host",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "purpose",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "mysql_user",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "mysql_password",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "mysql_schema",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "SSH Backend - dbops",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "SECURE_NOTE",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "host",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "purpose",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "public_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "private_key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "SSH Search - root devws",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "DOCUMENT",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [
+        {
+          "name": "ci_deploy_key"
+        }
+      ],
+      "item": "SSH ken-brain CI deploy - kenbrain-deploy@167.235.8.250",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "API Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "Spamhaus",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "API_CREDENTIAL",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "credential",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "MENU",
+          "label": "type",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "filename",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "valid from",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "DATE",
+          "label": "expires",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "hostname",
+          "purpose": null,
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "Stripe Prod Key",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "email",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        },
+        {
+          "field_type": "STRING",
+          "label": "Dev API Key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "Platform API key",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "auth.doubleword.ai",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "SECURE_NOTE",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "ConnectionStrings__KenDb",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "ConnectionStrings__KenDbReadReplica",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "Redis__ConnectionString",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "MongoDbConfiguration__ConnectionString",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "JwtSettings__SecretKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "ShortIoConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "OpenAi__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "AnthropicConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "XAIConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "OpenRouterConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "TogetherAiConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "FireworksConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "InstantlyConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "Clerk__WebhookSecret",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "Clerk__SecretKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "EmailBison__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "WebhookSecurity__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "InternalServiceAuth__Tokens__0",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "KenSearch__ClerkApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "KenSearch__ClerkUserId",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "KenSearch__ServiceBearerToken",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "HypertideConfiguration__ApiToken",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "OutEngineConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "OutEngineConfiguration__CustomerId",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "ClickUpAlerting__ApiToken",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "ClickUpAlerting__ListId",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "AmazonBedrockConfiguration__AwsAccessKeyId",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "AmazonBedrockConfiguration__AwsSecretAccessKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "KEN_SEARCH_INTERNAL_TOKEN",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "RESEND_API_KEY",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "SvixConfiguration__ServerUrl",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "SvixConfiguration__AuthToken",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "InboxkitConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "InboxkitConfiguration__WorkspaceId",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "MoonshotConfiguration__ApiKey",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "XAIConfiguration__ProxyUrl",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "RESEND_CONTACT_SYNC_ENABLED",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "RESEND_FREE_SEGMENT_ID",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "RESEND_STARTER_SEGMENT_ID",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "RESEND_GROWTH_SEGMENT_ID",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "SecretStore__ActiveKeyVersion",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "SecretStore__Keys__1",
+          "purpose": null,
+          "section": null,
+          "value_present": true
+        }
+      ],
+      "files": [],
+      "item": "ken-backend-env",
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "category": "LOGIN",
+      "fields": [
+        {
+          "field_type": "STRING",
+          "label": "username",
+          "purpose": "USERNAME",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "CONCEALED",
+          "label": "password",
+          "purpose": "PASSWORD",
+          "section": null,
+          "value_present": true
+        },
+        {
+          "field_type": "STRING",
+          "label": "notesPlain",
+          "purpose": "NOTES",
+          "section": null,
+          "value_present": false
+        }
+      ],
+      "files": [],
+      "item": "worldstream machine ssh",
+      "schema_version": 1,
+      "vault": "Development"
+    }
+  ]
+}

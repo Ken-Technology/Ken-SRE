@@ -18,6 +18,217 @@ sys.path.insert(0, str(LIB))
 import audit_workflows as aw  # noqa: E402
 
 
+class OnePasswordEnvMetadataTests(unittest.TestCase):
+    def test_emits_only_env_lhs_names_and_presence(self):
+        import extract_op_env_metadata as extractor
+
+        canaries = [
+            "RIGHT_HAND_CANARY_7fca2c",
+            "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "-----BEGIN PRIVATE KEY-----",
+        ]
+        item = {
+            "title": "ken-frontend-env",
+            "vault": {"name": "Development"},
+            "fields": [
+                {
+                    "id": "notesPlain",
+                    "purpose": "NOTES",
+                    "type": "STRING",
+                    "value": (
+                        "PUBLIC_URL=https://example.invalid/RIGHT_HAND_CANARY_7fca2c\n"
+                        "export API_TOKEN=ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
+                        "EMPTY=\n"
+                        "PRIVATE_KEY='-----BEGIN PRIVATE KEY-----\n"
+                        "right-hand-only material\n"
+                        "-----END PRIVATE KEY-----'\n"
+                    ),
+                }
+            ],
+        }
+
+        output = extractor.extract_item_metadata(item)
+        rendered = json.dumps(output, sort_keys=True)
+
+        self.assertEqual(output["schema_version"], 1)
+        self.assertEqual(output["vault"], "Development")
+        self.assertEqual(output["item"], "ken-frontend-env")
+        self.assertEqual(
+            output["keys"],
+            [
+                {
+                    "name": "API_TOKEN",
+                    "declared_type": "environment-string",
+                    "value_present": True,
+                },
+                {
+                    "name": "EMPTY",
+                    "declared_type": "environment-string",
+                    "value_present": False,
+                },
+                {
+                    "name": "PRIVATE_KEY",
+                    "declared_type": "environment-string",
+                    "value_present": True,
+                },
+                {
+                    "name": "PUBLIC_URL",
+                    "declared_type": "environment-string",
+                    "value_present": True,
+                },
+            ],
+        )
+        for canary in canaries:
+            self.assertNotIn(canary, rendered)
+        self.assertNotIn("value", output)
+        self.assertNotIn("notes", rendered.lower())
+
+    def test_multiline_right_hand_cannot_create_false_key(self):
+        import extract_op_env_metadata as extractor
+
+        item = {
+            "title": "ken-agents-env",
+            "vault": {"name": "Development"},
+            "fields": [
+                {
+                    "id": "notesPlain",
+                    "purpose": "NOTES",
+                    "type": "STRING",
+                    "value": (
+                        'JSON_BLOB="{\n'
+                        'FAKE_KEY=must-not-be-emitted\n'
+                        '}"\n'
+                        "REAL_KEY=present\n"
+                    ),
+                }
+            ],
+        }
+
+        output = extractor.extract_item_metadata(item)
+
+        self.assertEqual(
+            [key["name"] for key in output["keys"]], ["JSON_BLOB", "REAL_KEY"]
+        )
+
+    def test_error_never_echoes_right_hand_input(self):
+        import extract_op_env_metadata as extractor
+
+        canary = "ERROR_CANARY_must_not_escape"
+        with self.assertRaises(ValueError) as caught:
+            extractor.extract_item_metadata({"unexpected": canary})
+        self.assertNotIn(canary, str(caught.exception))
+
+
+class ConnectionMetadataTests(unittest.TestCase):
+    def test_emits_only_mysql_component_names_and_mongo_presence(self):
+        import extract_connection_metadata as extractor
+
+        canaries = [
+            "MYSQL_PASSWORD_CANARY_9a18",
+            "MONGO_PASSWORD_CANARY_d81e",
+            "database-name-canary",
+        ]
+        payload = {
+            "mysql": (
+                "Server=db.invalid;Port=3306;Database=database-name-canary;"
+                "User Id=svc;Password=MYSQL_PASSWORD_CANARY_9a18"
+            ),
+            "mongo": (
+                "mongodb://svc:MONGO_PASSWORD_CANARY_d81e@mongo.invalid/"
+                "database-name-canary?authSource=admin"
+            ),
+        }
+
+        output = extractor.extract_connection_metadata(payload)
+        rendered = json.dumps(output, sort_keys=True)
+
+        self.assertEqual(
+            output["mysql_components"],
+            ["database", "password", "port", "server", "user"],
+        )
+        self.assertTrue(output["mongo_connection_present"])
+        self.assertTrue(output["mongo_database_component_present"])
+        for canary in canaries:
+            self.assertNotIn(canary, rendered)
+
+    def test_connection_error_never_echoes_input(self):
+        import extract_connection_metadata as extractor
+
+        canary = "CONNECTION_ERROR_CANARY_4d19"
+        with self.assertRaises(ValueError) as caught:
+            extractor.extract_connection_metadata({"mysql": canary})
+        self.assertNotIn(canary, str(caught.exception))
+
+
+class EnvFileMetadataTests(unittest.TestCase):
+    def test_env_file_projection_never_emits_right_hand_content(self):
+        import extract_env_key_metadata as extractor
+
+        canary = "ENV_FILE_CANARY_726f"
+        output = extractor.extract_env_metadata(
+            f"PORT=3306\nPRIVATE={canary}\nEMPTY=\n",
+            source_file=".env.example",
+        )
+        rendered = json.dumps(output, sort_keys=True)
+        self.assertEqual(output["source_file"], ".env.example")
+        self.assertEqual(
+            [entry["name"] for entry in output["keys"]],
+            ["EMPTY", "PORT", "PRIVATE"],
+        )
+        self.assertNotIn(canary, rendered)
+
+
+class OnePasswordFieldMetadataTests(unittest.TestCase):
+    def test_field_projection_omits_values_ids_and_file_paths(self):
+        import extract_op_field_metadata as extractor
+
+        canary = "OP_FIELD_CANARY_e7d2"
+        item = {
+            "id": "item-id-must-not-escape",
+            "title": "Provider production",
+            "vault": {"name": "Development", "id": "vault-id-must-not-escape"},
+            "category": "API_CREDENTIAL",
+            "fields": [
+                {
+                    "id": "secret-id",
+                    "label": "API Key",
+                    "type": "CONCEALED",
+                    "value": canary,
+                    "section": {"label": "credential"},
+                }
+            ],
+            "files": [
+                {
+                    "name": "deploy_key",
+                    "content_path": f"/content/{canary}",
+                }
+            ],
+        }
+
+        output = extractor.extract_field_metadata(item)
+        rendered = json.dumps(output, sort_keys=True)
+
+        self.assertEqual(output["item"], "Provider production")
+        self.assertEqual(output["vault"], "Development")
+        self.assertEqual(
+            output["fields"],
+            [
+                {
+                    "label": "API Key",
+                    "field_type": "CONCEALED",
+                    "purpose": None,
+                    "section": "credential",
+                    "value_present": True,
+                }
+            ],
+        )
+        self.assertEqual(output["files"], [{"name": "deploy_key"}])
+        self.assertNotIn(canary, rendered)
+        self.assertNotIn("secret-id", rendered)
+        self.assertNotIn("content_path", rendered)
+
+
+
 def classify(**overrides):
     args = {
         "repo": "example-private",
@@ -596,6 +807,22 @@ class RegenerationAndManifestTests(unittest.TestCase):
                 "authority-evidence.json",
                 {"schema_version": 1, "evidence_id": "probe", "mappings": []},
             ),
+            "op_env_key_metadata": (
+                "op-env-key-metadata.json",
+                {"schema_version": 1, "items": [{"item": "probe", "keys": []}]},
+            ),
+            "op_field_metadata": (
+                "op-field-metadata.json",
+                {"schema_version": 1, "items": [{"item": "probe", "fields": []}]},
+            ),
+            "worldstream_key_metadata": (
+                "worldstream-key-metadata.json",
+                {"schema_version": 1, "keys": [{"key_path": "probe"}]},
+            ),
+            "connection_structure": (
+                "connection-structure.json",
+                {"schema_version": 1, "mysql_components": ["probe"]},
+            ),
             "collection_meta": (
                 "collection-meta.json",
                 {"collected_at": "2026-08-19T17:00:00Z", "mode": "offline-fixture"},
@@ -647,6 +874,10 @@ class RegenerationAndManifestTests(unittest.TestCase):
         output_affecting = set(mutations) - {
             "repository_variable_names",
             "environment_secret_names",
+            "op_env_key_metadata",
+            "op_field_metadata",
+            "worldstream_key_metadata",
+            "connection_structure",
         }
 
         def semantic_without_hash(output: Path) -> str:
@@ -932,9 +1163,13 @@ jobs:
         self.assertFalse(github["rotation_required"])
         self.assertEqual(grok_token["migration_action"], "preserve")
         self.assertFalse(grok_token["rotation_required"])
+        self.assertNotIn("unresolved_reason", grok_token)
+        self.assertNotIn("resolution_class", grok_token)
         self.assertEqual(bootstrap["migration_action"], "replace-bootstrap")
         self.assertIsNone(bootstrap["target_vault"])
         self.assertFalse(bootstrap["rotation_required"])
+        self.assertNotIn("unresolved_reason", bootstrap)
+        self.assertNotIn("resolution_class", bootstrap)
 
     def test_unknown_consumer_does_not_default_to_production(self):
         entry = aw.secret_authority(
@@ -1142,6 +1377,87 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "value-bearing"):
             aw.apply_authority_evidence(self._entry(self.production), evidence)
 
+    def test_structural_source_kinds_emit_value_free_authorities(self):
+        cases = [
+            (
+                {
+                    "kind": "onepassword-env-key",
+                    "vault": "Development",
+                    "item": "ken-frontend-env",
+                    "name": "CLERK_SECRET_KEY",
+                    "declared_type": "environment-string",
+                    "readable": True,
+                    "value_present": True,
+                    "metadata_artifact": "task-6-op-env-key-metadata.json",
+                },
+                "op-env://Development/ken-frontend-env#CLERK_SECRET_KEY",
+                "copy",
+            ),
+            (
+                {
+                    "kind": "onepassword-document",
+                    "vault": "Development",
+                    "item": "SSH deploy",
+                    "file_name": "deploy_key",
+                    "readable": True,
+                    "exists": True,
+                    "metadata_artifact": "task-6-op-field-metadata.json",
+                },
+                "op-file://Development/SSH deploy/deploy_key",
+                "copy",
+            ),
+            (
+                {
+                    "kind": "onepassword-item-title-component",
+                    "vault": "Development",
+                    "item": "SSH deploy - user@host",
+                    "component": "username",
+                    "readable": True,
+                    "exists": True,
+                    "metadata_artifact": "task-6-op-field-metadata.json",
+                },
+                "op-title://Development/SSH deploy - user@host#username",
+                "reconstruct",
+            ),
+            (
+                {
+                    "kind": "deployed-connection-component",
+                    "host": "185.183.35.189",
+                    "file": "/var/www/app/appsettings.Production.json",
+                    "key_path": "ConnectionStrings.KenDb",
+                    "component": "password",
+                    "readable": True,
+                    "exists": True,
+                    "metadata_artifact": "task-6-connection-structure.json",
+                },
+                "deployed-component://185.183.35.189/var/www/app/appsettings.Production.json#ConnectionStrings.KenDb[password]",
+                "reconstruct",
+            ),
+        ]
+        for index, (source, expected, action) in enumerate(cases):
+            with self.subTest(kind=source["kind"]):
+                evidence = {
+                    "evidence_id": "structural-fixture",
+                    "mappings": [
+                        {
+                            "repository": "ken-frontend",
+                            "github_secret_name": "CLERK_SECRET_KEY",
+                            "target_vault": "Ken Deploy Production",
+                            "classification": "credential",
+                            "migration_action": action,
+                            "authority_match": "reviewed-semantic",
+                            "source": source,
+                            "downstream_update_steps": [
+                                "Use the value-blind structural handoff."
+                            ],
+                        }
+                    ],
+                }
+                entry = aw.apply_authority_evidence(
+                    self._entry(self.production), evidence
+                )
+                self.assertEqual(entry["source_authority"], expected)
+
     def test_generation_hashes_and_applies_authority_evidence(self):
         import shutil
         import yaml
@@ -1243,6 +1559,23 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
             "inventory/evidence/task-6-authority-metadata.json", collector
         )
         self.assertIn('"${COLLECT_DIR}/authority-evidence.json"', collector)
+        for name in (
+            "task-6-op-env-key-metadata.json",
+            "task-6-op-field-metadata.json",
+            "task-6-worldstream-key-metadata.json",
+            "task-6-connection-structure.json",
+        ):
+            self.assertIn(name, collector)
+
+    def test_structural_authority_inputs_are_registered_for_hashing(self):
+        expected = {
+            "op_env_key_metadata": "op-env-key-metadata.json",
+            "op_field_metadata": "op-field-metadata.json",
+            "worldstream_key_metadata": "worldstream-key-metadata.json",
+            "connection_structure": "connection-structure.json",
+        }
+        for kind, filename in expected.items():
+            self.assertEqual(aw.STATIC_INPUT_SOURCE_REGISTRY[kind][0], filename)
 
     def test_authority_evidence_builder_emits_only_reviewed_metadata(self):
         import build_task6_authority_evidence as builder
@@ -1275,6 +1608,8 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                 mapping["repository"] == "ken-frontend"
                 and mapping["github_secret_name"] == "CLERK_SECRET_KEY"
                 and mapping["target_vault"] == "Ken CI Runtime"
+                and mapping["source_ref"]
+                == "op-development-clerk-production-api-clerk-secret-key"
                 for mapping in evidence["mappings"]
             )
         )
@@ -1287,6 +1622,248 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(edge_client_id["classification"], "identifier")
         self.assertEqual(edge_client_id["migration_action"], "move-to-variable")
+
+    def test_round_two_builder_uses_structural_sources_without_crossing_trust(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        mappings = evidence["mappings"]
+
+        frontend_ci_clerk = next(
+            mapping
+            for mapping in mappings
+            if mapping["repository"] == "ken-frontend"
+            and mapping["github_secret_name"] == "CLERK_SECRET_KEY"
+            and mapping["target_vault"] == "Ken CI Runtime"
+        )
+        self.assertEqual(
+            frontend_ci_clerk["source_ref"],
+            "op-development-ken-staging-secrets-clerk-secret-key",
+        )
+        self.assertEqual(frontend_ci_clerk["workflow"], ".github/workflows/ci.yml")
+
+        self.assertTrue(
+            any(
+                mapping["repository"] == "ken-ai-mcp"
+                and mapping["github_secret_name"] == "KEN_CLERK_CLIENT_SECRET"
+                and mapping["source_ref"]
+                == "op-development-ken-ai-mcp-clerk-oauth-client-client-secret"
+                for mapping in mappings
+            )
+        )
+        self.assertTrue(
+            any(
+                mapping["repository"] == "ken-backend"
+                and mapping["github_secret_name"] == "BACKBLAZE_APPLICATION_KEY"
+                and mapping["source_ref"]
+                == "worldstream-clickevent-processor-backblazeb2-applicationkey"
+                for mapping in mappings
+            )
+        )
+        self.assertTrue(
+            any(
+                mapping["repository"] == "ken-search"
+                and mapping["github_secret_name"] == "VPS_SSH_KEY"
+                and mapping["source_ref"]
+                == "op-development-ssh-search-root-devws-private-key"
+                for mapping in mappings
+            )
+        )
+        self.assertFalse(
+            any(
+                mapping["repository"] == "ken-frontend"
+                and mapping["github_secret_name"] == "CLERK_SECRET_KEY"
+                and mapping["target_vault"] == "Ken CI Runtime"
+                and mapping["source_ref"]
+                == "op-development-clerk-production-api-clerk-secret-key"
+                for mapping in mappings
+            )
+        )
+
+    def test_round_two_builder_fails_when_raw_metadata_does_not_prove_source(self):
+        import build_task6_authority_evidence as builder
+        import shutil
+
+        evidence_dir = ROOT / "infra/github-actions/inventory/evidence"
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            for name in (
+                "task-6-op-env-key-metadata.json",
+                "task-6-op-field-metadata.json",
+                "task-6-worldstream-key-metadata.json",
+                "task-6-connection-structure.json",
+            ):
+                shutil.copy2(evidence_dir / name, tmp_path / name)
+            op_env_path = tmp_path / "task-6-op-env-key-metadata.json"
+            op_env = json.loads(op_env_path.read_text())
+            frontend = next(
+                item for item in op_env["items"] if item["item"] == "ken-frontend-env"
+            )
+            frontend["keys"] = [
+                key for key in frontend["keys"] if key["name"] != "DEEPSEEK_API_KEY"
+            ]
+            op_env_path.write_text(json.dumps(op_env))
+
+            with self.assertRaisesRegex(ValueError, "source metadata not proven"):
+                builder.build_evidence(tmp_path)
+
+    def test_round_two_reuses_only_production_provider_authorities(self):
+        import build_task6_authority_evidence as builder
+
+        mappings = builder.build_evidence()["mappings"]
+        self.assertTrue(
+            any(
+                mapping["repository"] == "ken-frontend"
+                and mapping["github_secret_name"] == "XAI_API_KEY"
+                and mapping["target_vault"] == "Ken Deploy Production"
+                and mapping["source_ref"]
+                == "worldstream-scraper-api-xaiconfiguration-apikey"
+                for mapping in mappings
+            )
+        )
+        self.assertTrue(
+            any(
+                mapping["repository"] == "ken-agents"
+                and mapping["github_secret_name"] == "OPENAI_API_KEY"
+                and mapping["target_vault"] == "Ken Deploy Production"
+                and mapping["source_ref"]
+                == "worldstream-scraper-api-openai-apikey"
+                for mapping in mappings
+            )
+        )
+        self.assertTrue(
+            any(
+                mapping["repository"] == "ken-agents"
+                and mapping["github_secret_name"] == "XAI_PROXY_URL"
+                and mapping["source_ref"]
+                == "op-development-ken-backend-env-xaiconfiguration-proxyurl"
+                for mapping in mappings
+            )
+        )
+        self.assertFalse(
+            any(
+                mapping["github_secret_name"] in {"XAI_API_KEY", "OPENAI_API_KEY"}
+                and mapping["target_vault"] == "Ken CI Runtime"
+                for mapping in mappings
+            )
+        )
+
+    def test_unresolved_provider_annotation_keeps_authority_unresolved(self):
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "PYPI_API_TOKEN",
+                "Ken-SRE",
+                self.empty_scopes,
+                ".github/workflows/publish.yml",
+            ),
+            self.production,
+        )
+        evidence = {
+            "unresolved_annotations": [
+                {
+                    "annotation_id": "ken-sre-pypi-api-token",
+                    "repository": "Ken-SRE",
+                    "github_secret_name": "PYPI_API_TOKEN",
+                    "target_vault": "Ken Deploy Production",
+                    "resolution_class": "provider-rotation",
+                    "authority_owner": "PyPI project owner",
+                    "handoff_group": "publishing/pypi",
+                    "unresolved_reason": "GitHub metadata is name-only and no readable authority was found.",
+                    "provider_rotation_steps": [
+                        "Create a replacement project-scoped PyPI publishing credential.",
+                        "Store it through the concealed migration handoff, verify the package publish, then revoke the predecessor.",
+                    ],
+                }
+            ]
+        }
+        annotated = aw.apply_unresolved_annotation(entry, evidence)
+        self.assertEqual(annotated["authority_status"], "unresolved")
+        self.assertEqual(annotated["resolution_class"], "provider-rotation")
+        self.assertEqual(annotated["authority_owner"], "PyPI project owner")
+        self.assertEqual(annotated["handoff_group"], "publishing/pypi")
+        self.assertTrue(annotated["rotation_required"])
+        self.assertEqual(annotated["migration_action"], "rotate-at-provider")
+        self.assertEqual(annotated["authority_annotation_id"], "ken-sre-pypi-api-token")
+
+    def test_unresolved_annotation_fails_closed_on_scope_or_incomplete_procedure(self):
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "PYPI_API_TOKEN",
+                "Ken-SRE",
+                self.empty_scopes,
+                ".github/workflows/publish.yml",
+            ),
+            self.production,
+        )
+        wrong_scope = {
+            "unresolved_annotations": [
+                {
+                    "annotation_id": "wrong-scope",
+                    "repository": "Ken-SRE",
+                    "github_secret_name": "PYPI_API_TOKEN",
+                    "target_vault": "Ken CI Runtime",
+                    "resolution_class": "provider-rotation",
+                    "authority_owner": "PyPI project owner",
+                    "handoff_group": "publishing/pypi",
+                    "unresolved_reason": "No readable authority was found.",
+                    "provider_rotation_steps": ["Create and revoke a project token."],
+                }
+            ]
+        }
+        self.assertIs(aw.apply_unresolved_annotation(entry, wrong_scope), entry)
+
+        incomplete = {
+            "unresolved_annotations": [
+                {
+                    "annotation_id": "missing-procedure",
+                    "repository": "Ken-SRE",
+                    "github_secret_name": "PYPI_API_TOKEN",
+                    "target_vault": "Ken Deploy Production",
+                    "resolution_class": "provider-rotation",
+                    "authority_owner": "PyPI project owner",
+                    "handoff_group": "publishing/pypi",
+                    "unresolved_reason": "No readable authority was found.",
+                    "provider_rotation_steps": None,
+                }
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "rotation procedure"):
+            aw.apply_unresolved_annotation(entry, incomplete)
+
+    def test_round_two_builder_classifies_source_proven_recovery_routes(self):
+        import build_task6_authority_evidence as builder
+
+        annotations = builder.build_evidence()["unresolved_annotations"]
+        pypi = next(
+            row
+            for row in annotations
+            if row["repository"] == "Ken-SRE"
+            and row["github_secret_name"] == "PYPI_API_TOKEN"
+        )
+        self.assertEqual(pypi["resolution_class"], "provider-rotation")
+        self.assertEqual(pypi["handoff_group"], "publishing/pypi")
+        self.assertGreaterEqual(len(pypi["provider_rotation_steps"]), 2)
+
+        mcp_read = [
+            row
+            for row in annotations
+            if row["repository"] == "ken-ai-mcp"
+            and row["github_secret_name"] == "KEN_BACKEND_READ_TOKEN"
+        ]
+        self.assertEqual(
+            {row["target_vault"] for row in mcp_read},
+            {"Ken CI Runtime", "Ken Deploy Production"},
+        )
+        self.assertEqual(len({row["handoff_group"] for row in mcp_read}), 2)
+
+        self.assertFalse(
+            any(
+                row["repository"] == "ken-cms"
+                and row["github_secret_name"] == "OAUTH2_PROXY_CLIENT_SECRET"
+                and "frontend" in row["handoff_group"]
+                for row in annotations
+            )
+        )
 
 
 if __name__ == "__main__":
