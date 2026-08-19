@@ -339,16 +339,35 @@ case "${1:-}" in
   cat) exit 0 ;;
   is-active)
     [[ "${FAKE_SSH_PROFILE:-good}" == grok-unhealthy && "${*: -1}" == *ken-search* ]] && exit 3
+    [[ "${FAKE_SSH_PROFILE:-good}" == grok-stopped-during-apply && -e "${FAKE_STATE_ROOT}/packages-installed" && "${*: -1}" == *ken-backend* ]] && exit 3
     exit 0
     ;;
   enable) exit 0 ;;
   show)
+    pid=4242
+    case "${2:-}" in
+      *ken-agents*) pid=5101 ;;
+      *ken-ai-mcp*) pid=5102 ;;
+      *ken-backend*) pid=5103 ;;
+      *ken-frontend*) pid=5104 ;;
+      *ken-scraping*) pid=5105 ;;
+      *ken-search*) pid=5106 ;;
+    esac
+    active=active
+    substate=running
+    if [[ "${FAKE_SSH_PROFILE:-good}" == runner-service-restarted && -e "${FAKE_STATE_ROOT}/packages-installed" && "${2:-}" == *ken-backend* ]]; then
+      pid=6103
+    elif [[ "${FAKE_SSH_PROFILE:-good}" == grok-stopped-during-apply && -e "${FAKE_STATE_ROOT}/packages-installed" && "${2:-}" == *ken-backend* ]]; then
+      pid=0
+      active=inactive
+      substate=dead
+    fi
     cat <<EOF
 Id=${2:-unit}
 LoadState=loaded
-ActiveState=active
-SubState=running
-MainPID=4242
+ActiveState=${active}
+SubState=${substate}
+MainPID=${pid}
 EOF
     ;;
   *) exit 0 ;;
@@ -589,7 +608,23 @@ SH
 
   cat >"${fake_bin}/pgrep" <<'SH'
 #!/usr/bin/env bash
+set -euo pipefail
+{
 echo '4242 /usr/share/elasticsearch/bin/elasticsearch'
+echo '5101 /mnt/data/actions-runners/ken-agents/bin/Runner.Listener run --startuptype service'
+echo '5102 /mnt/data/actions-runners/ken-ai-mcp/bin/Runner.Listener run --startuptype service'
+if [[ "${FAKE_SSH_PROFILE:-good}" != runner-listener-lost || ! -e "${FAKE_STATE_ROOT}/packages-installed" ]]; then
+  echo '5103 /mnt/data/actions-runners/ken-backend/bin/Runner.Listener run --startuptype service'
+fi
+echo '5104 /mnt/data/actions-runners/ken-frontend/bin/Runner.Listener run --startuptype service'
+echo '5105 /mnt/data/actions-runners/ken-scraping/bin/Runner.Listener run --startuptype service'
+echo '5106 /mnt/data/actions-runners/ken-search/bin/Runner.Listener run --startuptype service'
+if [[ "${FAKE_SSH_PROFILE:-good}" == runner-worker-churn && -e "${FAKE_STATE_ROOT}/packages-installed" ]]; then
+  echo '8069 /mnt/data/actions-runners/ken-backend/bin/Runner.Worker spawnclient 250 253'
+else
+  echo '7069 /mnt/data/actions-runners/ken-backend/bin/Runner.Worker spawnclient 150 153'
+fi
+} | grep -E "${2:?missing pgrep pattern}" || true
 SH
   cat >"${fake_bin}/ss" <<'SH'
 #!/usr/bin/env bash
@@ -787,6 +822,38 @@ SH
     pass "container without a healthcheck is snapshotted without leaking environment values"
   else
     fail "container without a healthcheck broke or leaked from the protected-state snapshot"
+    printf '%s\n' "${output}"
+  fi
+
+  exercise runner-worker-churn root@167.235.8.250
+  if (( status == 0 )) && grep -Fq 'Host provisioning verified' <<<"${output}"; then
+    pass "transient Runner.Worker job churn does not fail protected-state verification"
+  else
+    fail "normal Runner.Worker completion was treated as protected host damage"
+    printf '%s\n' "${output}"
+  fi
+
+  exercise runner-listener-lost root@167.235.8.250
+  if (( status != 0 )) && grep -Fq 'Protected processes entries disappeared or changed' <<<"${output}" && grep -Fq 'Runner.Listener' <<<"${output}"; then
+    pass "Runner.Listener disappearance still fails protected-state verification"
+  else
+    fail "Runner.Listener disappearance was not detected"
+    printf '%s\n' "${output}"
+  fi
+
+  exercise runner-service-restarted root@167.235.8.250
+  if (( status != 0 )) && grep -Fq 'Protected services entries disappeared or changed' <<<"${output}" && grep -Fq 'MainPID=5103' <<<"${output}"; then
+    pass "runner service generation change still fails protected-state verification"
+  else
+    fail "runner service generation change was not detected"
+    printf '%s\n' "${output}"
+  fi
+
+  exercise grok-stopped-during-apply root@167.235.8.250
+  if (( status != 0 )) && grep -Eq 'Protected services entries disappeared or changed|Grok runners changed during provisioning' <<<"${output}"; then
+    pass "runner service loss during apply still fails closed"
+  else
+    fail "runner service loss during apply was not detected"
     printf '%s\n' "${output}"
   fi
 

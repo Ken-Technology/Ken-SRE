@@ -489,7 +489,7 @@ snapshot_protected_state() {
       ] | @tsv' >>"${destination}/docker"
   done < <(docker ps -q 2>/dev/null | sort)
   sort -o "${destination}/docker" "${destination}/docker"
-  pgrep -af 'Runner\.(Listener|Worker)|/usr/share/elasticsearch|dockerd' | sort >"${destination}/processes" || true
+  pgrep -af 'Runner\.Listener|/usr/share/elasticsearch|dockerd' | sort >"${destination}/processes" || true
   ss -H -lntup 2>/dev/null | sort >"${destination}/ports"
 }
 
