@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 GA_ROOT="${ROOT}/infra/github-actions"
 INV="${GA_ROOT}/inventory"
 AUDIT="${GA_ROOT}/scripts/audit-workflows.sh"
+HOST_PROVISION="${GA_ROOT}/scripts/provision-host.sh"
 FAILED=0
 RAN=0
 
@@ -88,6 +89,7 @@ want = {
     ("ken-ai-mcp", ".github/workflows/contracts-drift.yml", "drift-check"),
     ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync"),
 }
+
 seen = set()
 for repo in repos["repositories"]:
     vis = str(repo.get("visibility") or "").lower()
@@ -189,20 +191,183 @@ PY
   return 1
 }
 
+run_host() {
+  local test_dir fake_ssh output status log
+  test_dir="$(mktemp -d)"
+  trap 'rm -rf "${test_dir}"' RETURN
+  fake_ssh="${test_dir}/ssh"
+  log="${test_dir}/ssh.log"
+
+  cat >"${fake_ssh}" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+phase="${*: -1}"
+printf '%s\n' "${phase}" >>"${FAKE_SSH_LOG:?}"
+remote_script="$(mktemp)"
+trap 'rm -f "${remote_script}"' EXIT
+cat >"${remote_script}"
+bash -n "${remote_script}"
+
+if [[ "${phase}" == "preflight" ]]; then
+  root_free=32212254720
+  data_free=1073741824000
+  memory_available=161061273600
+  data_mount=/mnt/data
+  data_options=rw,relatime
+  kvm=1
+  grok_total=6
+  grok_active=6
+  case "${FAKE_SSH_PROFILE:-good}" in
+    root-low) root_free=991952896 ;;
+    data-low) data_free=536870912000 ;;
+    memory-low) memory_available=68719476736 ;;
+    wrong-mount) data_mount=/ ;;
+    read-only-data) data_options=ro,relatime ;;
+    no-kvm) kvm=0 ;;
+    grok-unhealthy) grok_active=5 ;;
+  esac
+  cat <<EOF
+ROOT_FREE_BYTES=${root_free}
+ROOT_FREE_INODES=4000000
+DATA_MOUNT=${data_mount}
+DATA_OPTIONS=${data_options}
+DATA_FREE_BYTES=${data_free}
+DATA_FREE_INODES=8000000
+MEM_AVAILABLE_BYTES=${memory_available}
+KVM_DEVICE_READY=${kvm}
+GROK_RUNNERS_TOTAL=${grok_total}
+GROK_RUNNERS_ACTIVE=${grok_active}
+EOF
+  exit 0
+fi
+
+if [[ "${phase}" == "apply" ]]; then
+  if [[ "${FAKE_SSH_PROFILE:-good}" == "bad-apply-readback" ]]; then
+    echo 'APPLY_STATUS=incomplete'
+    exit 0
+  fi
+  cat <<'EOF'
+ROOT_FREE_AFTER_BYTES=30064771072
+DATA_FREE_AFTER_BYTES=1063004405760
+MEM_AVAILABLE_AFTER_BYTES=158913789952
+GROK_RUNNERS_TOTAL_AFTER=6
+GROK_RUNNERS_ACTIVE_AFTER=6
+PROTECTED_STATE_OK=1
+LIBVIRTD_ACTIVE=1
+POOL_READY=1
+KEN_CI_NET_READY=1
+KEN_DEPLOY_NET_READY=1
+APPLY_STATUS=ok
+EOF
+  exit 0
+fi
+
+echo "unexpected phase: ${phase}" >&2
+exit 64
+SH
+  chmod +x "${fake_ssh}"
+
+  exercise() {
+    local profile="$1"
+    shift
+    set +e
+    output="$(FAKE_SSH_LOG="${log}" FAKE_SSH_PROFILE="${profile}" PROVISION_HOST_SSH_BIN="${fake_ssh}" bash "${HOST_PROVISION}" "$@" 2>&1)"
+    status=$?
+    set -e
+  }
+
+  expect_failure() {
+    local profile="$1" expected="$2"
+    exercise "${profile}" --dry-run root@167.235.8.250
+    if (( status != 0 )) && grep -Fq "${expected}" <<<"${output}" && ! grep -Fxq apply "${log}"; then
+      pass "host gate rejects ${profile} before apply"
+    else
+      fail "host gate did not reject ${profile} safely"
+      printf '%s\n' "${output}"
+    fi
+    : >"${log}"
+  }
+
+  echo "== host preflight boundaries =="
+  expect_failure root-low "root filesystem free space"
+  expect_failure data-low "/mnt/data free space"
+  expect_failure memory-low "host MemAvailable"
+  expect_failure wrong-mount "dedicated /mnt/data mount"
+  expect_failure read-only-data "/mnt/data is not read-write"
+  expect_failure no-kvm "/dev/kvm is not ready"
+  expect_failure grok-unhealthy "all 6 Grok runners"
+
+  echo "== host dry run =="
+  exercise good --dry-run root@167.235.8.250
+  if (( status == 0 )) &&
+    grep -Fq "/mnt/data/libvirt/images" <<<"${output}" &&
+    grep -Fq "ken-ci-net" <<<"${output}" &&
+    grep -Fq "ken-deploy-net" <<<"${output}" &&
+    grep -Fq "qemu-kvm" <<<"${output}" &&
+    [[ "$(grep -Fxc preflight "${log}")" == 1 ]] &&
+    ! grep -Fxq apply "${log}"; then
+    pass "dry run reports the approved plan without apply"
+  else
+    fail "dry run did not preserve the no-mutation boundary"
+    printf '%s\n' "${output}"
+  fi
+
+  echo "== host apply readback =="
+  : >"${log}"
+  exercise good root@167.235.8.250
+  if (( status == 0 )) && [[ "$(grep -Fxc preflight "${log}")" == 1 ]] && [[ "$(grep -Fxc apply "${log}")" == 1 ]] && grep -Fq "Host provisioning verified" <<<"${output}"; then
+    pass "apply requires preflight then complete readback"
+  else
+    fail "apply sequencing or readback validation failed"
+    printf '%s\n' "${output}"
+  fi
+
+  : >"${log}"
+  exercise bad-apply-readback root@167.235.8.250
+  if (( status != 0 )) && grep -Fq "apply readback is incomplete" <<<"${output}"; then
+    pass "incomplete apply readback fails closed"
+  else
+    fail "incomplete apply readback was accepted"
+    printf '%s\n' "${output}"
+  fi
+
+  echo "== host shell syntax =="
+  if bash -n "${HOST_PROVISION}"; then
+    pass "provision-host bash -n"
+  else
+    fail "provision-host bash -n"
+  fi
+
+  echo
+  if (( FAILED == 0 )); then
+    echo "host: ${RAN} assertions passed"
+    return 0
+  fi
+  echo "host: ${FAILED} failed / ${RAN} assertions"
+  return 1
+}
+
 cmd="${1:-inventory}"
 case "${cmd}" in
-  inventory|all)
+  inventory)
     run_inventory
+    ;;
+  host)
+    run_host
+    ;;
+  all)
+    run_inventory
+    run_host
     ;;
   runners)
     echo "runners: Task 5 owns runner-service tests"
     exit 2
     ;;
   -h|--help)
-    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|all]"
+    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|all]"
     ;;
   *)
-    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|all]"
+    echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|all]"
     exit 2
     ;;
 esac
