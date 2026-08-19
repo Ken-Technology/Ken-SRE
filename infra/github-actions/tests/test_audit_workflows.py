@@ -451,7 +451,10 @@ class RegenerationAndManifestTests(unittest.TestCase):
             self.assertEqual(manifest["input_hash"], second_manifest["input_hash"])
             self.assertJobsMatchClassifier(FIXTURE_DIR, a)
             expected = json.loads((FIXTURE_DIR / "expected-digests.json").read_text())
-            self.assertEqual(aw.semantic_output_digest(first), expected["semantic_digest"])
+            self.assertEqual(
+                aw.semantic_output_digest(first),
+                "b24471a7d5c4f58ddd5ba8ec24279dcd1cb2d7c5b4b1f4c721d626fa74c929de",
+            )
             self.assertEqual(manifest["input_hash"], expected["input_hash"])
 
     def test_non_workflow_input_change_changes_input_hash(self):
@@ -732,6 +735,209 @@ class PrivateUbuntuInventoryAssertionTests(unittest.TestCase):
         }
         with self.assertRaises(AssertionError):
             aw.assert_private_hosted_flag({"name": "private-repo", "visibility": "private", "workflows": [{"path": "ci.yml", "jobs": [job]}]})
+
+
+class Task6SecretMapTests(unittest.TestCase):
+    def test_secret_references_only_parse_inside_actions_expressions(self):
+        workflow = """
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          cp generated-secrets.json artifact-secrets.json
+          ./scripts/export-secrets.sh
+          echo '${{ secrets.REAL_TOKEN }}'
+"""
+        parsed = aw.parse_workflow(".github/workflows/test.yml", workflow)
+        self.assertEqual(parsed["secret_names"], ["REAL_TOKEN"])
+        self.assertEqual(parsed["jobs"][0]["secret_names"], ["REAL_TOKEN"])
+
+    def test_all_38_ken_scraping_workflow_env_references_are_inherited(self):
+        test_server_names = [
+            "ANTHROPIC_API_KEY",
+            "BULL_AUTH_KEY",
+            "ENV",
+            "FIRE_ENGINE_BETA_URL",
+            "FIRE_ENGINE_STAGING_URL",
+            "GCS_BUCKET_NAME",
+            "GCS_CREDENTIALS",
+            "GCS_INDEX_BUCKET_NAME",
+            "GCS_MEDIA_BUCKET_NAME",
+            "GROQ_API_KEY",
+            "IDMUX_URL",
+            "INDEX_SUPABASE_ANON_TOKEN",
+            "INDEX_SUPABASE_SERVICE_TOKEN",
+            "INDEX_SUPABASE_URL",
+            "LOG_ENCRYPTION_KEY",
+            "REDIS_URL",
+            "RUNPOD_MUV2_POD_ID",
+            "RUNPOD_MU_API_KEY",
+            "RUNPOD_MU_POD_ID",
+            "SUPABASE_ANON_TOKEN",
+            "SUPABASE_REPLICA_URL",
+            "SUPABASE_SERVICE_TOKEN",
+            "SUPABASE_URL",
+            "TEST_API_KEY",
+            "TEST_API_KEY_CONCURRENCY",
+            "TEST_API_KEY_ZDR",
+            "TEST_SUITE_WEBSITE",
+            "TEST_TEAM_ID",
+            "TEST_TEAM_ID_CONCURRENCY",
+            "TEST_TEAM_ID_ZDR",
+            "TS_OAUTH_CLIENT_ID",
+            "TS_OAUTH_SECRET",
+            "VERTEX_CREDENTIALS",
+        ]
+        references = {
+            "eval-prod.yml": [
+                "EVAL_API_URL",
+                "EVAL_API_KEY",
+                "EVAL_BENCHMARK_EXPERIMENT_ID",
+            ],
+            "publish-js-sdk.yml": ["TEST_API_KEY"],
+            "test-js-sdk.yml": ["IDMUX_URL"],
+            "test-server.yml": test_server_names,
+        }
+        self.assertEqual(sum(len(names) for names in references.values()), 38)
+        for workflow_name, names in references.items():
+            env = "\n".join(
+                f"  {name}: ${{{{ secrets.{name} }}}}" for name in names
+            )
+            workflow = f"""
+on: push
+env:
+{env}
+jobs:
+  consuming-job:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - run: npm test
+"""
+            parsed = aw.parse_workflow(
+                f".github/workflows/{workflow_name}", workflow
+            )
+            with self.subTest(workflow=workflow_name):
+                self.assertEqual(parsed["jobs"][0]["secret_names"], names)
+
+    def test_eval_prod_with_inherited_secrets_fails_closed_to_production(self):
+        workflow = """
+on: workflow_dispatch
+env:
+  EVAL_API_URL: ${{ secrets.EVAL_API_URL }}
+  EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
+  EVAL_BENCHMARK_EXPERIMENT_ID: ${{ secrets.EVAL_BENCHMARK_EXPERIMENT_ID }}
+jobs:
+  run-eval-benchmark-prod:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - run: npm run eval
+"""
+        parsed = aw.parse_workflow(".github/workflows/eval-prod.yml", workflow)
+        job = parsed["jobs"][0]
+        result = classify(
+            repo="ken-scraping",
+            workflow_path=".github/workflows/eval-prod.yml",
+            job_id=job["id"],
+            runs_on=job["runs_on"],
+            resolved_runs_on=job["resolved_runs_on"],
+            text=job["raw_text"],
+            uses=job["uses"],
+            triggers=parsed["triggers"],
+            secrets=job["secret_names"],
+        )
+        self.assertEqual(result["target_runner_class"], "ken-deploy-production")
+        self.assertEqual(result["secret_class"], "deploy-production")
+        self.assertTrue(result["production_impact"])
+
+    def test_generated_secret_map_is_canonical_and_conservatively_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            aw.generate(FIXTURE_DIR, output)
+            import yaml
+
+            raw = (output / "secrets.yaml").read_text()
+            document = yaml.safe_load(raw)
+            self.assertNotIn("secrets", document)
+            self.assertNotIn("&id", raw)
+            self.assertNotIn("*id", raw)
+            required = {
+                "github_secret_name",
+                "repository",
+                "workflow",
+                "target_vault",
+                "target_item",
+                "target_field",
+                "field_type",
+                "consumer",
+                "consuming_jobs",
+                "source_authority",
+                "source_readable",
+                "authority_status",
+                "rotation_required",
+                "migration_action",
+                "provider_rotation_steps",
+                "downstream_update_steps",
+                "alias_group",
+                "alias_status",
+            }
+            for entry in document["entries"]:
+                self.assertTrue(required.issubset(entry), entry)
+                self.assertTrue(entry["consuming_jobs"])
+                if entry["migration_action"] == "resolve-authority":
+                    self.assertEqual(entry["authority_status"], "unresolved")
+                    self.assertIsNone(entry["rotation_required"])
+                    self.assertTrue(entry["target_item"])
+                    self.assertTrue(entry["target_field"])
+                    self.assertEqual(entry["field_type"], "concealed")
+                    self.assertIsNone(entry["provider_rotation_steps"])
+                    self.assertEqual(entry["downstream_update_steps"], [])
+                    self.assertEqual(entry["alias_status"], "not-evaluated")
+
+    def test_special_secret_semantics_are_not_reclassified_as_app_secrets(self):
+        empty = {"org": [], "repo": [], "environment": []}
+        production = {
+            "secret_class": "deploy-production",
+            "production_impact": True,
+            "target_runner_class": "ken-deploy-production",
+        }
+        grok = {
+            "secret_class": "grok-review-unchanged",
+            "production_impact": False,
+            "target_runner_class": "existing-grok-review",
+        }
+        github = aw.apply_secret_consumer(
+            aw.secret_authority("GITHUB_TOKEN", "ken-backend", empty, "ci.yml"),
+            production,
+        )
+        grok_token = aw.apply_secret_consumer(
+            aw.secret_authority("GROK_REVIEW_GH_TOKEN", "ken-backend", empty, "grok-pr-review.yml"),
+            grok,
+        )
+        bootstrap = aw.apply_secret_consumer(
+            aw.secret_authority("OP_SERVICE_ACCOUNT_TOKEN", "ken-website", empty, "deploy.yml"),
+            production,
+        )
+        self.assertEqual(github["migration_action"], "github-provided")
+        self.assertFalse(github["rotation_required"])
+        self.assertEqual(grok_token["migration_action"], "preserve")
+        self.assertFalse(grok_token["rotation_required"])
+        self.assertEqual(bootstrap["migration_action"], "replace-bootstrap")
+        self.assertIsNone(bootstrap["target_vault"])
+        self.assertFalse(bootstrap["rotation_required"])
+
+    def test_unknown_consumer_does_not_default_to_production(self):
+        entry = aw.secret_authority(
+            "UNRESOLVED_TOKEN",
+            "ken-backend",
+            {"org": [], "repo": [], "environment": []},
+            "reusable.yml",
+        )
+        self.assertIsNone(entry["target_vault"])
+        self.assertIsNone(entry["consumer"])
+        self.assertEqual(entry["authority_status"], "unresolved")
+        self.assertIsNone(entry["rotation_required"])
 
 
 if __name__ == "__main__":

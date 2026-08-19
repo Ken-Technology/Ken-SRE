@@ -25,6 +25,7 @@ VAR_NAME_RE = re.compile(
 VALUE_SHAPED_RE = re.compile(
     r"-----BEGIN [A-Z0-9 ]+PRIVATE KEY-----\s+[A-Za-z0-9+/=\n]{64,}|\bghp_[A-Za-z0-9]{20,}|\bgho_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bAKIA[0-9A-Z]{16}\b"
 )
+GITHUB_EXPRESSION_RE = re.compile(r"\$\{\{(?P<body>.*?)\}\}", re.DOTALL)
 
 BUILD_HINTS = (
     "docker build",
@@ -218,10 +219,11 @@ def flatten_text(value: Any) -> str:
 
 def extract_names(pattern: re.Pattern[str], text: str) -> list[str]:
     names: list[str] = []
-    for match in pattern.finditer(text):
-        name = match.group("dot") or match.group("brk")
-        if name and name not in names:
-            names.append(name)
+    for expression in GITHUB_EXPRESSION_RE.finditer(text):
+        for match in pattern.finditer(expression.group("body")):
+            name = match.group("dot") or match.group("brk")
+            if name and name not in names:
+                names.append(name)
     return names
 
 
@@ -391,20 +393,40 @@ def apply_secret_consumer(entry: dict[str, Any], classified: dict[str, Any]) -> 
             "Ken Deploy Production" if classified.get("production_impact") else "Ken Deploy Nonproduction"
         )
         entry["consumer"] = classified.get("target_runner_class")
+        entry["classification"] = (
+            "deployment-production"
+            if classified.get("production_impact")
+            else "deployment-nonproduction"
+        )
     elif secret_class == "ci-runtime":
         entry["target_vault"] = "Ken CI Runtime"
         entry["consumer"] = classified.get("target_runner_class")
+        entry["classification"] = "ci-nonproduction"
     elif secret_class == "grok-review-unchanged":
         entry["target_vault"] = None
+        entry["target_item"] = None
+        entry["target_field"] = None
+        entry["field_type"] = None
         entry["consumer"] = "existing-grok-review"
         entry["source_authority"] = (
             "Existing Grok review workflow reference; do not copy onto ken-ci or ken-deploy."
         )
+        entry["authority_status"] = "preserved-existing"
+        entry["rotation_required"] = False
+        entry["classification"] = "preserve"
+        entry["migration_action"] = "preserve"
+        entry["alias_status"] = "not-applicable"
     if entry.get("github_secret_name") == OP_BOOTSTRAP_SECRET:
-        consumer = str(entry.get("consumer") or "")
-        if consumer.startswith("ken-ci") or not consumer:
-            entry["target_vault"] = "Ken Deploy Production"
-            entry["consumer"] = "ken-deploy-production"
+        entry["target_vault"] = None
+        entry["target_item"] = None
+        entry["target_field"] = None
+        entry["field_type"] = None
+        entry["authority_status"] = "bootstrap-to-replace"
+        entry["rotation_required"] = False
+        entry["classification"] = "bootstrap"
+        entry["migration_action"] = "replace-bootstrap"
+        entry["replacement_required"] = True
+        entry["alias_status"] = "not-applicable"
     return entry
 
 
@@ -863,6 +885,23 @@ def classify_job(
     if vis == "private" and op_bootstrap:
         flags.append("OP_BOOTSTRAP_TOKEN")
 
+    if (
+        vis == "private"
+        and Path(workflow_path).stem.lower() == "eval-prod"
+        and long_lived
+    ):
+        flags.append("PRODUCTION_SECRET_WORKFLOW_FAIL_CLOSED")
+        return {
+            "classification": "production-secret-workflow",
+            "target_runner_class": "ken-deploy-production",
+            "target_runs_on": "[self-hosted, linux, x64, ken-deploy, production]",
+            "secret_class": "deploy-production",
+            "production_impact": True,
+            "deploys_or_publishes": bool(deploys),
+            "combined_build_and_deploy": combined,
+            "flags": flags,
+        }
+
     if is_grok_workflow(workflow_path):
         flags.append("PRESERVE_GROK_REVIEW_CLASS")
         if job_id == "review" or "grok-review" in runs_on:
@@ -1013,15 +1052,18 @@ def parse_workflow(path: str, text: str) -> dict[str, Any]:
     if not triggers:
         triggers = workflow_triggers(data.get("on"))
     jobs_block = data.get("jobs") or {}
+    workflow_env = data.get("env") if isinstance(data.get("env"), dict) else {}
+    inherited_env_text = yaml.safe_dump({"env": workflow_env}, sort_keys=False)
     jobs: list[dict[str, Any]] = []
     if isinstance(jobs_block, dict):
         for job_id, job in jobs_block.items():
             if not isinstance(job, dict):
                 job = {}
             job_text = yaml.safe_dump(job, sort_keys=False)
+            effective_job_text = inherited_env_text + "\n" + job_text
             uses = uses_from(job)
-            secrets = extract_names(SECRET_NAME_RE, job_text)
-            variables = extract_names(VAR_NAME_RE, job_text)
+            secrets = extract_names(SECRET_NAME_RE, effective_job_text)
+            variables = extract_names(VAR_NAME_RE, effective_job_text)
             env_name, env_obj = job_environment(job)
             runs_on = job.get("runs-on")
             jobs.append(
@@ -1038,8 +1080,8 @@ def parse_workflow(path: str, text: str) -> dict[str, Any]:
                     "secret_names": secrets,
                     "variable_names": variables,
                     "artifacts": artifact_refs(job_text, uses),
-                    "target_hints": target_hints(job_text),
-                    "raw_text": job_text,
+                    "target_hints": target_hints(effective_job_text),
+                    "raw_text": effective_job_text,
                 }
             )
     wf_text = text
@@ -1157,7 +1199,19 @@ def secret_authority(
             "source_readable": False,
             "rotation_required": False,
             "target_vault": None,
+            "target_item": None,
+            "target_field": None,
+            "field_type": None,
             "consumer": "workflow-job",
+            "consuming_jobs": [],
+            "classification": "github-provided",
+            "authority_status": "github-provided",
+            "migration_action": "github-provided",
+            "provider_rotation_steps": None,
+            "downstream_update_steps": [],
+            "alias_group": None,
+            "alias_status": "not-applicable",
+            "replacement_required": False,
         }
     scopes = []
     if name in listed.get("org", []):
@@ -1177,8 +1231,6 @@ def secret_authority(
             "Name referenced in default-branch workflow YAML; not listed in org/repo/environment "
             "secret metadata from this collection. Value is not recoverable through the GitHub API."
         )
-    consumer = "ken-deploy-production"
-    vault = "Ken Deploy Production"
     return {
         "github_secret_name": name,
         "repository": repo,
@@ -1186,9 +1238,21 @@ def secret_authority(
         "scope": ",".join(scopes) if scopes else "workflow-reference",
         "source_authority": authority,
         "source_readable": False,
-        "rotation_required": True,
-        "target_vault": vault,
-        "consumer": consumer,
+        "authority_status": "unresolved",
+        "rotation_required": None,
+        "target_vault": None,
+        "target_item": repo,
+        "target_field": name,
+        "field_type": "concealed",
+        "consumer": None,
+        "consuming_jobs": [],
+        "classification": "unresolved",
+        "migration_action": "resolve-authority",
+        "provider_rotation_steps": None,
+        "downstream_update_steps": [],
+        "alias_group": None,
+        "alias_status": "not-evaluated",
+        "replacement_required": False,
     }
 
 
@@ -1316,7 +1380,7 @@ def generate_from_inputs(
 
     repositories: list[dict[str, Any]] = []
     secret_entries: list[dict[str, Any]] = []
-    seen_secret_keys: set[tuple[str, str, str]] = set()
+    secret_entries_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     repository_inputs = {repo["name"]: repo for repo in data["repositories"]}
     for repo_info in repos_meta:
@@ -1442,13 +1506,17 @@ def generate_from_inputs(
                 )
                 for secret_name in job["secret_names"]:
                     key = (name, rel, secret_name)
-                    if key in seen_secret_keys:
+                    existing = secret_entries_by_key.get(key)
+                    if existing is not None:
+                        if job["id"] not in existing["consuming_jobs"]:
+                            existing["consuming_jobs"].append(job["id"])
                         continue
-                    seen_secret_keys.add(key)
                     entry = apply_secret_consumer(
                         secret_authority(secret_name, name, listed_secrets, rel),
                         classified,
                     )
+                    entry["consuming_jobs"] = [job["id"]]
+                    secret_entries_by_key[key] = entry
                     secret_entries.append(entry)
             workflows.append(
                 {
@@ -1537,18 +1605,18 @@ def generate_from_inputs(
     }
 
     secrets_doc = {
-        "schema_version": 1,
+        "schema_version": 2,
         "organization": org.get("login") or "Ken-Technology",
         "generated_at": generated_at,
         "policy": (
             "Name-only map. Values were never requested or written. "
-            "GitHub-only long-lived secrets are unrecoverable and require rotation."
+            "GitHub-only long-lived secrets remain unresolved until a readable authority "
+            "or provider rotation procedure is verified."
         ),
         "organization_secret_names": org_secrets,
         "organization_variable_names": org_vars,
         "onepassword_visible_vaults": data["onepassword_vaults"],
         "entries": secret_entries,
-        "secrets": secret_entries,
     }
 
     manifest = build_input_manifest(inputs, snapshot_time)
