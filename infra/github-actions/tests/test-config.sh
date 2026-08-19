@@ -344,6 +344,10 @@ case "${1:-}" in
     ;;
   enable) exit 0 ;;
   show)
+    if [[ "${FAKE_SSH_PROFILE:-good}" == systemctl-show-fails && ! -e "${FAKE_STATE_ROOT}/packages-installed" && "${2:-}" == *ken-backend* ]]; then
+      echo 'injected systemctl show failure' >&2
+      exit 1
+    fi
     pid=4242
     case "${2:-}" in
       *ken-agents*) pid=5101 ;;
@@ -361,6 +365,15 @@ case "${1:-}" in
       pid=0
       active=inactive
       substate=dead
+    fi
+    if [[ "${FAKE_SSH_PROFILE:-good}" == systemctl-show-incomplete && ! -e "${FAKE_STATE_ROOT}/packages-installed" && "${2:-}" == *ken-backend* ]]; then
+      cat <<EOF
+Id=${2:-unit}
+LoadState=loaded
+ActiveState=${active}
+SubState=${substate}
+EOF
+      exit 0
     fi
     cat <<EOF
 Id=${2:-unit}
@@ -609,20 +622,25 @@ SH
   cat >"${fake_bin}/pgrep" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${FAKE_SSH_PROFILE:-good}" == pgrep-probe-fails ]]; then
+  echo 'injected pgrep failure' >&2
+  exit 2
+fi
 {
 echo '4242 /usr/share/elasticsearch/bin/elasticsearch'
-echo '5101 /mnt/data/actions-runners/ken-agents/bin/Runner.Listener run --startuptype service'
-echo '5102 /mnt/data/actions-runners/ken-ai-mcp/bin/Runner.Listener run --startuptype service'
-if [[ "${FAKE_SSH_PROFILE:-good}" != runner-listener-lost || ! -e "${FAKE_STATE_ROOT}/packages-installed" ]]; then
-  echo '5103 /mnt/data/actions-runners/ken-backend/bin/Runner.Listener run --startuptype service'
+echo "5101 ${FAKE_DATA_ROOT}/actions-runners/ken-agents/bin/Runner.Listener run --startuptype service"
+echo "5102 ${FAKE_DATA_ROOT}/actions-runners/ken-ai-mcp/bin/Runner.Listener run --startuptype service"
+if [[ "${FAKE_SSH_PROFILE:-good}" != runner-listener-missing-baseline ]] &&
+  [[ "${FAKE_SSH_PROFILE:-good}" != runner-listener-lost || ! -e "${FAKE_STATE_ROOT}/packages-installed" ]]; then
+  echo "5103 ${FAKE_DATA_ROOT}/actions-runners/ken-backend/bin/Runner.Listener run --startuptype service"
 fi
-echo '5104 /mnt/data/actions-runners/ken-frontend/bin/Runner.Listener run --startuptype service'
-echo '5105 /mnt/data/actions-runners/ken-scraping/bin/Runner.Listener run --startuptype service'
-echo '5106 /mnt/data/actions-runners/ken-search/bin/Runner.Listener run --startuptype service'
+echo "5104 ${FAKE_DATA_ROOT}/actions-runners/ken-frontend/bin/Runner.Listener run --startuptype service"
+echo "5105 ${FAKE_DATA_ROOT}/actions-runners/ken-scraping/bin/Runner.Listener run --startuptype service"
+echo "5106 ${FAKE_DATA_ROOT}/actions-runners/ken-search/bin/Runner.Listener run --startuptype service"
 if [[ "${FAKE_SSH_PROFILE:-good}" == runner-worker-churn && -e "${FAKE_STATE_ROOT}/packages-installed" ]]; then
-  echo '8069 /mnt/data/actions-runners/ken-backend/bin/Runner.Worker spawnclient 250 253'
+  echo "8069 ${FAKE_DATA_ROOT}/actions-runners/ken-backend/bin/Runner.Worker spawnclient 250 253"
 else
-  echo '7069 /mnt/data/actions-runners/ken-backend/bin/Runner.Worker spawnclient 150 153'
+  echo "7069 ${FAKE_DATA_ROOT}/actions-runners/ken-backend/bin/Runner.Worker spawnclient 150 153"
 fi
 } | grep -E "${2:?missing pgrep pattern}" || true
 SH
@@ -825,6 +843,46 @@ SH
     printf '%s\n' "${output}"
   fi
 
+  exercise runner-listener-missing-baseline root@167.235.8.250
+  if (( status != 0 )) &&
+    grep -Fq 'expected Grok listener is missing or duplicated' <<<"${output}" &&
+    ! grep -Fq 'apt-get update' "${command_log}"; then
+    pass "missing baseline Runner.Listener fails before package mutation"
+  else
+    fail "missing baseline Runner.Listener did not fail before package mutation"
+    printf '%s\n' "${output}"
+  fi
+
+  exercise systemctl-show-fails root@167.235.8.250
+  if (( status != 0 )) &&
+    grep -Fq 'cannot snapshot protected service' <<<"${output}" &&
+    ! grep -Fq 'apt-get update' "${command_log}"; then
+    pass "systemctl show failure fails before package mutation"
+  else
+    fail "systemctl show failure did not fail before package mutation"
+    printf '%s\n' "${output}"
+  fi
+
+  exercise systemctl-show-incomplete root@167.235.8.250
+  if (( status != 0 )) &&
+    grep -Fq 'protected service identity is incomplete' <<<"${output}" &&
+    ! grep -Fq 'apt-get update' "${command_log}"; then
+    pass "incomplete systemctl identity fails before package mutation"
+  else
+    fail "incomplete systemctl identity did not fail before package mutation"
+    printf '%s\n' "${output}"
+  fi
+
+  exercise pgrep-probe-fails root@167.235.8.250
+  if (( status != 0 )) &&
+    grep -Fq 'cannot snapshot protected processes' <<<"${output}" &&
+    ! grep -Fq 'apt-get update' "${command_log}"; then
+    pass "pgrep failure fails before package mutation"
+  else
+    fail "pgrep failure did not fail before package mutation"
+    printf '%s\n' "${output}"
+  fi
+
   exercise runner-worker-churn root@167.235.8.250
   if (( status == 0 )) && grep -Fq 'Host provisioning verified' <<<"${output}"; then
     pass "transient Runner.Worker job churn does not fail protected-state verification"
@@ -834,7 +892,7 @@ SH
   fi
 
   exercise runner-listener-lost root@167.235.8.250
-  if (( status != 0 )) && grep -Fq 'Protected processes entries disappeared or changed' <<<"${output}" && grep -Fq 'Runner.Listener' <<<"${output}"; then
+  if (( status != 0 )) && grep -Eq 'Protected processes entries disappeared or changed|expected Grok listener is missing or duplicated' <<<"${output}" && grep -Fq 'Runner.Listener' <<<"${output}"; then
     pass "Runner.Listener disappearance still fails protected-state verification"
   else
     fail "Runner.Listener disappearance was not detected"
@@ -850,7 +908,7 @@ SH
   fi
 
   exercise grok-stopped-during-apply root@167.235.8.250
-  if (( status != 0 )) && grep -Eq 'Protected services entries disappeared or changed|Grok runners changed during provisioning' <<<"${output}"; then
+  if (( status != 0 )) && grep -Eq 'Protected services entries disappeared or changed|protected Grok service is not healthy|Grok runners changed during provisioning' <<<"${output}"; then
     pass "runner service loss during apply still fails closed"
   else
     fail "runner service loss during apply was not detected"

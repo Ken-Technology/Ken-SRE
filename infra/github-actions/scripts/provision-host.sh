@@ -74,6 +74,14 @@ readonly GROK_UNITS=(
   actions.runner.Ken-Technology-ken-scraping.hetzner-grok-review-ken-scraping.service
   actions.runner.Ken-Technology-ken-search.hetzner-grok-review-ken-search.service
 )
+readonly GROK_LISTENERS=(
+  "${DATA_ROOT}/actions-runners/ken-agents/bin/Runner.Listener"
+  "${DATA_ROOT}/actions-runners/ken-ai-mcp/bin/Runner.Listener"
+  "${DATA_ROOT}/actions-runners/ken-backend/bin/Runner.Listener"
+  "${DATA_ROOT}/actions-runners/ken-frontend/bin/Runner.Listener"
+  "${DATA_ROOT}/actions-runners/ken-scraping/bin/Runner.Listener"
+  "${DATA_ROOT}/actions-runners/ken-search/bin/Runner.Listener"
+)
 
 die() {
   printf 'REMOTE_ERROR: %s\n' "$*" >&2
@@ -467,12 +475,69 @@ read_only_safety_gate() {
   validate_network_plan
 }
 
+service_property() {
+  local report="$1" key="$2"
+  awk -F= -v key="${key}" '
+    $1 == key {
+      count++
+      value = substr($0, length(key) + 2)
+    }
+    END {
+      if (count != 1 || value == "") exit 1
+      print value
+    }
+  ' <<<"${report}"
+}
+
+snapshot_service_identity() {
+  local destination="$1" unit="$2" require_grok_health="$3"
+  local report id load active substate main_pid
+  if ! report="$(
+    systemctl show "${unit}" \
+      --property=Id \
+      --property=LoadState \
+      --property=ActiveState \
+      --property=SubState \
+      --property=MainPID
+  )"; then
+    die "cannot snapshot protected service ${unit}"
+  fi
+  id="$(service_property "${report}" Id)" || die "protected service identity is incomplete for ${unit}"
+  load="$(service_property "${report}" LoadState)" || die "protected service identity is incomplete for ${unit}"
+  active="$(service_property "${report}" ActiveState)" || die "protected service identity is incomplete for ${unit}"
+  substate="$(service_property "${report}" SubState)" || die "protected service identity is incomplete for ${unit}"
+  main_pid="$(service_property "${report}" MainPID)" || die "protected service identity is incomplete for ${unit}"
+  [[ "${id}" == "${unit}" && "${main_pid}" =~ ^[0-9]+$ ]] || die "protected service identity is invalid for ${unit}"
+  if [[ "${require_grok_health}" == 1 ]]; then
+    [[ "${load}" == loaded && "${active}" == active && "${substate}" == running && "${main_pid}" != 0 ]] ||
+      die "protected Grok service is not healthy: ${unit}"
+  fi
+  printf 'Id=%s LoadState=%s ActiveState=%s SubState=%s MainPID=%s\n' \
+    "${id}" "${load}" "${active}" "${substate}" "${main_pid}" >>"${destination}"
+}
+
+snapshot_protected_processes() {
+  local destination="$1" report listener count total_listeners
+  if ! report="$(pgrep -af 'Runner\.Listener|/usr/share/elasticsearch|dockerd')"; then
+    die "cannot snapshot protected processes"
+  fi
+  for listener in "${GROK_LISTENERS[@]}"; do
+    count="$(awk -v expected="${listener}" '$2 == expected { count++ } END { print count + 0 }' <<<"${report}")"
+    [[ "${count}" == 1 ]] || die "expected Grok listener is missing or duplicated: ${listener}"
+  done
+  total_listeners="$(awk '$2 ~ /\/Runner\.Listener$/ { count++ } END { print count + 0 }' <<<"${report}")"
+  [[ "${total_listeners}" == "${EXPECTED_GROK_RUNNERS}" ]] || die "unexpected Runner.Listener process set"
+  sort <<<"${report}" >"${destination}"
+}
+
 snapshot_protected_state() {
   local destination="$1" unit container_id
   : >"${destination}/services"
-  for unit in "${GROK_UNITS[@]}" elasticsearch.service docker.service; do
-    systemctl show "${unit}" --property=Id --property=LoadState --property=ActiveState --property=SubState --property=MainPID >>"${destination}/services" 2>/dev/null || true
+  for unit in "${GROK_UNITS[@]}"; do
+    snapshot_service_identity "${destination}/services" "${unit}" 1
   done
+  snapshot_service_identity "${destination}/services" elasticsearch.service 0
+  snapshot_service_identity "${destination}/services" docker.service 0
   sort -o "${destination}/services" "${destination}/services"
   : >"${destination}/docker"
   while IFS= read -r container_id; do
@@ -489,7 +554,7 @@ snapshot_protected_state() {
       ] | @tsv' >>"${destination}/docker"
   done < <(docker ps -q 2>/dev/null | sort)
   sort -o "${destination}/docker" "${destination}/docker"
-  pgrep -af 'Runner\.Listener|/usr/share/elasticsearch|dockerd' | sort >"${destination}/processes" || true
+  snapshot_protected_processes "${destination}/processes"
   ss -H -lntup 2>/dev/null | sort >"${destination}/ports"
 }
 
