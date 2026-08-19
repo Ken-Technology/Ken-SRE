@@ -26,8 +26,9 @@ VALUE_SHAPED_RE = re.compile(
     r"-----BEGIN [A-Z0-9 ]+PRIVATE KEY-----\s+[A-Za-z0-9+/=\n]{64,}|\bghp_[A-Za-z0-9]{20,}|\bgho_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bAKIA[0-9A-Z]{16}\b"
 )
 GITHUB_EXPRESSION_RE = re.compile(r"\$\{\{(?P<body>.*?)\}\}", re.DOTALL)
+OP_REFERENCE_SEGMENT = r"[A-Za-z0-9][A-Za-z0-9._ -]*"
 DIRECT_OP_REFERENCE_RE = re.compile(
-    r"^op://(?P<vault>[^/\s]+)/(?P<item>[^/\s]+)/(?P<field>[^/\s]+)$"
+    rf"^op://(?P<vault>{OP_REFERENCE_SEGMENT})/(?P<item>{OP_REFERENCE_SEGMENT})/(?P<field>{OP_REFERENCE_SEGMENT})$"
 )
 
 BUILD_HINTS = (
@@ -136,8 +137,24 @@ SCHEDULED_PROD_HINTS = (
 )
 
 
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(_: str) -> None:
+    raise ValueError("non-finite JSON number")
+
+
 def _parse_json_documents(text: str) -> list[Any]:
-    decoder = json.JSONDecoder()
+    decoder = json.JSONDecoder(
+        object_pairs_hook=_strict_json_object,
+        parse_constant=_reject_json_constant,
+    )
     idx = 0
     docs: list[Any] = []
     length = len(text)
@@ -159,7 +176,11 @@ def load_json(path: Path, default: Any) -> Any:
     if not text.strip():
         return default
     try:
-        return json.loads(text)
+        return json.loads(
+            text,
+            object_pairs_hook=_strict_json_object,
+            parse_constant=_reject_json_constant,
+        )
     except json.JSONDecodeError:
         docs = _parse_json_documents(text)
         if not docs:
@@ -190,6 +211,33 @@ def dump_yaml(path: Path, data: Any) -> None:
             width=120,
             default_flow_style=False,
         )
+
+
+class UniqueKeySafeLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_unique_mapping(
+    loader: UniqueKeySafeLoader, node: yaml.MappingNode, deep: bool = False
+) -> dict[Any, Any]:
+    loader.flatten_mapping(node)
+    mapping: dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            duplicate = key in mapping
+        except TypeError as exc:
+            raise ValueError("unhashable YAML mapping key") from exc
+        if duplicate:
+            raise ValueError("duplicate YAML mapping key")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+UniqueKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
 
 
 def as_list(value: Any) -> list[Any]:
@@ -521,6 +569,10 @@ def assert_secret_trust_compatible(
         "migration_action",
         "source_authority",
         "data_classification",
+        "target_variable_name",
+        "broker_action_id",
+        "action_phase",
+        "execution_boundary",
     ):
         if existing.get(field) != candidate.get(field):
             raise ValueError(
@@ -560,6 +612,9 @@ def apply_direct_onepassword_mapping(
     mapping_id = str(mapping.get("mapping_id") or "").strip()
     if not mapping_id:
         raise ValueError("direct 1Password mapping requires mapping_id")
+    broker_action_id = str(mapping.get("broker_action_id") or "").strip()
+    if not broker_action_id:
+        raise ValueError("direct 1Password mapping requires broker_action_id")
     for field in ("source_vault", "source_item", "source_field"):
         if mapping.get(field) != reference.get(field):
             raise ValueError(f"direct 1Password mapping source mismatch: {field}")
@@ -586,9 +641,37 @@ def apply_direct_onepassword_mapping(
         "retirement_steps",
     ):
         _nonempty_steps(mapping.get(field), field)
+    broker_actions = [
+        action
+        for action in evidence.get("broker_actions") or []
+        if isinstance(action, dict) and action.get("action_id") == broker_action_id
+    ]
+    if len(broker_actions) != 1:
+        raise ValueError("direct 1Password mapping requires one fixed broker action")
+    broker_action = broker_actions[0]
+    if broker_action.get("mode") != "fixed_secret_action":
+        raise ValueError("direct 1Password reference requires fixed_secret_action mode")
+    for field in ("repository", "workflow", "job", "runner_class", "target_vault"):
+        expected = {
+            "repository": repository,
+            "workflow": workflow,
+            "job": job,
+            "runner_class": mapping.get("consumer"),
+            "target_vault": mapping.get("target_vault"),
+        }[field]
+        if broker_action.get(field) != expected:
+            raise ValueError("direct 1Password broker action trust boundary mismatch")
+    exact_field = {
+        "target_item": mapping["target_item"],
+        "target_field": mapping["target_field"],
+        "field_type": mapping["field_type"],
+    }
+    if exact_field not in (broker_action.get("required_fields") or []):
+        raise ValueError("direct 1Password broker action is missing its exact field")
     return {
         "reference_class": "direct-onepassword",
         "mapping_id": mapping_id,
+        "broker_action_id": broker_action_id,
         "repository": repository,
         "workflow": workflow,
         "job": job,
@@ -616,12 +699,525 @@ def apply_direct_onepassword_mapping(
 def _reject_value_bearing_evidence(value: Any, path: str = "evidence") -> None:
     if isinstance(value, dict):
         for key, child in value.items():
-            if str(key).lower() in {"value", "secret", "password", "token"}:
-                raise ValueError(f"value-bearing authority evidence key at {path}.{key}")
+            if str(key).lower() in {
+                "value",
+                "secret",
+                "password",
+                "token",
+                "credential",
+                "api_key",
+                "private_key",
+                "secret_value",
+                "access_token",
+                "password_hash",
+                "values",
+            }:
+                raise ValueError("value-bearing authority evidence key")
             _reject_value_bearing_evidence(child, f"{path}.{key}")
     elif isinstance(value, list):
         for index, child in enumerate(value):
             _reject_value_bearing_evidence(child, f"{path}[{index}]")
+
+
+def _authority_object(
+    value: Any,
+    required: set[str],
+    optional: set[str] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("wrong authority evidence type")
+    allowed = required | (optional or set())
+    if set(value) - allowed:
+        raise ValueError("unexpected authority evidence key")
+    if required - set(value):
+        raise ValueError("missing authority evidence key")
+    return value
+
+
+def _authority_type(value: Any, expected: type | tuple[type, ...]) -> None:
+    expected_types = expected if isinstance(expected, tuple) else (expected,)
+    if not any(type(value) is expected_type for expected_type in expected_types):
+        raise ValueError("wrong authority evidence type")
+
+
+def _authority_string_list(value: Any, *, allow_empty: bool = False) -> None:
+    if not isinstance(value, list) or (not allow_empty and not value):
+        raise ValueError("wrong authority evidence type")
+    if not all(type(item) is str and item.strip() for item in value):
+        raise ValueError("wrong authority evidence type")
+
+
+def _validate_authority_source(source: Any) -> None:
+    if not isinstance(source, dict) or type(source.get("kind")) is not str:
+        raise ValueError("wrong authority evidence type")
+    schemas = {
+        "deployed-config": {
+            "kind", "host", "file", "key_path", "value_type", "readable",
+            "exists", "metadata_artifact", "scoped_user",
+        },
+        "deployed-connection-component": {
+            "kind", "host", "file", "key_path", "component", "readable",
+            "exists", "metadata_artifact", "scoped_user",
+        },
+        "evidence-key": {"kind", "artifact", "key_path", "readable", "exists"},
+        "onepassword": {
+            "kind", "vault", "item", "field", "field_type", "readable",
+            "value_present", "metadata_artifact",
+        },
+        "onepassword-document": {
+            "kind", "vault", "item", "file_name", "readable", "exists",
+            "metadata_artifact",
+        },
+        "onepassword-env-key": {
+            "kind", "vault", "item", "name", "declared_type", "readable",
+            "value_present", "metadata_artifact",
+        },
+        "onepassword-item-title-component": {
+            "kind", "vault", "item", "component", "readable", "exists",
+            "metadata_artifact",
+        },
+    }
+    required = schemas.get(source["kind"])
+    if required is None:
+        raise ValueError("unsupported authority evidence source kind")
+    _authority_object(source, required)
+    for key, value in source.items():
+        if key in {"readable", "exists", "value_present"}:
+            _authority_type(value, bool)
+        else:
+            _authority_type(value, str)
+
+
+def _validate_fixed_broker_action(action: dict[str, Any]) -> None:
+    required = {
+        "action_id", "mode", "trust_class", "repository", "workflow", "job",
+        "runner_class", "template_path", "template_owner", "wrapper_path",
+        "wrapper_owner", "executor_uid", "target_vault", "target_profile",
+        "network_profile", "required_fields", "request_allowed_keys",
+        "result_contract", "client_receives_field", "client_receives_config",
+        "client_receives_fd", "client_receives_output",
+    }
+    _authority_object(action, required)
+    for key, value in action.items():
+        if key.startswith("client_receives_"):
+            _authority_type(value, bool)
+        elif key in {"required_fields"}:
+            if not isinstance(value, list) or not value:
+                raise ValueError("wrong authority evidence type")
+            for field in value:
+                field = _authority_object(
+                    field, {"target_item", "target_field", "field_type"}
+                )
+                for part in field.values():
+                    _authority_type(part, str)
+        elif key == "request_allowed_keys":
+            _authority_string_list(value)
+        else:
+            _authority_type(value, str)
+    if (
+        action["trust_class"] != "production"
+        or action["runner_class"] != "ken-deploy-production"
+        or action["target_vault"] != "Ken Deploy Production"
+        or action["template_owner"] != "root"
+        or action["wrapper_owner"] != "root"
+        or not action["template_path"].startswith("/etc/ken-op-broker/")
+        or not action["wrapper_path"].startswith("/usr/local/libexec/")
+        or action["request_allowed_keys"]
+        != ["version", "action_id", "oidc_jwt", "github_token"]
+        or action["result_contract"] != "stable-code-only"
+        or any(
+            action[key]
+            for key in {
+                "client_receives_field", "client_receives_config",
+                "client_receives_fd", "client_receives_output",
+            }
+        )
+    ):
+        raise ValueError("invalid fixed broker action contract")
+
+
+def _validate_production_build_action(action: dict[str, Any]) -> None:
+    required = {
+        "action_id", "mode", "status", "trust_class", "repository", "workflow",
+        "job", "environment", "runner_class", "request_contract", "runner_contract",
+        "authorization", "source_contract", "identity_boundary", "build_contract",
+        "post_build_contract", "deploy_contract", "durable_state", "cleanup",
+        "risk_acceptance", "pin_gate", "required_mutation_tests",
+        "no_fallback_or_rebuild_elsewhere",
+    }
+    _authority_object(action, required)
+    for key in {
+        "action_id", "mode", "status", "trust_class", "repository", "workflow",
+        "job", "environment", "runner_class",
+    }:
+        _authority_type(action[key], str)
+    _authority_type(action["no_fallback_or_rebuild_elsewhere"], bool)
+    _authority_string_list(action["required_mutation_tests"])
+
+    request = _authority_object(
+        action["request_contract"],
+        {"allowed_keys", "accepts_artifact", "accepts_descriptor", "result"},
+    )
+    _authority_string_list(request["allowed_keys"])
+    _authority_type(request["accepts_artifact"], bool)
+    _authority_type(request["accepts_descriptor"], bool)
+    _authority_type(request["result"], str)
+    runner = _authority_object(
+        action["runner_contract"],
+        {"checkout", "build", "receives_digest", "receives_output"},
+    )
+    for value in runner.values():
+        _authority_type(value, bool)
+    authorization = _authority_object(
+        action["authorization"],
+        {"checks", "all_before_onepassword", "github_token_use"},
+    )
+    _authority_string_list(authorization["checks"])
+    _authority_type(authorization["all_before_onepassword"], bool)
+    _authority_type(authorization["github_token_use"], str)
+    source = _authority_object(
+        action["source_contract"],
+        {
+            "mode", "owner", "repository", "default_ref", "source_commit_sha",
+            "workflow_blob_sha", "dockerfile_blob_sha", "pnpm_lock_blob_sha",
+            "source_addendum", "fetch_before_onepassword", "fallback",
+        },
+    )
+    for key, value in source.items():
+        _authority_type(value, bool if key in {"fetch_before_onepassword", "fallback"} else str)
+    identities = _authority_object(
+        action["identity_boundary"],
+        {
+            "runner_uid", "broker_uid", "builder_uid", "post_build_uid", "deploy_uid",
+            "pairwise_distinct", "runner_can_access_builder_socket",
+            "runner_can_access_builder_state", "builder_can_access_deploy_executor",
+            "deploy_executor_can_access_builder",
+        },
+    )
+    for key, value in identities.items():
+        _authority_type(value, bool if key not in {
+            "runner_uid", "broker_uid", "builder_uid", "post_build_uid", "deploy_uid"
+        } else str)
+    build = _authority_object(
+        action["build_contract"],
+        {
+            "rootless_buildkit", "builder_socket", "builder_state", "wrapper_path",
+            "base_image", "base_image_digest", "buildkit_version", "wrapper_sha256",
+            "dependencies_and_base_images_secretless", "dependency_network_profile",
+            "dependency_endpoints", "secret_phase", "reviewed_github_variables",
+            "forbidden_build_fields", "resource_limits", "output",
+        },
+    )
+    for key in {
+        "builder_socket", "builder_state", "wrapper_path", "base_image",
+        "base_image_digest", "buildkit_version", "wrapper_sha256",
+        "dependency_network_profile",
+    }:
+        _authority_type(build[key], str)
+    _authority_type(build["rootless_buildkit"], bool)
+    _authority_type(build["dependencies_and_base_images_secretless"], bool)
+    for key in {"dependency_endpoints", "reviewed_github_variables", "forbidden_build_fields"}:
+        _authority_string_list(build[key])
+    phase = _authority_object(
+        build["secret_phase"],
+        {"command", "network", "delivery", "field", "arg", "env", "cache_metadata", "logs", "layers"},
+    )
+    for key, value in phase.items():
+        _authority_type(value, bool if key in {"arg", "env", "cache_metadata", "logs", "layers"} else str)
+    limits = _authority_object(
+        build["resource_limits"],
+        {"cpu_quota", "memory_max", "tasks_max", "timeout_seconds", "context_bytes_max", "output_bytes_max"},
+    )
+    _authority_type(limits["cpu_quota"], str)
+    _authority_type(limits["memory_max"], str)
+    for key in {"tasks_max", "timeout_seconds", "context_bytes_max", "output_bytes_max"}:
+        _authority_type(limits[key], int)
+    output = _authority_object(
+        build["output"],
+        {"format", "scan_config_history", "scan_uncompressed_layers", "canary_variants", "push_by_digest", "verified_short_lived_token", "registry"},
+    )
+    _authority_type(output["format"], str)
+    _authority_type(output["registry"], str)
+    _authority_string_list(output["canary_variants"])
+    for key in {"scan_config_history", "scan_uncompressed_layers", "push_by_digest", "verified_short_lived_token"}:
+        _authority_type(output[key], bool)
+    post = _authority_object(
+        action["post_build_contract"],
+        {"executor_uid", "input", "fields", "target", "release", "can_read_build_field", "result"},
+    )
+    _authority_string_list(post["fields"])
+    _authority_type(post["can_read_build_field"], bool)
+    for key in {"executor_uid", "input", "target", "release", "result"}:
+        _authority_type(post[key], str)
+    deploy = _authority_object(
+        action["deploy_contract"],
+        {"executor_uid", "input", "deploy_by_digest", "accepts_runner_digest"},
+    )
+    _authority_type(deploy["executor_uid"], str)
+    _authority_type(deploy["input"], str)
+    _authority_type(deploy["deploy_by_digest"], bool)
+    _authority_type(deploy["accepts_runner_digest"], bool)
+    durable = _authority_object(
+        action["durable_state"], {"fields", "source_run_digest_binding"}
+    )
+    _authority_string_list(durable["fields"])
+    _authority_type(durable["source_run_digest_binding"], bool)
+    cleanup = _authority_object(
+        action["cleanup"],
+        {"every_exit_path", "builder_state", "builder_cache", "request_directory", "process_groups"},
+    )
+    for value in cleanup.values():
+        _authority_type(value, bool)
+    risk = _authority_object(
+        action["risk_acceptance"],
+        {"merged_protected_code_may_consume_build_field", "transformed_embedding_residual_accepted_only_for_reviewed_source", "scope"},
+    )
+    _authority_type(risk["scope"], str)
+    _authority_type(risk["merged_protected_code_may_consume_build_field"], bool)
+    _authority_type(risk["transformed_embedding_residual_accepted_only_for_reviewed_source"], bool)
+    gate = _authority_object(
+        action["pin_gate"], {"cutover_blocked_until_all_exact", "required_exact_pins"}
+    )
+    _authority_type(gate["cutover_blocked_until_all_exact"], bool)
+    _authority_string_list(gate["required_exact_pins"])
+    expected_auth_checks = {
+        "unix-peer", "class-oidc", "live-job", "workflow", "protected-ref",
+        "environment", "durable-replay",
+    }
+    expected_source = {
+        "source_commit_sha": "0952ac075f658acd1bc15a3253032507581e1f0d",
+        "workflow_blob_sha": "21b01bbfeb3db512a42080ea21dff5276f3fa28b",
+        "dockerfile_blob_sha": "6860679d7e023ac3d7828fa97cb32ed0e04bce53",
+        "pnpm_lock_blob_sha": "4dadbbdda72a3c1ed23c1ef14240e765fe9a2170",
+    }
+    expected_mutations = {
+        "network-enabled-secret-phase", "secret-in-arg", "secret-in-env",
+        "secret-in-cache-metadata", "secret-in-log", "secret-in-layer",
+        "secret-in-base64-layer", "secret-in-hex-layer", "source-drift",
+        "workflow-drift", "wrong-image-digest", "replay",
+        "runner-builder-socket-access", "builder-deploy-cross-access",
+        "deploy-builder-cross-access",
+    }
+    expected_uids = {
+        identities["runner_uid"], identities["broker_uid"], identities["builder_uid"],
+        identities["post_build_uid"], identities["deploy_uid"],
+    }
+    if (
+        action["action_id"] != "ken-frontend-production-release"
+        or action["mode"] != "production_build"
+        or action["status"] != "blocked-until-task7-pins-and-mutations-pass"
+        or action["repository"] != "ken-frontend"
+        or action["workflow"] != ".github/workflows/deploy.yml"
+        or action["job"] != "build-image"
+        or action["environment"] != "production"
+        or action["runner_class"] != "ken-deploy-production"
+        or request["allowed_keys"]
+        != ["version", "action_id", "oidc_jwt", "github_token"]
+        or request["accepts_artifact"]
+        or request["accepts_descriptor"]
+        or request["result"] != "stable-code-only"
+        or any(runner.values())
+        or set(authorization["checks"]) != expected_auth_checks
+        or not authorization["all_before_onepassword"]
+        or source["mode"] != "broker-fetched-exact-commit"
+        or not source["fetch_before_onepassword"]
+        or source["fallback"]
+        or any(source[key] != value for key, value in expected_source.items())
+        or len(expected_uids) != 5
+        or not identities["pairwise_distinct"]
+        or identities["runner_can_access_builder_socket"]
+        or identities["runner_can_access_builder_state"]
+        or identities["builder_can_access_deploy_executor"]
+        or identities["deploy_executor_can_access_builder"]
+        or not build["rootless_buildkit"]
+        or not build["dependencies_and_base_images_secretless"]
+        or phase["command"] != "pnpm build"
+        or phase["network"] != "none"
+        or phase["delivery"] != "buildkit-secret-mount"
+        or phase["field"] != "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
+        or any(phase[key] for key in {"arg", "env", "cache_metadata", "logs", "layers"})
+        or set(build["forbidden_build_fields"])
+        != {"POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID"}
+        or not output["scan_config_history"]
+        or not output["scan_uncompressed_layers"]
+        or set(output["canary_variants"]) != {"raw", "base64", "hex"}
+        or not output["push_by_digest"]
+        or not output["verified_short_lived_token"]
+        or post["can_read_build_field"]
+        or post["result"] != "stable-code-only"
+        or deploy["accepts_runner_digest"]
+        or not deploy["deploy_by_digest"]
+        or not durable["source_run_digest_binding"]
+        or not all(cleanup.values())
+        or not risk["merged_protected_code_may_consume_build_field"]
+        or not risk["transformed_embedding_residual_accepted_only_for_reviewed_source"]
+        or not gate["cutover_blocked_until_all_exact"]
+        or not expected_mutations.issubset(set(action["required_mutation_tests"]))
+        or not action["no_fallback_or_rebuild_elsewhere"]
+    ):
+        raise ValueError("invalid production build contract")
+
+
+def validate_authority_evidence(evidence: Any) -> None:
+    """Reject any unregistered field or type before evidence can enter a hash."""
+    if evidence == {}:
+        return
+    _reject_value_bearing_evidence(evidence)
+    root = _authority_object(
+        evidence,
+        {
+            "schema_version", "evidence_id", "policy", "sources", "mappings",
+            "unresolved_annotations", "secretless_migrations",
+            "workflow_variable_migrations", "direct_onepassword_mappings",
+            "broker_actions", "unresolved_observations",
+        },
+    )
+    _authority_type(root["schema_version"], int)
+    if root["schema_version"] != 2:
+        raise ValueError("unsupported authority evidence schema version")
+    _authority_type(root["evidence_id"], str)
+    _authority_type(root["policy"], str)
+    _authority_type(root["sources"], dict)
+    for key in {
+        "mappings", "unresolved_annotations", "secretless_migrations",
+        "workflow_variable_migrations", "direct_onepassword_mappings",
+        "broker_actions", "unresolved_observations",
+    }:
+        _authority_type(root[key], list)
+    for source_id, source in root["sources"].items():
+        _authority_type(source_id, str)
+        _validate_authority_source(source)
+
+    mapping_ids: set[str] = set()
+    for mapping in root["mappings"]:
+        row = _authority_object(
+            mapping,
+            {"mapping_id", "repository", "github_secret_name", "target_vault", "source_ref", "authority_match", "classification", "migration_action", "downstream_update_steps", "alias_group"},
+            {"workflow", "target_item", "target_field"},
+        )
+        for key, value in row.items():
+            if key == "downstream_update_steps":
+                _authority_string_list(value)
+            elif key in {"workflow", "target_item", "target_field", "alias_group"} and value is None:
+                continue
+            else:
+                _authority_type(value, str)
+        if row["mapping_id"] in mapping_ids or row["source_ref"] not in root["sources"]:
+            raise ValueError("invalid authority mapping cross-reference")
+        mapping_ids.add(row["mapping_id"])
+
+    annotation_ids: set[str] = set()
+    for annotation in root["unresolved_annotations"]:
+        row = _authority_object(
+            annotation,
+            {"annotation_id", "repository", "github_secret_name", "target_vault", "resolution_class", "authority_owner", "handoff_group", "unresolved_reason", "provider_rotation_steps", "downstream_update_steps", "data_classification"},
+            {"workflow", "required_runtime_identity", "execution_boundary", "broker_action_id", "action_phase"},
+        )
+        for key, value in row.items():
+            if key in {"downstream_update_steps", "provider_rotation_steps"}:
+                if value is not None:
+                    _authority_string_list(value)
+            elif key == "execution_boundary":
+                boundary = _authority_object(
+                    value,
+                    {"action_id", "mode", "workflow", "production_build_job", "deployment_job", "runner_class", "broker_only", "ci_validation_only", "forbid_ken_ci_production_artifact"},
+                )
+                for boundary_key, boundary_value in boundary.items():
+                    _authority_type(boundary_value, bool if boundary_key in {"broker_only", "ci_validation_only", "forbid_ken_ci_production_artifact"} else str)
+            elif key in {"workflow", "required_runtime_identity", "broker_action_id", "action_phase"} and value is None:
+                continue
+            elif key == "target_vault" and value is None:
+                continue
+            else:
+                _authority_type(value, str)
+        if row["annotation_id"] in annotation_ids:
+            raise ValueError("duplicate authority annotation id")
+        annotation_ids.add(row["annotation_id"])
+
+    migration_ids: set[str] = set()
+    for migration in root["secretless_migrations"]:
+        action = migration.get("migration_action") if isinstance(migration, dict) else None
+        common = {"migration_id", "repository", "workflow", "github_secret_name", "migration_action", "target_runner_class", "target_vault", "target_item", "target_field", "required_permissions", "provider_setup_steps", "downstream_update_steps", "live_verification_steps", "retirement_steps"}
+        extra = {"trusted_publisher", "packaging_contract"} if action == "oidc-trusted-publisher" else {"cross_repo_task"}
+        row = _authority_object(migration, common | extra)
+        for key in common - {"required_permissions", "provider_setup_steps", "downstream_update_steps", "live_verification_steps", "retirement_steps"}:
+            value = row[key]
+            if key in {"target_vault", "target_item", "target_field"} and value is None:
+                continue
+            _authority_type(value, str)
+        for key in {"provider_setup_steps", "downstream_update_steps", "live_verification_steps", "retirement_steps"}:
+            _authority_string_list(row[key])
+        permissions = row["required_permissions"]
+        required_permissions = {"contents", "id-token"} if action == "oidc-trusted-publisher" else {"contents"}
+        _authority_object(permissions, required_permissions)
+        for value in permissions.values():
+            _authority_type(value, str)
+        if action == "oidc-trusted-publisher":
+            publisher = _authority_object(row["trusted_publisher"], {"project", "owner", "repository", "workflow", "environment"})
+            packaging = _authority_object(row["packaging_contract"], {"source", "backend", "project", "install_command", "build_command", "verification_command", "broken_command_to_remove", "task", "checked_default_sha", "pyproject_blob_sha", "root_setup_py_present", "status"})
+            for value in publisher.values(): _authority_type(value, str)
+            for key, value in packaging.items(): _authority_type(value, bool if key == "root_setup_py_present" else str)
+        elif action == "pull-based-publisher":
+            cross = _authority_object(row["cross_repo_task"], {"task", "source_repository", "source_ref", "target_repository", "authentication"})
+            for value in cross.values(): _authority_type(value, str)
+        else:
+            raise ValueError("unsupported secretless authority evidence action")
+        if row["migration_id"] in migration_ids:
+            raise ValueError("duplicate secretless migration id")
+        migration_ids.add(row["migration_id"])
+
+    variable_ids: set[str] = set()
+    for migration in root["workflow_variable_migrations"]:
+        row = _authority_object(migration, {"migration_id", "repository", "workflow", "github_secret_name", "target_variable_name", "migration_action", "review_required", "downstream_update_steps", "live_verification_steps", "retirement_steps"})
+        for key, value in row.items():
+            if key in {"downstream_update_steps", "live_verification_steps", "retirement_steps"}: _authority_string_list(value)
+            elif key == "review_required": _authority_type(value, bool)
+            else: _authority_type(value, str)
+        if row["migration_id"] in variable_ids:
+            raise ValueError("duplicate workflow variable migration id")
+        variable_ids.add(row["migration_id"])
+
+    direct_ids: set[str] = set()
+    for mapping in root["direct_onepassword_mappings"]:
+        row = _authority_object(mapping, {"mapping_id", "broker_action_id", "repository", "workflow", "job", "environment_name", "source_reference", "source_vault", "source_item", "source_field", "target_vault", "target_item", "target_field", "field_type", "consumer", "source_to_target_steps", "broker_cutover_steps", "live_verification_steps", "retirement_steps"})
+        for key, value in row.items():
+            if key.endswith("_steps"): _authority_string_list(value)
+            else: _authority_type(value, str)
+        if row["mapping_id"] in direct_ids:
+            raise ValueError("duplicate direct 1Password mapping id")
+        direct_ids.add(row["mapping_id"])
+
+    action_ids: set[str] = set()
+    for action in root["broker_actions"]:
+        if not isinstance(action, dict):
+            raise ValueError("wrong authority evidence type")
+        if action.get("mode") == "fixed_secret_action":
+            _validate_fixed_broker_action(action)
+        elif action.get("mode") == "production_build":
+            _validate_production_build_action(action)
+        else:
+            raise ValueError("unsupported broker action mode")
+        if action["action_id"] in action_ids:
+            raise ValueError("duplicate broker action id")
+        action_ids.add(action["action_id"])
+    if action_ids and action_ids != {
+        "ken-frontend-production-release",
+        "ken-vexa-mcp-auth-production-deploy",
+        "ken-website-beehiiv-production-sync",
+        "ken-website-production-deploy",
+    }:
+        raise ValueError("incomplete authority broker action set")
+    for mapping in root["direct_onepassword_mappings"]:
+        if mapping["broker_action_id"] not in action_ids:
+            raise ValueError("invalid direct broker action cross-reference")
+    for annotation in root["unresolved_annotations"]:
+        if annotation.get("broker_action_id") not in {None, *action_ids}:
+            raise ValueError("invalid annotation broker action cross-reference")
+
+    for observation in root["unresolved_observations"]:
+        row = _authority_object(observation, {"kind", "reason"})
+        _authority_type(row["kind"], str)
+        _authority_type(row["reason"], str)
 
 
 def apply_secretless_migration(
@@ -741,6 +1337,72 @@ def apply_secretless_migration(
     entry["replacement_required"] = True
     entry["alias_group"] = None
     entry["alias_status"] = "not-applicable"
+    return entry
+
+
+def apply_workflow_variable_migration(
+    entry: dict[str, Any], evidence: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Plan reviewed public configuration as a GitHub variable, never a secret."""
+    evidence = evidence or {}
+    _reject_value_bearing_evidence(evidence)
+    matches = [
+        row
+        for row in evidence.get("workflow_variable_migrations") or []
+        if isinstance(row, dict)
+        and row.get("repository") == entry.get("repository")
+        and row.get("workflow") == entry.get("workflow")
+        and row.get("github_secret_name") == entry.get("github_secret_name")
+    ]
+    if not matches:
+        return entry
+    if len(matches) != 1:
+        raise ValueError("multiple workflow variable migrations matched one reference")
+    migration = matches[0]
+    if migration.get("migration_action") != "move-to-github-variable":
+        raise ValueError("unsupported workflow variable migration action")
+    if migration.get("review_required") is not True:
+        raise ValueError("workflow variable migration requires explicit review")
+    if migration.get("target_variable_name") != entry.get("github_secret_name"):
+        raise ValueError("workflow variable migration target name mismatch")
+    for field in (
+        "downstream_update_steps",
+        "live_verification_steps",
+        "retirement_steps",
+    ):
+        _nonempty_steps(migration.get(field), field)
+    for key in (
+        "resolution_class",
+        "authority_owner",
+        "unresolved_reason",
+        "handoff_group",
+        "authority_annotation_id",
+    ):
+        entry.pop(key, None)
+    entry.update(
+        {
+            "source_authority": f"planned-github-variable://{migration['migration_id']}",
+            "source_readable": False,
+            "authority_status": "planned-variable",
+            "migration_action": "move-to-github-variable",
+            "workflow_variable_migration_id": migration["migration_id"],
+            "target_variable_name": migration["target_variable_name"],
+            "target_vault": None,
+            "target_item": None,
+            "target_field": None,
+            "field_type": None,
+            "classification": "public-build-configuration",
+            "data_classification": "configuration",
+            "rotation_required": False,
+            "provider_rotation_steps": None,
+            "downstream_update_steps": list(migration["downstream_update_steps"]),
+            "live_verification_steps": list(migration["live_verification_steps"]),
+            "retirement_steps": list(migration["retirement_steps"]),
+            "replacement_required": True,
+            "alias_group": None,
+            "alias_status": "not-applicable",
+        }
+    )
     return entry
 
 
@@ -968,11 +1630,12 @@ def apply_unresolved_annotation(
     if annotation.get("execution_boundary"):
         boundary = annotation["execution_boundary"]
         expected = {
+            "action_id": "ken-frontend-production-release",
+            "mode": "production_build",
             "workflow": ".github/workflows/deploy.yml",
             "production_build_job": "build-image",
             "deployment_job": "deploy",
             "runner_class": "ken-deploy-production",
-            "build_wrapper": "task7-fixed-production-image-build",
             "broker_only": True,
             "ci_validation_only": True,
             "forbid_ken_ci_production_artifact": True,
@@ -980,6 +1643,10 @@ def apply_unresolved_annotation(
         if boundary != expected:
             raise ValueError("invalid fixed production build execution boundary")
         entry["execution_boundary"] = dict(boundary)
+    if annotation.get("broker_action_id"):
+        entry["broker_action_id"] = annotation["broker_action_id"]
+    if annotation.get("action_phase"):
+        entry["action_phase"] = annotation["action_phase"]
     if annotation.get("data_classification"):
         entry["data_classification"] = annotation["data_classification"]
     return entry
@@ -993,8 +1660,12 @@ def validate_authority_mapping_coverage(
     mappings = evidence.get("mappings") or []
     annotations = evidence.get("unresolved_annotations") or []
     migrations = evidence.get("secretless_migrations") or []
+    variable_migrations = evidence.get("workflow_variable_migrations") or []
     direct_mappings = evidence.get("direct_onepassword_mappings") or []
-    if not mappings and not annotations and not migrations and not direct_mappings:
+    broker_actions = evidence.get("broker_actions") or []
+    if not any(
+        (mappings, annotations, migrations, variable_migrations, direct_mappings, broker_actions)
+    ):
         return
     mapping_ids: list[str] = []
     for mapping in mappings:
@@ -1053,6 +1724,30 @@ def validate_authority_mapping_coverage(
     if unused_migrations:
         raise ValueError(f"unused secretless migrations: {', '.join(unused_migrations)}")
 
+    variable_migration_ids: list[str] = []
+    for migration in variable_migrations:
+        if not isinstance(migration, dict):
+            raise ValueError("workflow variable migration must be an object")
+        migration_id = str(migration.get("migration_id") or "").strip()
+        if not migration_id:
+            raise ValueError("workflow variable migration requires migration_id")
+        variable_migration_ids.append(migration_id)
+    if len(variable_migration_ids) != len(set(variable_migration_ids)):
+        raise ValueError("duplicate workflow variable migration_id")
+    used_variable_migrations = {
+        str(entry["workflow_variable_migration_id"])
+        for entry in entries
+        if entry.get("workflow_variable_migration_id")
+    }
+    unused_variable_migrations = sorted(
+        set(variable_migration_ids) - used_variable_migrations
+    )
+    if unused_variable_migrations:
+        raise ValueError(
+            "unused workflow variable migrations: "
+            + ", ".join(unused_variable_migrations)
+        )
+
     direct_mapping_ids: list[str] = []
     for mapping in direct_mappings:
         if not isinstance(mapping, dict):
@@ -1073,6 +1768,42 @@ def validate_authority_mapping_coverage(
         raise ValueError(
             f"unused direct 1Password mappings: {', '.join(unused_direct)}"
         )
+
+    action_ids = [str(action.get("action_id") or "") for action in broker_actions]
+    if any(not action_id for action_id in action_ids):
+        raise ValueError("broker action requires action_id")
+    if len(action_ids) != len(set(action_ids)):
+        raise ValueError("duplicate broker action_id")
+    action_by_id = {str(action["action_id"]): action for action in broker_actions}
+    for entry in entries:
+        action_id = entry.get("broker_action_id")
+        if not action_id:
+            continue
+        action = action_by_id.get(str(action_id))
+        if (
+            not action
+            or action.get("repository") != entry.get("repository")
+            or action.get("workflow") != entry.get("workflow")
+            or action.get("runner_class") != entry.get("consumer")
+        ):
+            raise ValueError("secret broker action trust boundary mismatch")
+        boundary = entry.get("execution_boundary")
+        if boundary and (
+            boundary.get("action_id") != action.get("action_id")
+            or boundary.get("mode") != action.get("mode")
+            or boundary.get("workflow") != action.get("workflow")
+            or boundary.get("production_build_job") != action.get("job")
+            or boundary.get("runner_class") != action.get("runner_class")
+        ):
+            raise ValueError("production build execution boundary mismatch")
+    used_action_ids = {
+        str(entry["broker_action_id"])
+        for entry in [*entries, *(direct_entries or [])]
+        if entry.get("broker_action_id")
+    }
+    unused_actions = sorted(set(action_ids) - used_action_ids)
+    if unused_actions:
+        raise ValueError("unused broker actions: " + ", ".join(unused_actions))
 
 
 def load_billing_evidence(path: Path) -> dict[str, Any]:
@@ -1201,6 +1932,7 @@ def load_inventory_inputs(collect_dir: Path) -> LoadedInventoryInputs:
         kind: reader.json(kind, collect_dir / filename, default)
         for kind, (filename, default) in STATIC_INPUT_SOURCE_REGISTRY.items()
     }
+    validate_authority_evidence(raw["authority_evidence"])
     repos_index = raw["repos_index"] if isinstance(raw["repos_index"], list) else []
     repository_inputs: list[dict[str, Any]] = []
     for repo_info in repos_index:
@@ -1738,7 +2470,7 @@ def classify_job(
 def parse_workflow(path: str, text: str) -> dict[str, Any]:
     if VALUE_SHAPED_RE.search(text):
         text = VALUE_SHAPED_RE.sub("[REDACTED-VALUE-SHAPED]", text)
-    data = yaml.safe_load(text) or {}
+    data = yaml.load(text, Loader=UniqueKeySafeLoader) or {}
     if not isinstance(data, dict):
         raise ValueError(f"{path} is not a mapping")
     triggers = workflow_triggers(data.get(True) if True in data else data.get("on"))
@@ -2124,6 +2856,7 @@ def build_secret_handoff(
     organization: str,
     generated_at: str,
     direct_onepassword_entries: list[dict[str, Any]] | None = None,
+    broker_actions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     grouped: dict[tuple[str, str, str | None], list[dict[str, Any]]] = {}
     excluded = {"github-provided": 0, "preserved-existing": 0}
@@ -2155,6 +2888,9 @@ def build_secret_handoff(
         "execution_boundary",
         "trusted_publisher",
         "packaging_contract",
+        "target_variable_name",
+        "broker_action_id",
+        "action_phase",
     )
     for (repository, name, target_vault), members in sorted(
         grouped.items(), key=lambda item: (item[0][0].lower(), item[0][1], item[0][2] or "")
@@ -2199,6 +2935,9 @@ def build_secret_handoff(
             "execution_boundary": first.get("execution_boundary"),
             "trusted_publisher": first.get("trusted_publisher"),
             "packaging_contract": first.get("packaging_contract"),
+            "target_variable_name": first.get("target_variable_name"),
+            "broker_action_id": first.get("broker_action_id"),
+            "action_phase": first.get("action_phase"),
             "workflows": workflows,
             "consumers": consumers,
             "consuming_jobs": consuming_jobs,
@@ -2258,6 +2997,7 @@ def build_secret_handoff(
             "field_type": entry["field_type"],
             "authority_status": entry["authority_status"],
             "migration_action": entry["migration_action"],
+            "broker_action_id": entry["broker_action_id"],
             "consumer": entry["consumer"],
             "handoff_group": (
                 f"direct-op/{entry['repository']}/{Path(entry['workflow']).stem}/"
@@ -2306,7 +3046,7 @@ def build_secret_handoff(
         return dict(sorted(output.items()))
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "organization": organization,
         "generated_at": generated_at,
         "policy": (
@@ -2353,6 +3093,7 @@ def build_secret_handoff(
             "by_target_vault": counts("target_vault"),
             "by_handoff_group": counts("handoff_group"),
         },
+        "broker_actions": list(broker_actions or []),
         "rows": rows,
     }
 
@@ -2636,6 +3377,7 @@ def generate_from_inputs(
                                 "field_type": entry["field_type"],
                                 "consumer": entry["consumer"],
                                 "migration_action": entry["migration_action"],
+                                "broker_action_id": entry["broker_action_id"],
                             }
                             for entry in job_direct_entries
                         ],
@@ -2662,6 +3404,9 @@ def generate_from_inputs(
                         classified,
                     )
                     candidate = apply_secretless_migration(
+                        candidate, authority_evidence
+                    )
+                    candidate = apply_workflow_variable_migration(
                         candidate, authority_evidence
                     )
                     candidate = apply_authority_evidence(
@@ -2774,7 +3519,7 @@ def generate_from_inputs(
     }
 
     secrets_doc = {
-        "schema_version": 3,
+        "schema_version": 4,
         "organization": org.get("login") or "Ken-Technology",
         "generated_at": generated_at,
         "policy": (
@@ -2788,12 +3533,14 @@ def generate_from_inputs(
         "authority_evidence_id": authority_evidence.get("evidence_id"),
         "entries": secret_entries,
         "direct_onepassword_entries": direct_onepassword_entries,
+        "broker_actions": authority_evidence.get("broker_actions") or [],
     }
     handoff_doc = build_secret_handoff(
         secret_entries,
         str(org.get("login") or "Ken-Technology"),
         generated_at,
         direct_onepassword_entries,
+        authority_evidence.get("broker_actions") or [],
     )
 
     manifest = build_input_manifest(inputs, snapshot_time)
@@ -2809,6 +3556,7 @@ def generate_from_inputs(
         "secrets": len(secret_entries),
         "handoff_rows": len(handoff_doc["rows"]),
         "direct_onepassword_references": len(direct_onepassword_entries),
+        "broker_actions": len(authority_evidence.get("broker_actions") or []),
         "input_hash": manifest["input_hash"],
         "output_dir": str(output_dir),
     }

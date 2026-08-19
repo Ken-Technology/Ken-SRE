@@ -6298,6 +6298,7 @@ repositories:
         field_type: string
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-vexa-mcp-auth-production-deploy
       - environment_name: SERVER_PORT
         source_reference: op://Development/vexa-mcp-auth-deploy-ssh/port
         source_vault: Development
@@ -6309,6 +6310,7 @@ repositories:
         field_type: string
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-vexa-mcp-auth-production-deploy
       - environment_name: SERVER_SSH_KEY
         source_reference: op://Development/vexa-mcp-auth-deploy-ssh/private_key
         source_vault: Development
@@ -6320,6 +6322,7 @@ repositories:
         field_type: concealed
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-vexa-mcp-auth-production-deploy
       artifacts: []
       target_hints:
       - 1Password
@@ -6413,6 +6416,7 @@ repositories:
         field_type: concealed
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-website-beehiiv-production-sync
       - environment_name: BEEHIIV_API_KEY
         source_reference: op://ken-website/beehiiv/credential
         source_vault: ken-website
@@ -6424,6 +6428,7 @@ repositories:
         field_type: concealed
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-website-beehiiv-production-sync
       - environment_name: BEEHIIV_PUBLICATION_ID
         source_reference: op://ken-website/beehiiv/publication_id
         source_vault: ken-website
@@ -6435,6 +6440,7 @@ repositories:
         field_type: string
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-website-beehiiv-production-sync
       artifacts: []
       target_hints:
       - npm
@@ -6546,6 +6552,7 @@ repositories:
         field_type: string
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-website-production-deploy
       - environment_name: POSTHOG_PERSONAL_API_KEY
         source_reference: op://ken-website/posthog/personal_api_key
         source_vault: ken-website
@@ -6557,6 +6564,7 @@ repositories:
         field_type: concealed
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-website-production-deploy
       - environment_name: WEBSITE_HOST
         source_reference: op://ken-website/deploy-ssh/host
         source_vault: ken-website
@@ -6568,6 +6576,7 @@ repositories:
         field_type: string
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-website-production-deploy
       - environment_name: WEBSITE_PORT
         source_reference: op://ken-website/deploy-ssh/port
         source_vault: ken-website
@@ -6579,6 +6588,7 @@ repositories:
         field_type: string
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-website-production-deploy
       - environment_name: WEBSITE_SSH_KEY
         source_reference: op://ken-website/deploy-ssh/private_key
         source_vault: ken-website
@@ -6590,6 +6600,7 @@ repositories:
         field_type: concealed
         consumer: ken-deploy-production
         migration_action: copy-direct-onepassword-reference
+        broker_action_id: ken-website-production-deploy
       artifacts: []
       target_hints:
       - Cloudflare
@@ -6618,4 +6629,4 @@ repositories:
       - COMBINED_BUILD_AND_DEPLOY
       - SCHEDULED_LONG_LIVED_SECRET
       - OP_BOOTSTRAP_TOKEN
-input_hash: ea441076c6e63417132634f86494e032364b5128666bde0cc7ece336c2dd9964
+input_hash: acbec1cd65218d4bbb5a3e553ad4a6c79d19e3e37c78835f3db57eb40597940f

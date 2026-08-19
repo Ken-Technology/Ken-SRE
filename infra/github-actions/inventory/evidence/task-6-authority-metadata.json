@@ -1,8 +1,357 @@
 {
+  "broker_actions": [
+    {
+      "action_id": "ken-frontend-production-release",
+      "authorization": {
+        "all_before_onepassword": true,
+        "checks": [
+          "unix-peer",
+          "class-oidc",
+          "live-job",
+          "workflow",
+          "protected-ref",
+          "environment",
+          "durable-replay"
+        ],
+        "github_token_use": "fixed-github-read-and-ghcr-write-only"
+      },
+      "build_contract": {
+        "base_image": "node:22-alpine",
+        "base_image_digest": "task7-exact-sha256-required",
+        "builder_socket": "/run/ken-op-broker/production/builders/ken-frontend-production-release/buildkitd.sock",
+        "builder_state": "/run/ken-op-broker/production/builders/ken-frontend-production-release/state",
+        "buildkit_version": "task7-exact-version-required",
+        "dependencies_and_base_images_secretless": true,
+        "dependency_endpoints": [
+          "auth.docker.io:443",
+          "registry-1.docker.io:443",
+          "registry.npmjs.org:443"
+        ],
+        "dependency_network_profile": "ken-frontend-secretless-dependency-fetch",
+        "forbidden_build_fields": [
+          "POSTHOG_PERSONAL_API_KEY",
+          "POSTHOG_PROJECT_ID"
+        ],
+        "output": {
+          "canary_variants": [
+            "raw",
+            "base64",
+            "hex"
+          ],
+          "format": "OCI",
+          "push_by_digest": true,
+          "registry": "ghcr.io/ken-technology/ken-frontend",
+          "scan_config_history": true,
+          "scan_uncompressed_layers": true,
+          "verified_short_lived_token": true
+        },
+        "resource_limits": {
+          "context_bytes_max": 1073741824,
+          "cpu_quota": "400%",
+          "memory_max": "16G",
+          "output_bytes_max": 2147483648,
+          "tasks_max": 512,
+          "timeout_seconds": 1800
+        },
+        "reviewed_github_variables": [
+          "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+          "NEXT_PUBLIC_CLERK_SIGN_IN_URL",
+          "NEXT_PUBLIC_CLERK_SIGN_UP_URL",
+          "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+          "NEXT_PUBLIC_TECHNOLOGY_FILTER_ENABLED",
+          "NEXT_PUBLIC_TECHNOLOGY_FILTER_ALLOWED_CLIENT_IDS",
+          "NEXT_PUBLIC_EXPERIMENTS_ALLOWED_CLIENT_IDS"
+        ],
+        "rootless_buildkit": true,
+        "secret_phase": {
+          "arg": false,
+          "cache_metadata": false,
+          "command": "pnpm build",
+          "delivery": "buildkit-secret-mount",
+          "env": false,
+          "field": "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+          "layers": false,
+          "logs": false,
+          "network": "none"
+        },
+        "wrapper_path": "/usr/local/libexec/ken-actions/ken-frontend-production-release-build",
+        "wrapper_sha256": "task7-exact-sha256-required"
+      },
+      "cleanup": {
+        "builder_cache": true,
+        "builder_state": true,
+        "every_exit_path": true,
+        "process_groups": true,
+        "request_directory": true
+      },
+      "deploy_contract": {
+        "accepts_runner_digest": false,
+        "deploy_by_digest": true,
+        "executor_uid": "ken-action-frontend-deploy",
+        "input": "broker-recorded-image-digest"
+      },
+      "durable_state": {
+        "fields": [
+          "repository_id",
+          "run_id",
+          "run_attempt",
+          "check_run_id",
+          "action_id",
+          "source_commit_sha",
+          "image_digest",
+          "result_code"
+        ],
+        "source_run_digest_binding": true
+      },
+      "environment": "production",
+      "identity_boundary": {
+        "broker_uid": "root",
+        "builder_can_access_deploy_executor": false,
+        "builder_uid": "ken-action-frontend-builder",
+        "deploy_executor_can_access_builder": false,
+        "deploy_uid": "ken-action-frontend-deploy",
+        "pairwise_distinct": true,
+        "post_build_uid": "ken-action-frontend-posthog",
+        "runner_can_access_builder_socket": false,
+        "runner_can_access_builder_state": false,
+        "runner_uid": "ken-deploy-production-runner"
+      },
+      "job": "build-image",
+      "mode": "production_build",
+      "no_fallback_or_rebuild_elsewhere": true,
+      "pin_gate": {
+        "cutover_blocked_until_all_exact": true,
+        "required_exact_pins": [
+          "base_image_digest",
+          "pnpm_lock_blob_sha",
+          "source_commit_sha",
+          "workflow_blob_sha",
+          "wrapper_sha256",
+          "buildkit_version",
+          "resource_limits"
+        ]
+      },
+      "post_build_contract": {
+        "can_read_build_field": false,
+        "executor_uid": "ken-action-frontend-posthog",
+        "fields": [
+          "POSTHOG_PERSONAL_API_KEY",
+          "POSTHOG_PROJECT_ID"
+        ],
+        "input": "broker-owned-sourcemap-set-from-scanned-image",
+        "release": "exact-source-commit-sha",
+        "result": "stable-code-only",
+        "target": "https://us.posthog.com"
+      },
+      "repository": "ken-frontend",
+      "request_contract": {
+        "accepts_artifact": false,
+        "accepts_descriptor": false,
+        "allowed_keys": [
+          "version",
+          "action_id",
+          "oidc_jwt",
+          "github_token"
+        ],
+        "result": "stable-code-only"
+      },
+      "required_mutation_tests": [
+        "network-enabled-secret-phase",
+        "secret-in-arg",
+        "secret-in-env",
+        "secret-in-cache-metadata",
+        "secret-in-log",
+        "secret-in-layer",
+        "secret-in-base64-layer",
+        "secret-in-hex-layer",
+        "source-drift",
+        "workflow-drift",
+        "wrong-image-digest",
+        "replay",
+        "runner-builder-socket-access",
+        "builder-deploy-cross-access",
+        "deploy-builder-cross-access"
+      ],
+      "risk_acceptance": {
+        "merged_protected_code_may_consume_build_field": true,
+        "scope": "exact-source-workflow-wrapper-and-lock-pins-only",
+        "transformed_embedding_residual_accepted_only_for_reviewed_source": true
+      },
+      "runner_class": "ken-deploy-production",
+      "runner_contract": {
+        "build": false,
+        "checkout": false,
+        "receives_digest": false,
+        "receives_output": false
+      },
+      "source_contract": {
+        "default_ref": "refs/heads/main",
+        "dockerfile_blob_sha": "6860679d7e023ac3d7828fa97cb32ed0e04bce53",
+        "fallback": false,
+        "fetch_before_onepassword": true,
+        "mode": "broker-fetched-exact-commit",
+        "owner": "Ken-Technology",
+        "pnpm_lock_blob_sha": "4dadbbdda72a3c1ed23c1ef14240e765fe9a2170",
+        "repository": "ken-frontend",
+        "source_addendum": "task-6-broker-source-contract-addendum.md",
+        "source_commit_sha": "0952ac075f658acd1bc15a3253032507581e1f0d",
+        "workflow_blob_sha": "21b01bbfeb3db512a42080ea21dff5276f3fa28b"
+      },
+      "status": "blocked-until-task7-pins-and-mutations-pass",
+      "trust_class": "production",
+      "workflow": ".github/workflows/deploy.yml"
+    },
+    {
+      "action_id": "ken-vexa-mcp-auth-production-deploy",
+      "client_receives_config": false,
+      "client_receives_fd": false,
+      "client_receives_field": false,
+      "client_receives_output": false,
+      "executor_uid": "ken-action-vexa-deploy",
+      "job": "deploy",
+      "mode": "fixed_secret_action",
+      "network_profile": "github-source-vexa-production-ssh-mcp-recordings",
+      "repository": "ken-vexa-mcp-auth",
+      "request_allowed_keys": [
+        "version",
+        "action_id",
+        "oidc_jwt",
+        "github_token"
+      ],
+      "required_fields": [
+        {
+          "field_type": "string",
+          "target_field": "SERVER_HOST",
+          "target_item": "ken-vexa-mcp-auth"
+        },
+        {
+          "field_type": "string",
+          "target_field": "SERVER_PORT",
+          "target_item": "ken-vexa-mcp-auth"
+        },
+        {
+          "field_type": "concealed",
+          "target_field": "SERVER_SSH_KEY",
+          "target_item": "ken-vexa-mcp-auth"
+        }
+      ],
+      "result_contract": "stable-code-only",
+      "runner_class": "ken-deploy-production",
+      "target_profile": "vexa-mcp-auth-production-ssh-and-public-health",
+      "target_vault": "Ken Deploy Production",
+      "template_owner": "root",
+      "template_path": "/etc/ken-op-broker/templates/ken-vexa-mcp-auth-production-deploy.env.op",
+      "trust_class": "production",
+      "workflow": ".github/workflows/deploy.yml",
+      "wrapper_owner": "root",
+      "wrapper_path": "/usr/local/libexec/ken-actions/ken-vexa-mcp-auth-production-deploy"
+    },
+    {
+      "action_id": "ken-website-beehiiv-production-sync",
+      "client_receives_config": false,
+      "client_receives_fd": false,
+      "client_receives_field": false,
+      "client_receives_output": false,
+      "executor_uid": "ken-action-website-beehiiv",
+      "job": "sync",
+      "mode": "fixed_secret_action",
+      "network_profile": "github-source-beehiiv-api-and-ken-website-push",
+      "repository": "ken-website",
+      "request_allowed_keys": [
+        "version",
+        "action_id",
+        "oidc_jwt",
+        "github_token"
+      ],
+      "required_fields": [
+        {
+          "field_type": "concealed",
+          "target_field": "DEPLOY_SSH_KEY",
+          "target_item": "ken-website"
+        },
+        {
+          "field_type": "concealed",
+          "target_field": "BEEHIIV_API_KEY",
+          "target_item": "ken-website"
+        },
+        {
+          "field_type": "string",
+          "target_field": "BEEHIIV_PUBLICATION_ID",
+          "target_item": "ken-website"
+        }
+      ],
+      "result_contract": "stable-code-only",
+      "runner_class": "ken-deploy-production",
+      "target_profile": "ken-website-main-beehiiv-sync",
+      "target_vault": "Ken Deploy Production",
+      "template_owner": "root",
+      "template_path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.env.op",
+      "trust_class": "production",
+      "workflow": ".github/workflows/beehiiv-sync.yml",
+      "wrapper_owner": "root",
+      "wrapper_path": "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync"
+    },
+    {
+      "action_id": "ken-website-production-deploy",
+      "client_receives_config": false,
+      "client_receives_fd": false,
+      "client_receives_field": false,
+      "client_receives_output": false,
+      "executor_uid": "ken-action-website-deploy",
+      "job": "deploy",
+      "mode": "fixed_secret_action",
+      "network_profile": "github-source-website-production-ssh-and-public-health",
+      "repository": "ken-website",
+      "request_allowed_keys": [
+        "version",
+        "action_id",
+        "oidc_jwt",
+        "github_token"
+      ],
+      "required_fields": [
+        {
+          "field_type": "string",
+          "target_field": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+          "target_item": "ken-website"
+        },
+        {
+          "field_type": "concealed",
+          "target_field": "POSTHOG_PERSONAL_API_KEY",
+          "target_item": "ken-website"
+        },
+        {
+          "field_type": "string",
+          "target_field": "WEBSITE_HOST",
+          "target_item": "ken-website"
+        },
+        {
+          "field_type": "string",
+          "target_field": "WEBSITE_PORT",
+          "target_item": "ken-website"
+        },
+        {
+          "field_type": "concealed",
+          "target_field": "WEBSITE_SSH_KEY",
+          "target_item": "ken-website"
+        }
+      ],
+      "result_contract": "stable-code-only",
+      "runner_class": "ken-deploy-production",
+      "target_profile": "ken-website-production-ssh-and-public-health",
+      "target_vault": "Ken Deploy Production",
+      "template_owner": "root",
+      "template_path": "/etc/ken-op-broker/templates/ken-website-production-deploy.env.op",
+      "trust_class": "production",
+      "workflow": ".github/workflows/deploy.yml",
+      "wrapper_owner": "root",
+      "wrapper_path": "/usr/local/libexec/ken-actions/ken-website-production-deploy"
+    }
+  ],
   "direct_onepassword_mappings": [
     {
+      "broker_action_id": "ken-vexa-mcp-auth-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://Development/vexa-mcp-auth-deploy-ssh/host env reference in ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_HOST with the fixed production broker field Ken Deploy Production/ken-vexa-mcp-auth/SERVER_HOST under ken-deploy-production.",
+        "Replace the direct op://Development/vexa-mcp-auth-deploy-ssh/host env reference in ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_HOST with one request for fixed action ken-vexa-mcp-auth-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -30,8 +379,9 @@
       "workflow": ".github/workflows/deploy.yml"
     },
     {
+      "broker_action_id": "ken-vexa-mcp-auth-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://Development/vexa-mcp-auth-deploy-ssh/port env reference in ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_PORT with the fixed production broker field Ken Deploy Production/ken-vexa-mcp-auth/SERVER_PORT under ken-deploy-production.",
+        "Replace the direct op://Development/vexa-mcp-auth-deploy-ssh/port env reference in ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_PORT with one request for fixed action ken-vexa-mcp-auth-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -59,8 +409,9 @@
       "workflow": ".github/workflows/deploy.yml"
     },
     {
+      "broker_action_id": "ken-vexa-mcp-auth-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://Development/vexa-mcp-auth-deploy-ssh/private_key env reference in ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_SSH_KEY with the fixed production broker field Ken Deploy Production/ken-vexa-mcp-auth/SERVER_SSH_KEY under ken-deploy-production.",
+        "Replace the direct op://Development/vexa-mcp-auth-deploy-ssh/private_key env reference in ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_SSH_KEY with one request for fixed action ken-vexa-mcp-auth-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -88,8 +439,9 @@
       "workflow": ".github/workflows/deploy.yml"
     },
     {
+      "broker_action_id": "ken-website-beehiiv-production-sync",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/beehiiv/credential env reference in ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_API_KEY with the fixed production broker field Ken Deploy Production/ken-website/BEEHIIV_API_KEY under ken-deploy-production.",
+        "Replace the direct op://ken-website/beehiiv/credential env reference in ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_API_KEY with one request for fixed action ken-website-beehiiv-production-sync; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -117,8 +469,9 @@
       "workflow": ".github/workflows/beehiiv-sync.yml"
     },
     {
+      "broker_action_id": "ken-website-beehiiv-production-sync",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/beehiiv/publication_id env reference in ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_PUBLICATION_ID with the fixed production broker field Ken Deploy Production/ken-website/BEEHIIV_PUBLICATION_ID under ken-deploy-production.",
+        "Replace the direct op://ken-website/beehiiv/publication_id env reference in ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_PUBLICATION_ID with one request for fixed action ken-website-beehiiv-production-sync; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -146,8 +499,9 @@
       "workflow": ".github/workflows/beehiiv-sync.yml"
     },
     {
+      "broker_action_id": "ken-website-beehiiv-production-sync",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/blog-sync-deploy/private_key env reference in ken-website:.github/workflows/beehiiv-sync.yml#sync:DEPLOY_SSH_KEY with the fixed production broker field Ken Deploy Production/ken-website/DEPLOY_SSH_KEY under ken-deploy-production.",
+        "Replace the direct op://ken-website/blog-sync-deploy/private_key env reference in ken-website:.github/workflows/beehiiv-sync.yml#sync:DEPLOY_SSH_KEY with one request for fixed action ken-website-beehiiv-production-sync; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -175,8 +529,9 @@
       "workflow": ".github/workflows/beehiiv-sync.yml"
     },
     {
+      "broker_action_id": "ken-website-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/posthog/project_token env reference in ken-website:.github/workflows/deploy.yml#deploy:NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN with the fixed production broker field Ken Deploy Production/ken-website/NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN under ken-deploy-production.",
+        "Replace the direct op://ken-website/posthog/project_token env reference in ken-website:.github/workflows/deploy.yml#deploy:NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN with one request for fixed action ken-website-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -204,8 +559,9 @@
       "workflow": ".github/workflows/deploy.yml"
     },
     {
+      "broker_action_id": "ken-website-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/posthog/personal_api_key env reference in ken-website:.github/workflows/deploy.yml#deploy:POSTHOG_PERSONAL_API_KEY with the fixed production broker field Ken Deploy Production/ken-website/POSTHOG_PERSONAL_API_KEY under ken-deploy-production.",
+        "Replace the direct op://ken-website/posthog/personal_api_key env reference in ken-website:.github/workflows/deploy.yml#deploy:POSTHOG_PERSONAL_API_KEY with one request for fixed action ken-website-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -233,8 +589,9 @@
       "workflow": ".github/workflows/deploy.yml"
     },
     {
+      "broker_action_id": "ken-website-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/deploy-ssh/host env reference in ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_HOST with the fixed production broker field Ken Deploy Production/ken-website/WEBSITE_HOST under ken-deploy-production.",
+        "Replace the direct op://ken-website/deploy-ssh/host env reference in ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_HOST with one request for fixed action ken-website-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -262,8 +619,9 @@
       "workflow": ".github/workflows/deploy.yml"
     },
     {
+      "broker_action_id": "ken-website-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/deploy-ssh/port env reference in ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_PORT with the fixed production broker field Ken Deploy Production/ken-website/WEBSITE_PORT under ken-deploy-production.",
+        "Replace the direct op://ken-website/deploy-ssh/port env reference in ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_PORT with one request for fixed action ken-website-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -291,8 +649,9 @@
       "workflow": ".github/workflows/deploy.yml"
     },
     {
+      "broker_action_id": "ken-website-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/deploy-ssh/private_key env reference in ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_SSH_KEY with the fixed production broker field Ken Deploy Production/ken-website/WEBSITE_SSH_KEY under ken-deploy-production.",
+        "Replace the direct op://ken-website/deploy-ssh/private_key env reference in ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_SSH_KEY with one request for fixed action ken-website-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
@@ -2556,20 +2915,6 @@
       "target_vault": "Ken Deploy Production"
     },
     {
-      "alias_group": "ken-frontend/NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-      "authority_match": "exact-field",
-      "classification": "identifier",
-      "downstream_update_steps": [
-        "Create repository Actions variable NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in ken-frontend, update the workflow reference from secrets to vars, and verify without printing the setting."
-      ],
-      "github_secret_name": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-      "mapping_id": "ken-frontend-ken-deploy-production-all-workflows-next-public-clerk-publishable-key",
-      "migration_action": "move-to-variable",
-      "repository": "ken-frontend",
-      "source_ref": "op-development-clerk-production-api-next-public-clerk-publishable-key",
-      "target_vault": "Ken Deploy Production"
-    },
-    {
       "alias_group": "ken-frontend/ONBOARDING_PREFILL_INTERNAL_TOKEN",
       "authority_match": "exact-field",
       "classification": "credential",
@@ -2809,7 +3154,7 @@
     }
   ],
   "policy": "Value-free metadata only. Sources record labels, key paths, types, and existence/readability booleans; no credential value was emitted or stored.",
-  "schema_version": 1,
+  "schema_version": 2,
   "secretless_migrations": [
     {
       "cross_repo_task": {
@@ -2905,16 +3250,6 @@
     "op-development-clerk-production-api-clerk-secret-key": {
       "field": "CLERK_SECRET_KEY",
       "field_type": "CONCEALED",
-      "item": "Clerk Production API",
-      "kind": "onepassword",
-      "metadata_artifact": "task-6-op-field-metadata.json",
-      "readable": true,
-      "value_present": true,
-      "vault": "Development"
-    },
-    "op-development-clerk-production-api-next-public-clerk-publishable-key": {
-      "field": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-      "field_type": "STRING",
       "item": "Clerk Production API",
       "kind": "onepassword",
       "metadata_artifact": "task-6-op-field-metadata.json",
@@ -5475,41 +5810,25 @@
       "unresolved_reason": "Both production consumers require one coordinated internal-service authority; no readable source was found and no unrelated credential may be reused."
     },
     {
-      "annotation_id": "ken-frontend-ken-deploy-production-all-workflows-next-public-posthog-project-token",
-      "authority_owner": "PostHog Ken project administrator",
-      "data_classification": "credential",
-      "downstream_update_steps": [
-        "Create the provider replacement for ken-frontend/NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN in Ken Deploy Production (frontend/posthog) and populate the exact target 1Password field through the temporary migration writer.",
-        "Cut the exact workflow consumers over to the local broker and verify the live provider operation.",
-        "Only after verification, delete the GitHub secret field and revoke the predecessor provider credential."
-      ],
-      "github_secret_name": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
-      "handoff_group": "frontend/posthog",
-      "provider_rotation_steps": [
-        "In PostHog, create a replacement credential restricted to the Ken production project and deployment operations; do not reuse a credential from another trust domain.",
-        "Use the temporary migration writer to store it in the named target vault, verify the exact workflow consumer, then revoke the predecessor at the provider."
-      ],
-      "repository": "ken-frontend",
-      "resolution_class": "provider-rotation",
-      "target_vault": "Ken Deploy Production",
-      "unresolved_reason": "The frontend deploy workflow proves these are PostHog project credentials, but no readable authority was found."
-    },
-    {
+      "action_phase": "offline-buildkit-secret-phase",
       "annotation_id": "ken-frontend-ken-deploy-production-all-workflows-next-server-actions-encryption-key",
       "authority_owner": "ken-frontend runtime owner",
+      "broker_action_id": "ken-frontend-production-release",
       "data_classification": "credential",
       "downstream_update_steps": [
         "Create a new production-only server-actions encryption authority and populate only Ken Deploy Production/ken-frontend/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY through the temporary migration writer.",
-        "Task 7 must run build-image on ken-deploy-production through task7-fixed-production-image-build; the wrapper obtains the key from the local production broker and passes it only to the fixed production image build.",
-        "The ken-ci pools may run no-secret validation only and must never build or publish the production image artifact.",
-        "Verify the production image build and both production replicas before deleting the GitHub field and revoking the predecessor authority after the rollback window."
+        "Task 7 must implement fixed action ken-frontend-production-release in production_build mode. The runner sends only action ID, class OIDC JWT, and its short-lived GitHub token and performs no checkout or build.",
+        "The broker fetches the exact reviewed commit before 1Password, then gives the build field only to the rootless action-specific BuildKit secret mount for RUN --network=none pnpm build. ARG, ENV, logs, cache metadata, and layers are forbidden.",
+        "The broker scans OCI config, history, and uncompressed layers for raw, base64, and hex canaries, pushes the computed digest, records the source/run/digest binding, and the fixed deploy executor deploys only that digest.",
+        "Verify the production image, separate PostHog sourcemap step, durable state, cleanup, and both production replicas before deleting the GitHub field and revoking the predecessor authority after the rollback window."
       ],
       "execution_boundary": {
+        "action_id": "ken-frontend-production-release",
         "broker_only": true,
-        "build_wrapper": "task7-fixed-production-image-build",
         "ci_validation_only": true,
         "deployment_job": "deploy",
         "forbid_ken_ci_production_artifact": true,
+        "mode": "production_build",
         "production_build_job": "build-image",
         "runner_class": "ken-deploy-production",
         "workflow": ".github/workflows/deploy.yml"
@@ -5524,8 +5843,10 @@
       "unresolved_reason": "This application encryption key must remain stable across replicas; no readable runtime authority was found."
     },
     {
+      "action_phase": "post-build-sourcemap-upload",
       "annotation_id": "ken-frontend-ken-deploy-production-all-workflows-posthog-personal-api-key",
       "authority_owner": "PostHog Ken project administrator",
+      "broker_action_id": "ken-frontend-production-release",
       "data_classification": "credential",
       "downstream_update_steps": [
         "Create the provider replacement for ken-frontend/POSTHOG_PERSONAL_API_KEY in Ken Deploy Production (frontend/posthog) and populate the exact target 1Password field through the temporary migration writer.",
@@ -5541,11 +5862,13 @@
       "repository": "ken-frontend",
       "resolution_class": "provider-rotation",
       "target_vault": "Ken Deploy Production",
-      "unresolved_reason": "The frontend deploy workflow proves these are PostHog project credentials, but no readable authority was found."
+      "unresolved_reason": "The frontend release needs this field only in the fixed post-build sourcemap executor; no readable authority was found."
     },
     {
+      "action_phase": "post-build-sourcemap-upload",
       "annotation_id": "ken-frontend-ken-deploy-production-all-workflows-posthog-project-id",
       "authority_owner": "PostHog Ken project administrator",
+      "broker_action_id": "ken-frontend-production-release",
       "data_classification": "identifier",
       "downstream_update_steps": [
         "Have the named operator supply or reconstruct ken-frontend/POSTHOG_PROJECT_ID in Ken Deploy Production (frontend/posthog) directly into the exact target 1Password field without chat or terminal output.",
@@ -6723,6 +7046,44 @@
     {
       "kind": "value-blind-structural-projection",
       "reason": "Selected 1Password notes and structured items were streamed through tested parsers that emitted only key or field names, types, and presence booleans. Right-hand content was never emitted or stored."
+    }
+  ],
+  "workflow_variable_migrations": [
+    {
+      "downstream_update_steps": [
+        "Review NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY as public build configuration, create the same-name GitHub production variable, and update the fixed production action policy without exposing it through a secret channel."
+      ],
+      "github_secret_name": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+      "live_verification_steps": [
+        "Build and deploy the fixed source SHA, then verify the reviewed NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY behavior through the production application."
+      ],
+      "migration_action": "move-to-github-variable",
+      "migration_id": "ken-frontend-next-public-clerk-publishable-key-github-variable",
+      "repository": "ken-frontend",
+      "retirement_steps": [
+        "Delete the GitHub secret NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY only after the same-name reviewed variable passes the fixed production release verification."
+      ],
+      "review_required": true,
+      "target_variable_name": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+      "workflow": ".github/workflows/deploy.yml"
+    },
+    {
+      "downstream_update_steps": [
+        "Review NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN as public build configuration, create the same-name GitHub production variable, and update the fixed production action policy without exposing it through a secret channel."
+      ],
+      "github_secret_name": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+      "live_verification_steps": [
+        "Build and deploy the fixed source SHA, then verify the reviewed NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN behavior through the production application."
+      ],
+      "migration_action": "move-to-github-variable",
+      "migration_id": "ken-frontend-next-public-posthog-project-token-github-variable",
+      "repository": "ken-frontend",
+      "retirement_steps": [
+        "Delete the GitHub secret NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN only after the same-name reviewed variable passes the fixed production release verification."
+      ],
+      "review_required": true,
+      "target_variable_name": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+      "workflow": ".github/workflows/deploy.yml"
     }
   ]
 }

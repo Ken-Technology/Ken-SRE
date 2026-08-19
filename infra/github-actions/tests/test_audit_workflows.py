@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import sys
 import tempfile
@@ -279,6 +280,80 @@ jobs:
         with self.assertRaisesRegex(ValueError, "fixed direct 1Password"):
             aw.parse_workflow(".github/workflows/deploy.yml", workflow)
 
+    def test_parser_rejects_compact_actions_expression_in_every_op_segment(self):
+        bad_references = (
+            "op://${{vars.VAULT}}/item/field",
+            "op://Development/${{vars.ITEM}}/field",
+            "op://Development/item/${{vars.FIELD}}",
+        )
+        for reference in bad_references:
+            with self.subTest(reference=reference):
+                workflow = f"""
+on: push
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      BAD: {reference}
+"""
+                with self.assertRaisesRegex(ValueError, "fixed direct 1Password"):
+                    aw.parse_workflow(".github/workflows/deploy.yml", workflow)
+
+    def test_authority_builder_rejects_expression_or_control_syntax_in_segments(self):
+        import build_task6_authority_evidence as builder
+
+        for reference in (
+            "op://${{vars.VAULT}}/item/field",
+            "op://Development/${{vars.ITEM}}/field",
+            "op://Development/item/${{vars.FIELD}}",
+            "op://Development/item/field`whoami`",
+        ):
+            with self.subTest(reference=reference):
+                with self.assertRaisesRegex(ValueError, "fixed source reference"):
+                    builder._direct_onepassword_mapping(
+                        "repo", ".github/workflows/deploy.yml", "deploy", "KEY", reference, "concealed"
+                    )
+
+    def test_workflow_loader_rejects_duplicate_mapping_keys_at_every_level(self):
+        workflows = (
+            """
+on: push
+env:
+  FIRST: op://Development/item/field
+env:
+  SECOND: op://Development/item/field
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+""",
+            """
+on: push
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FIRST: op://Development/item/field
+    env:
+      SECOND: op://Development/item/field
+""",
+            """
+on: push
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: deploy
+        env:
+          FIRST: op://Development/item/field
+        env:
+          SECOND: op://Development/item/field
+""",
+        )
+        for workflow in workflows:
+            with self.subTest(workflow=workflow):
+                with self.assertRaisesRegex(ValueError, "duplicate YAML mapping key"):
+                    aw.parse_workflow(".github/workflows/deploy.yml", workflow)
+
     def test_committed_checked_inventory_has_exact_direct_reference_handoff(self):
         import yaml
 
@@ -330,6 +405,17 @@ jobs:
         self.assertEqual(direct_entries, parsed)
         self.assertEqual(direct_handoff, parsed)
         self.assertEqual(handoff["counts"]["direct_onepassword_rows"], 11)
+        self.assertEqual(
+            {row["broker_action_id"] for row in secrets["direct_onepassword_entries"]},
+            {
+                "ken-vexa-mcp-auth-production-deploy",
+                "ken-website-beehiiv-production-sync",
+                "ken-website-production-deploy",
+            },
+        )
+        self.assertEqual(
+            secrets["broker_actions"], handoff["broker_actions"]
+        )
 
     def test_unregistered_direct_reference_fails_closed(self):
         reference = {
@@ -367,11 +453,134 @@ jobs:
         self.assertEqual(len(mappings), 11)
         for row in mappings:
             self.assertEqual(row["consumer"], "ken-deploy-production")
+            self.assertIn(row["broker_action_id"], {
+                "ken-vexa-mcp-auth-production-deploy",
+                "ken-website-beehiiv-production-sync",
+                "ken-website-production-deploy",
+            })
             self.assertIn(row["field_type"], {"concealed", "string"})
             self.assertTrue(row["source_to_target_steps"])
             self.assertTrue(row["broker_cutover_steps"])
             self.assertTrue(row["live_verification_steps"])
             self.assertTrue(row["retirement_steps"])
+
+    def test_direct_rows_bind_to_three_fixed_output_free_broker_actions(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        direct_actions = {
+            row["action_id"]: row
+            for row in evidence["broker_actions"]
+            if row["mode"] == "fixed_secret_action"
+        }
+        self.assertEqual(
+            set(direct_actions),
+            {
+                "ken-vexa-mcp-auth-production-deploy",
+                "ken-website-beehiiv-production-sync",
+                "ken-website-production-deploy",
+            },
+        )
+        for action in direct_actions.values():
+            self.assertEqual(action["trust_class"], "production")
+            self.assertEqual(action["template_owner"], "root")
+            self.assertEqual(action["wrapper_owner"], "root")
+            self.assertTrue(action["template_path"].startswith("/etc/ken-op-broker/"))
+            self.assertTrue(action["wrapper_path"].startswith("/usr/local/libexec/"))
+            self.assertTrue(action["executor_uid"].startswith("ken-action-"))
+            self.assertTrue(action["target_profile"])
+            self.assertTrue(action["network_profile"])
+            self.assertEqual(action["result_contract"], "stable-code-only")
+            self.assertFalse(action["client_receives_field"])
+            self.assertFalse(action["client_receives_config"])
+            self.assertFalse(action["client_receives_fd"])
+            self.assertFalse(action["client_receives_output"])
+
+
+class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
+    def test_duplicate_json_keys_fail_before_inventory_hashing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "authority-evidence.json"
+            path.write_text(
+                '{"schema_version":1,"direct_onepassword_mappings":[],"direct_onepassword_mappings":[]}',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "duplicate JSON object key"):
+                aw.load_json(path, {})
+
+    def test_complete_builder_evidence_matches_exact_recursive_schema(self):
+        import build_task6_authority_evidence as builder
+
+        aw.validate_authority_evidence(builder.build_evidence())
+
+    def test_value_bearing_aliases_reject_before_hashing_without_echoing_canary(self):
+        import build_task6_authority_evidence as builder
+
+        aliases = (
+            "credential",
+            "api_key",
+            "private_key",
+            "secret_value",
+            "access_token",
+            "password_hash",
+            "values",
+        )
+        for alias in aliases:
+            evidence = copy.deepcopy(builder.build_evidence())
+            canary = "RIGHT_HAND_CANARY_must_not_escape"
+            evidence["direct_onepassword_mappings"][0][alias] = canary
+            with self.subTest(alias=alias):
+                with self.assertRaises(ValueError) as caught:
+                    aw.validate_authority_evidence(evidence)
+                self.assertNotIn(canary, str(caught.exception))
+
+    def test_unknown_nested_and_wrong_type_authority_keys_fail_closed(self):
+        import build_task6_authority_evidence as builder
+
+        unknown = copy.deepcopy(builder.build_evidence())
+        oidc = next(
+            row
+            for row in unknown["secretless_migrations"]
+            if row["migration_action"] == "oidc-trusted-publisher"
+        )
+        oidc["trusted_publisher"]["unexpected"] = True
+        with self.assertRaisesRegex(ValueError, "unexpected authority evidence key"):
+            aw.validate_authority_evidence(unknown)
+
+        wrong_type = copy.deepcopy(builder.build_evidence())
+        wrong_type["direct_onepassword_mappings"][0]["field_type"] = ["concealed"]
+        with self.assertRaisesRegex(ValueError, "wrong authority evidence type"):
+            aw.validate_authority_evidence(wrong_type)
+
+    def test_production_build_boundary_mutations_fail_closed(self):
+        import build_task6_authority_evidence as builder
+
+        mutations = (
+            ("network", lambda action: action["build_contract"]["secret_phase"].__setitem__("network", "default")),
+            ("secret-arg", lambda action: action["build_contract"]["secret_phase"].__setitem__("arg", True)),
+            ("secret-env", lambda action: action["build_contract"]["secret_phase"].__setitem__("env", True)),
+            ("secret-cache", lambda action: action["build_contract"]["secret_phase"].__setitem__("cache_metadata", True)),
+            ("secret-log", lambda action: action["build_contract"]["secret_phase"].__setitem__("logs", True)),
+            ("secret-layer", lambda action: action["build_contract"]["secret_phase"].__setitem__("layers", True)),
+            ("source-drift", lambda action: action["source_contract"].__setitem__("source_commit_sha", "0" * 40)),
+            ("workflow-drift", lambda action: action["source_contract"].__setitem__("workflow_blob_sha", "0" * 40)),
+            ("wrong-digest-input", lambda action: action["deploy_contract"].__setitem__("accepts_runner_digest", True)),
+            ("replay-disabled", lambda action: action["authorization"].__setitem__("checks", [check for check in action["authorization"]["checks"] if check != "durable-replay"])),
+            ("runner-socket", lambda action: action["identity_boundary"].__setitem__("runner_can_access_builder_socket", True)),
+            ("builder-deploy", lambda action: action["identity_boundary"].__setitem__("builder_can_access_deploy_executor", True)),
+            ("deploy-builder", lambda action: action["identity_boundary"].__setitem__("deploy_executor_can_access_builder", True)),
+        )
+        for name, mutate in mutations:
+            evidence = copy.deepcopy(builder.build_evidence())
+            action = next(
+                row
+                for row in evidence["broker_actions"]
+                if row["action_id"] == "ken-frontend-production-release"
+            )
+            mutate(action)
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, "production build contract"):
+                    aw.validate_authority_evidence(evidence)
 
 
 class ConnectionMetadataTests(unittest.TestCase):
@@ -1100,7 +1309,19 @@ class RegenerationAndManifestTests(unittest.TestCase):
             "onepassword_vaults": ("onepassword-vaults.json", ["Development", "Probe"]),
             "authority_evidence": (
                 "authority-evidence.json",
-                {"schema_version": 1, "evidence_id": "probe", "mappings": []},
+                {
+                    "schema_version": 2,
+                    "evidence_id": "probe",
+                    "policy": "value-free probe",
+                    "sources": {},
+                    "mappings": [],
+                    "unresolved_annotations": [],
+                    "secretless_migrations": [],
+                    "workflow_variable_migrations": [],
+                    "direct_onepassword_mappings": [],
+                    "broker_actions": [],
+                    "unresolved_observations": [],
+                },
             ),
             "op_env_key_metadata": (
                 "op-env-key-metadata.json",
@@ -1834,8 +2055,18 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         import yaml
 
         evidence = {
-            "schema_version": 1,
+            "schema_version": 2,
             "evidence_id": "fixture-authorities",
+            "policy": "value-free fixture",
+            "sources": {
+                "fixture-host": {
+                    "kind": "evidence-key",
+                    "artifact": "hosts.json",
+                    "key_path": "worldstream.host",
+                    "readable": True,
+                    "exists": True,
+                }
+            },
             "mappings": [
                 {
                     "mapping_id": "fixture-example-private-deploy-host",
@@ -1845,18 +2076,19 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                     "classification": "identifier",
                     "migration_action": "reconstruct",
                     "authority_match": "reviewed-semantic",
-                    "source": {
-                        "kind": "evidence-key",
-                        "artifact": "hosts.json",
-                        "key_path": "worldstream.host",
-                        "readable": True,
-                        "exists": True,
-                    },
+                    "source_ref": "fixture-host",
+                    "alias_group": None,
                     "downstream_update_steps": [
                         "Set the deployment host from the approved host inventory."
                     ],
                 }
             ],
+            "unresolved_annotations": [],
+            "secretless_migrations": [],
+            "workflow_variable_migrations": [],
+            "direct_onepassword_mappings": [],
+            "broker_actions": [],
+            "unresolved_observations": [],
         }
         with tempfile.TemporaryDirectory() as tmp:
             collect = Path(tmp) / "collect"
@@ -1878,7 +2110,7 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
             first_hash = yaml.safe_load(
                 (first / "input-manifest.yaml").read_text()
             )["input_hash"]
-            evidence["mappings"][0]["source"]["key_path"] = "worldstream.hostname"
+            evidence["sources"]["fixture-host"]["key_path"] = "worldstream.hostname"
             (collect / "authority-evidence.json").write_text(json.dumps(evidence))
             aw.generate(collect, second)
             second_hash = yaml.safe_load(
@@ -1890,8 +2122,21 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         import shutil
 
         evidence = {
-            "schema_version": 1,
+            "schema_version": 2,
             "evidence_id": "fixture-authorities",
+            "policy": "value-free fixture",
+            "sources": {
+                "fixture-secret": {
+                    "kind": "onepassword",
+                    "vault": "Development",
+                    "item": "fixture",
+                    "field": "NOT_USED_BY_ANY_WORKFLOW",
+                    "field_type": "CONCEALED",
+                    "readable": True,
+                    "value_present": True,
+                    "metadata_artifact": "fixture.json",
+                }
+            },
             "mappings": [
                 {
                     "mapping_id": "fixture-missing-secret",
@@ -1901,18 +2146,17 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                     "classification": "credential",
                     "migration_action": "copy",
                     "authority_match": "exact-field",
-                    "source": {
-                        "kind": "onepassword",
-                        "vault": "Development",
-                        "item": "fixture",
-                        "field": "NOT_USED_BY_ANY_WORKFLOW",
-                        "field_type": "CONCEALED",
-                        "readable": True,
-                        "value_present": True,
-                    },
+                    "source_ref": "fixture-secret",
+                    "alias_group": None,
                     "downstream_update_steps": ["Use a concealed handoff."],
                 }
             ],
+            "unresolved_annotations": [],
+            "secretless_migrations": [],
+            "workflow_variable_migrations": [],
+            "direct_onepassword_mappings": [],
+            "broker_actions": [],
+            "unresolved_observations": [],
         }
         with tempfile.TemporaryDirectory() as tmp:
             collect = Path(tmp) / "collect"
@@ -1953,7 +2197,7 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
 
         evidence = builder.build_evidence()
         aw._reject_value_bearing_evidence(evidence)
-        self.assertEqual(evidence["schema_version"], 1)
+        self.assertEqual(evidence["schema_version"], 2)
         self.assertEqual(evidence["evidence_id"], "task6-authorities-2026-08-19")
         self.assertGreaterEqual(len(evidence["sources"]), 60)
         self.assertGreaterEqual(len(evidence["mappings"]), 75)
@@ -2406,11 +2650,12 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         self.assertEqual(
             annotation["execution_boundary"],
             {
+                "action_id": "ken-frontend-production-release",
+                "mode": "production_build",
                 "workflow": ".github/workflows/deploy.yml",
                 "production_build_job": "build-image",
                 "deployment_job": "deploy",
                 "runner_class": "ken-deploy-production",
-                "build_wrapper": "task7-fixed-production-image-build",
                 "broker_only": True,
                 "ci_validation_only": True,
                 "forbid_ken_ci_production_artifact": True,
@@ -2433,6 +2678,228 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         self.assertEqual(
             annotated["required_runtime_identity"], "ken-deploy-production"
         )
+
+    def test_frontend_production_build_action_is_complete_and_fail_closed(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        action = next(
+            row
+            for row in evidence["broker_actions"]
+            if row["action_id"] == "ken-frontend-production-release"
+        )
+        self.assertEqual(action["mode"], "production_build")
+        self.assertEqual(action["status"], "blocked-until-task7-pins-and-mutations-pass")
+        self.assertEqual(
+            action["request_contract"]["allowed_keys"],
+            ["version", "action_id", "oidc_jwt", "github_token"],
+        )
+        self.assertFalse(action["request_contract"]["accepts_artifact"])
+        self.assertFalse(action["request_contract"]["accepts_descriptor"])
+        self.assertEqual(action["request_contract"]["result"], "stable-code-only")
+        self.assertFalse(action["runner_contract"]["checkout"])
+        self.assertFalse(action["runner_contract"]["build"])
+        self.assertFalse(action["runner_contract"]["receives_digest"])
+        self.assertFalse(action["runner_contract"]["receives_output"])
+        self.assertEqual(
+            set(action["authorization"]["checks"]),
+            {
+                "unix-peer",
+                "class-oidc",
+                "live-job",
+                "workflow",
+                "protected-ref",
+                "environment",
+                "durable-replay",
+            },
+        )
+        self.assertTrue(action["authorization"]["all_before_onepassword"])
+        source = action["source_contract"]
+        self.assertEqual(source["mode"], "broker-fetched-exact-commit")
+        self.assertTrue(source["fetch_before_onepassword"])
+        self.assertEqual(
+            source["source_commit_sha"],
+            "0952ac075f658acd1bc15a3253032507581e1f0d",
+        )
+        self.assertEqual(
+            source["workflow_blob_sha"],
+            "21b01bbfeb3db512a42080ea21dff5276f3fa28b",
+        )
+        self.assertEqual(
+            source["dockerfile_blob_sha"],
+            "6860679d7e023ac3d7828fa97cb32ed0e04bce53",
+        )
+        self.assertEqual(
+            source["pnpm_lock_blob_sha"],
+            "4dadbbdda72a3c1ed23c1ef14240e765fe9a2170",
+        )
+        self.assertFalse(source["fallback"])
+
+        identities = action["identity_boundary"]
+        self.assertTrue(identities["pairwise_distinct"])
+        self.assertEqual(
+            len(
+                {
+                    identities["runner_uid"],
+                    identities["broker_uid"],
+                    identities["builder_uid"],
+                    identities["post_build_uid"],
+                    identities["deploy_uid"],
+                }
+            ),
+            5,
+        )
+        self.assertFalse(identities["runner_can_access_builder_socket"])
+        self.assertFalse(identities["runner_can_access_builder_state"])
+        self.assertFalse(identities["builder_can_access_deploy_executor"])
+        self.assertFalse(identities["deploy_executor_can_access_builder"])
+
+        build = action["build_contract"]
+        self.assertTrue(build["rootless_buildkit"])
+        self.assertTrue(build["dependencies_and_base_images_secretless"])
+        self.assertEqual(build["secret_phase"]["command"], "pnpm build")
+        self.assertEqual(build["secret_phase"]["network"], "none")
+        self.assertEqual(build["secret_phase"]["delivery"], "buildkit-secret-mount")
+        self.assertEqual(
+            build["secret_phase"]["field"],
+            "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+        )
+        for channel in ("arg", "env", "cache_metadata", "logs", "layers"):
+            self.assertFalse(build["secret_phase"][channel])
+        self.assertEqual(
+            set(build["reviewed_github_variables"]),
+            {
+                "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+                "NEXT_PUBLIC_CLERK_SIGN_IN_URL",
+                "NEXT_PUBLIC_CLERK_SIGN_UP_URL",
+                "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+                "NEXT_PUBLIC_TECHNOLOGY_FILTER_ENABLED",
+                "NEXT_PUBLIC_TECHNOLOGY_FILTER_ALLOWED_CLIENT_IDS",
+                "NEXT_PUBLIC_EXPERIMENTS_ALLOWED_CLIENT_IDS",
+            },
+        )
+        self.assertEqual(
+            set(build["forbidden_build_fields"]),
+            {"POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID"},
+        )
+        self.assertEqual(build["output"]["format"], "OCI")
+        self.assertTrue(build["output"]["scan_config_history"])
+        self.assertTrue(build["output"]["scan_uncompressed_layers"])
+        self.assertEqual(
+            build["output"]["canary_variants"], ["raw", "base64", "hex"]
+        )
+        self.assertTrue(build["output"]["push_by_digest"])
+        self.assertTrue(build["output"]["verified_short_lived_token"])
+
+        post_build = action["post_build_contract"]
+        self.assertEqual(
+            set(post_build["fields"]),
+            {"POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID"},
+        )
+        self.assertEqual(post_build["target"], "https://us.posthog.com")
+        self.assertFalse(post_build["can_read_build_field"])
+        self.assertEqual(post_build["result"], "stable-code-only")
+        self.assertEqual(action["deploy_contract"]["input"], "broker-recorded-image-digest")
+        self.assertFalse(action["deploy_contract"]["accepts_runner_digest"])
+        self.assertTrue(action["durable_state"]["source_run_digest_binding"])
+        self.assertTrue(action["cleanup"]["every_exit_path"])
+        self.assertTrue(action["cleanup"]["builder_state"])
+        self.assertTrue(action["cleanup"]["builder_cache"])
+        self.assertTrue(action["cleanup"]["request_directory"])
+        self.assertTrue(action["risk_acceptance"]["merged_protected_code_may_consume_build_field"])
+        self.assertTrue(action["risk_acceptance"]["transformed_embedding_residual_accepted_only_for_reviewed_source"])
+        self.assertTrue(action["pin_gate"]["cutover_blocked_until_all_exact"])
+        self.assertEqual(
+            set(action["pin_gate"]["required_exact_pins"]),
+            {
+                "base_image_digest",
+                "pnpm_lock_blob_sha",
+                "source_commit_sha",
+                "workflow_blob_sha",
+                "wrapper_sha256",
+                "buildkit_version",
+                "resource_limits",
+            },
+        )
+        self.assertTrue(
+            {
+                "network-enabled-secret-phase",
+                "secret-in-arg",
+                "secret-in-env",
+                "secret-in-cache-metadata",
+                "secret-in-log",
+                "secret-in-layer",
+                "source-drift",
+                "workflow-drift",
+                "wrong-image-digest",
+                "replay",
+                "runner-builder-socket-access",
+                "builder-deploy-cross-access",
+                "deploy-builder-cross-access",
+            }.issubset(set(action["required_mutation_tests"]))
+        )
+
+    def test_frontend_public_build_inputs_move_to_reviewed_variables(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        migrations = {
+            row["github_secret_name"]: row
+            for row in evidence["workflow_variable_migrations"]
+            if row["repository"] == "ken-frontend"
+        }
+        self.assertEqual(
+            set(migrations),
+            {
+                "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+                "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+            },
+        )
+        for name, migration in migrations.items():
+            self.assertEqual(migration["target_variable_name"], name)
+            self.assertEqual(migration["migration_action"], "move-to-github-variable")
+            self.assertTrue(migration["review_required"])
+
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+                "ken-frontend",
+                self.empty_scopes,
+                ".github/workflows/deploy.yml",
+            ),
+            self.production,
+        )
+        migrated = aw.apply_workflow_variable_migration(entry, evidence)
+        self.assertEqual(migrated["authority_status"], "planned-variable")
+        self.assertEqual(migrated["migration_action"], "move-to-github-variable")
+        self.assertEqual(
+            migrated["target_variable_name"],
+            "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        )
+        self.assertIsNone(migrated["target_vault"])
+        self.assertIsNone(migrated["target_item"])
+        self.assertIsNone(migrated["target_field"])
+
+    def test_frontend_posthog_fields_are_separate_post_build_phase(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        annotations = {
+            row["github_secret_name"]: row
+            for row in evidence["unresolved_annotations"]
+            if row["repository"] == "ken-frontend"
+            and row["github_secret_name"] in {
+                "POSTHOG_PERSONAL_API_KEY",
+                "POSTHOG_PROJECT_ID",
+            }
+        }
+        self.assertEqual(set(annotations), {"POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID"})
+        for annotation in annotations.values():
+            self.assertEqual(
+                annotation["broker_action_id"],
+                "ken-frontend-production-release",
+            )
+            self.assertEqual(annotation["action_phase"], "post-build-sourcemap-upload")
 
     def test_hermes_keeps_dedicated_deploy_identity_unresolved(self):
         import build_task6_authority_evidence as builder

@@ -231,6 +231,8 @@ def _unresolved_annotation(
     data_classification: str = "credential",
     required_runtime_identity: str | None = None,
     execution_boundary: dict[str, Any] | None = None,
+    broker_action_id: str | None = None,
+    action_phase: str | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "annotation_id": (
@@ -261,6 +263,10 @@ def _unresolved_annotation(
         result["required_runtime_identity"] = required_runtime_identity
     if execution_boundary:
         result["execution_boundary"] = execution_boundary
+    if broker_action_id:
+        result["broker_action_id"] = broker_action_id
+    if action_phase:
+        result["action_phase"] = action_phase
     return result
 
 
@@ -271,10 +277,16 @@ def _direct_onepassword_mapping(
     environment_name: str,
     source_reference: str,
     field_type: str,
+    broker_action_id: str | None = None,
 ) -> dict[str, Any]:
-    match = re.fullmatch(r"op://([^/\s]+)/([^/\s]+)/([^/\s]+)", source_reference)
+    segment = r"[A-Za-z0-9][A-Za-z0-9._ -]*"
+    match = re.fullmatch(
+        rf"op://({segment})/({segment})/({segment})", source_reference
+    )
     if not match:
         raise ValueError("direct 1Password mapping requires a fixed source reference")
+    if not broker_action_id:
+        raise ValueError("direct 1Password mapping requires broker_action_id")
     source_vault, source_item, source_field = match.groups()
     target_vault = PRODUCTION_VAULT
     target_item = repository
@@ -294,11 +306,12 @@ def _direct_onepassword_mapping(
         "target_field": environment_name,
         "field_type": field_type,
         "consumer": "ken-deploy-production",
+        "broker_action_id": broker_action_id,
         "source_to_target_steps": [
             f"Use task6-temporary-migration-writer to copy {source_reference} directly into {target_vault}/{target_item}/{environment_name} without displaying the value."
         ],
         "broker_cutover_steps": [
-            f"Replace the direct {source_reference} env reference in {coordinate} with the fixed production broker field {target_vault}/{target_item}/{environment_name} under ken-deploy-production.",
+            f"Replace the direct {source_reference} env reference in {coordinate} with one request for fixed action {broker_action_id}; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
             "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover.",
         ],
         "live_verification_steps": [
@@ -307,6 +320,234 @@ def _direct_onepassword_mapping(
         "retirement_steps": [
             f"Only after live verification, remove the direct {source_reference} workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
         ],
+    }
+
+
+def _fixed_secret_broker_action(
+    action_id: str,
+    repository: str,
+    workflow: str,
+    job: str,
+    executor_uid: str,
+    target_profile: str,
+    network_profile: str,
+    required_fields: list[dict[str, str]],
+) -> dict[str, Any]:
+    return {
+        "action_id": action_id,
+        "mode": "fixed_secret_action",
+        "trust_class": "production",
+        "repository": repository,
+        "workflow": workflow,
+        "job": job,
+        "runner_class": "ken-deploy-production",
+        "template_owner": "root",
+        "template_path": f"/etc/ken-op-broker/templates/{action_id}.env.op",
+        "wrapper_owner": "root",
+        "wrapper_path": f"/usr/local/libexec/ken-actions/{action_id}",
+        "executor_uid": executor_uid,
+        "target_vault": PRODUCTION_VAULT,
+        "target_profile": target_profile,
+        "network_profile": network_profile,
+        "required_fields": required_fields,
+        "request_allowed_keys": ["version", "action_id", "oidc_jwt", "github_token"],
+        "result_contract": "stable-code-only",
+        "client_receives_field": False,
+        "client_receives_config": False,
+        "client_receives_fd": False,
+        "client_receives_output": False,
+    }
+
+
+def _production_build_broker_action() -> dict[str, Any]:
+    return {
+        "action_id": "ken-frontend-production-release",
+        "mode": "production_build",
+        "status": "blocked-until-task7-pins-and-mutations-pass",
+        "trust_class": "production",
+        "repository": "ken-frontend",
+        "workflow": ".github/workflows/deploy.yml",
+        "job": "build-image",
+        "environment": "production",
+        "runner_class": "ken-deploy-production",
+        "request_contract": {
+            "allowed_keys": ["version", "action_id", "oidc_jwt", "github_token"],
+            "accepts_artifact": False,
+            "accepts_descriptor": False,
+            "result": "stable-code-only",
+        },
+        "runner_contract": {
+            "checkout": False,
+            "build": False,
+            "receives_digest": False,
+            "receives_output": False,
+        },
+        "authorization": {
+            "checks": [
+                "unix-peer",
+                "class-oidc",
+                "live-job",
+                "workflow",
+                "protected-ref",
+                "environment",
+                "durable-replay",
+            ],
+            "all_before_onepassword": True,
+            "github_token_use": "fixed-github-read-and-ghcr-write-only",
+        },
+        "source_contract": {
+            "mode": "broker-fetched-exact-commit",
+            "source_addendum": "task-6-broker-source-contract-addendum.md",
+            "fetch_before_onepassword": True,
+            "owner": "Ken-Technology",
+            "repository": "ken-frontend",
+            "default_ref": "refs/heads/main",
+            "source_commit_sha": "0952ac075f658acd1bc15a3253032507581e1f0d",
+            "workflow_blob_sha": "21b01bbfeb3db512a42080ea21dff5276f3fa28b",
+            "dockerfile_blob_sha": "6860679d7e023ac3d7828fa97cb32ed0e04bce53",
+            "pnpm_lock_blob_sha": "4dadbbdda72a3c1ed23c1ef14240e765fe9a2170",
+            "fallback": False,
+        },
+        "identity_boundary": {
+            "runner_uid": "ken-deploy-production-runner",
+            "broker_uid": "root",
+            "builder_uid": "ken-action-frontend-builder",
+            "post_build_uid": "ken-action-frontend-posthog",
+            "deploy_uid": "ken-action-frontend-deploy",
+            "pairwise_distinct": True,
+            "runner_can_access_builder_socket": False,
+            "runner_can_access_builder_state": False,
+            "builder_can_access_deploy_executor": False,
+            "deploy_executor_can_access_builder": False,
+        },
+        "build_contract": {
+            "rootless_buildkit": True,
+            "builder_socket": "/run/ken-op-broker/production/builders/ken-frontend-production-release/buildkitd.sock",
+            "builder_state": "/run/ken-op-broker/production/builders/ken-frontend-production-release/state",
+            "dependencies_and_base_images_secretless": True,
+            "dependency_network_profile": "ken-frontend-secretless-dependency-fetch",
+            "dependency_endpoints": [
+                "auth.docker.io:443",
+                "registry-1.docker.io:443",
+                "registry.npmjs.org:443",
+            ],
+            "secret_phase": {
+                "command": "pnpm build",
+                "network": "none",
+                "delivery": "buildkit-secret-mount",
+                "field": "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+                "arg": False,
+                "env": False,
+                "cache_metadata": False,
+                "logs": False,
+                "layers": False,
+            },
+            "reviewed_github_variables": [
+                "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+                "NEXT_PUBLIC_CLERK_SIGN_IN_URL",
+                "NEXT_PUBLIC_CLERK_SIGN_UP_URL",
+                "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+                "NEXT_PUBLIC_TECHNOLOGY_FILTER_ENABLED",
+                "NEXT_PUBLIC_TECHNOLOGY_FILTER_ALLOWED_CLIENT_IDS",
+                "NEXT_PUBLIC_EXPERIMENTS_ALLOWED_CLIENT_IDS",
+            ],
+            "forbidden_build_fields": [
+                "POSTHOG_PERSONAL_API_KEY",
+                "POSTHOG_PROJECT_ID",
+            ],
+            "base_image": "node:22-alpine",
+            "base_image_digest": "task7-exact-sha256-required",
+            "buildkit_version": "task7-exact-version-required",
+            "wrapper_path": "/usr/local/libexec/ken-actions/ken-frontend-production-release-build",
+            "wrapper_sha256": "task7-exact-sha256-required",
+            "resource_limits": {
+                "cpu_quota": "400%",
+                "memory_max": "16G",
+                "tasks_max": 512,
+                "timeout_seconds": 1800,
+                "context_bytes_max": 1073741824,
+                "output_bytes_max": 2147483648,
+            },
+            "output": {
+                "format": "OCI",
+                "registry": "ghcr.io/ken-technology/ken-frontend",
+                "scan_config_history": True,
+                "scan_uncompressed_layers": True,
+                "canary_variants": ["raw", "base64", "hex"],
+                "push_by_digest": True,
+                "verified_short_lived_token": True,
+            },
+        },
+        "post_build_contract": {
+            "executor_uid": "ken-action-frontend-posthog",
+            "fields": ["POSTHOG_PERSONAL_API_KEY", "POSTHOG_PROJECT_ID"],
+            "target": "https://us.posthog.com",
+            "release": "exact-source-commit-sha",
+            "input": "broker-owned-sourcemap-set-from-scanned-image",
+            "can_read_build_field": False,
+            "result": "stable-code-only",
+        },
+        "deploy_contract": {
+            "executor_uid": "ken-action-frontend-deploy",
+            "input": "broker-recorded-image-digest",
+            "accepts_runner_digest": False,
+            "deploy_by_digest": True,
+        },
+        "durable_state": {
+            "source_run_digest_binding": True,
+            "fields": [
+                "repository_id",
+                "run_id",
+                "run_attempt",
+                "check_run_id",
+                "action_id",
+                "source_commit_sha",
+                "image_digest",
+                "result_code",
+            ],
+        },
+        "cleanup": {
+            "every_exit_path": True,
+            "builder_state": True,
+            "builder_cache": True,
+            "request_directory": True,
+            "process_groups": True,
+        },
+        "risk_acceptance": {
+            "merged_protected_code_may_consume_build_field": True,
+            "transformed_embedding_residual_accepted_only_for_reviewed_source": True,
+            "scope": "exact-source-workflow-wrapper-and-lock-pins-only",
+        },
+        "pin_gate": {
+            "cutover_blocked_until_all_exact": True,
+            "required_exact_pins": [
+                "base_image_digest",
+                "pnpm_lock_blob_sha",
+                "source_commit_sha",
+                "workflow_blob_sha",
+                "wrapper_sha256",
+                "buildkit_version",
+                "resource_limits",
+            ],
+        },
+        "required_mutation_tests": [
+            "network-enabled-secret-phase",
+            "secret-in-arg",
+            "secret-in-env",
+            "secret-in-cache-metadata",
+            "secret-in-log",
+            "secret-in-layer",
+            "secret-in-base64-layer",
+            "secret-in-hex-layer",
+            "source-drift",
+            "workflow-drift",
+            "wrong-image-digest",
+            "replay",
+            "runner-builder-socket-access",
+            "builder-deploy-cross-access",
+            "deploy-builder-cross-access",
+        ],
+        "no_fallback_or_rebuild_elsewhere": True,
     }
 
 
@@ -568,24 +809,102 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     mappings: list[dict[str, Any]] = []
     unresolved_annotations: list[dict[str, Any]] = []
     secretless_migrations: list[dict[str, Any]] = []
+    workflow_variable_migrations: list[dict[str, Any]] = []
     direct_onepassword_mappings: list[dict[str, Any]] = []
+    broker_actions: list[dict[str, Any]] = []
 
     direct_specs = (
-        ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_HOST", "op://Development/vexa-mcp-auth-deploy-ssh/host", "string"),
-        ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_PORT", "op://Development/vexa-mcp-auth-deploy-ssh/port", "string"),
-        ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_SSH_KEY", "op://Development/vexa-mcp-auth-deploy-ssh/private_key", "concealed"),
-        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "DEPLOY_SSH_KEY", "op://ken-website/blog-sync-deploy/private_key", "concealed"),
-        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_API_KEY", "op://ken-website/beehiiv/credential", "concealed"),
-        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_PUBLICATION_ID", "op://ken-website/beehiiv/publication_id", "string"),
-        ("ken-website", ".github/workflows/deploy.yml", "deploy", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "op://ken-website/posthog/project_token", "string"),
-        ("ken-website", ".github/workflows/deploy.yml", "deploy", "POSTHOG_PERSONAL_API_KEY", "op://ken-website/posthog/personal_api_key", "concealed"),
-        ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_HOST", "op://ken-website/deploy-ssh/host", "string"),
-        ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_PORT", "op://ken-website/deploy-ssh/port", "string"),
-        ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_SSH_KEY", "op://ken-website/deploy-ssh/private_key", "concealed"),
+        ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_HOST", "op://Development/vexa-mcp-auth-deploy-ssh/host", "string", "ken-vexa-mcp-auth-production-deploy"),
+        ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_PORT", "op://Development/vexa-mcp-auth-deploy-ssh/port", "string", "ken-vexa-mcp-auth-production-deploy"),
+        ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_SSH_KEY", "op://Development/vexa-mcp-auth-deploy-ssh/private_key", "concealed", "ken-vexa-mcp-auth-production-deploy"),
+        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "DEPLOY_SSH_KEY", "op://ken-website/blog-sync-deploy/private_key", "concealed", "ken-website-beehiiv-production-sync"),
+        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_API_KEY", "op://ken-website/beehiiv/credential", "concealed", "ken-website-beehiiv-production-sync"),
+        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_PUBLICATION_ID", "op://ken-website/beehiiv/publication_id", "string", "ken-website-beehiiv-production-sync"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "op://ken-website/posthog/project_token", "string", "ken-website-production-deploy"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "POSTHOG_PERSONAL_API_KEY", "op://ken-website/posthog/personal_api_key", "concealed", "ken-website-production-deploy"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_HOST", "op://ken-website/deploy-ssh/host", "string", "ken-website-production-deploy"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_PORT", "op://ken-website/deploy-ssh/port", "string", "ken-website-production-deploy"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_SSH_KEY", "op://ken-website/deploy-ssh/private_key", "concealed", "ken-website-production-deploy"),
     )
     direct_onepassword_mappings.extend(
         _direct_onepassword_mapping(*spec) for spec in direct_specs
     )
+    for action_id, repository, workflow, job, executor_uid, target, network in (
+        (
+            "ken-vexa-mcp-auth-production-deploy",
+            "ken-vexa-mcp-auth",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "ken-action-vexa-deploy",
+            "vexa-mcp-auth-production-ssh-and-public-health",
+            "github-source-vexa-production-ssh-mcp-recordings",
+        ),
+        (
+            "ken-website-beehiiv-production-sync",
+            "ken-website",
+            ".github/workflows/beehiiv-sync.yml",
+            "sync",
+            "ken-action-website-beehiiv",
+            "ken-website-main-beehiiv-sync",
+            "github-source-beehiiv-api-and-ken-website-push",
+        ),
+        (
+            "ken-website-production-deploy",
+            "ken-website",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "ken-action-website-deploy",
+            "ken-website-production-ssh-and-public-health",
+            "github-source-website-production-ssh-and-public-health",
+        ),
+    ):
+        required_fields = [
+            {
+                "target_item": row["target_item"],
+                "target_field": row["target_field"],
+                "field_type": row["field_type"],
+            }
+            for row in direct_onepassword_mappings
+            if row["broker_action_id"] == action_id
+        ]
+        broker_actions.append(
+            _fixed_secret_broker_action(
+                action_id,
+                repository,
+                workflow,
+                job,
+                executor_uid,
+                target,
+                network,
+                required_fields,
+            )
+        )
+    broker_actions.append(_production_build_broker_action())
+
+    for public_name in (
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+    ):
+        workflow_variable_migrations.append(
+            {
+                "migration_id": f"ken-frontend-{_slug(public_name)}-github-variable",
+                "repository": "ken-frontend",
+                "workflow": ".github/workflows/deploy.yml",
+                "github_secret_name": public_name,
+                "target_variable_name": public_name,
+                "migration_action": "move-to-github-variable",
+                "review_required": True,
+                "downstream_update_steps": [
+                    f"Review {public_name} as public build configuration, create the same-name GitHub production variable, and update the fixed production action policy without exposing it through a secret channel."
+                ],
+                "live_verification_steps": [
+                    f"Build and deploy the fixed source SHA, then verify the reviewed {public_name} behavior through the production application."
+                ],
+                "retirement_steps": [
+                    f"Delete the GitHub secret {public_name} only after the same-name reviewed variable passes the fixed production release verification."
+                ],
+            }
+        )
 
     def add_source(source: tuple[str, dict[str, Any]]) -> str:
         source_id, metadata = source
@@ -608,6 +927,8 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         data_classification: str = "credential",
         required_runtime_identity: str | None = None,
         execution_boundary: dict[str, Any] | None = None,
+        broker_action_id: str | None = None,
+        action_phase: str | None = None,
     ) -> None:
         for name in names:
             unresolved_annotations.append(
@@ -624,6 +945,8 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
                     data_classification=data_classification,
                     required_runtime_identity=required_runtime_identity,
                     execution_boundary=execution_boundary,
+                    broker_action_id=broker_action_id,
+                    action_phase=action_phase,
                 )
             )
 
@@ -750,14 +1073,6 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     clerk_secret = add_source(
         _op_source("Development", "Clerk Production API", "CLERK_SECRET_KEY", "CONCEALED")
     )
-    clerk_public = add_source(
-        _op_source(
-            "Development",
-            "Clerk Production API",
-            "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-            "STRING",
-        )
-    )
     ghcr = add_source(_op_source("Development", "GHCR_PULL_TOKEN", "credential", "CONCEALED"))
     frontend_host = add_source(_op_source("Development", "Frontend Server", "hostname", "STRING"))
     frontend_user = add_source(_op_source("Development", "Frontend Server", "username", "STRING"))
@@ -773,7 +1088,6 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     )
     frontend_specs = [
         ("CLERK_SECRET_KEY", clerk_secret, "copy", "credential"),
-        ("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", clerk_public, "move-to-variable", "identifier"),
         ("GHCR_PULL_TOKEN", ghcr, "copy", "credential"),
         ("DEPLOY_HOST", frontend_host, "move-to-variable", "identifier"),
         ("DEPLOY_USER", frontend_user, "move-to-variable", "identifier"),
@@ -790,7 +1104,7 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
                 source_ref,
                 action=action,
                 classification=classification,
-                authority_match="exact-field" if name in {"CLERK_SECRET_KEY", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"} else "reviewed-semantic",
+                authority_match="exact-field" if name == "CLERK_SECRET_KEY" else "reviewed-semantic",
             )
         )
 
@@ -1207,15 +1521,17 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
 
     annotate_many(
         "ken-frontend",
-        ("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "POSTHOG_PERSONAL_API_KEY"),
+        ("POSTHOG_PERSONAL_API_KEY",),
         PRODUCTION_VAULT,
         resolution_class="provider-rotation",
         authority_owner="PostHog Ken project administrator",
         handoff_group="frontend/posthog",
-        reason="The frontend deploy workflow proves these are PostHog project credentials, but no readable authority was found.",
+        reason="The frontend release needs this field only in the fixed post-build sourcemap executor; no readable authority was found.",
         provider_rotation_steps=provider_steps(
             "PostHog", "the Ken production project and deployment operations"
         ),
+        broker_action_id="ken-frontend-production-release",
+        action_phase="post-build-sourcemap-upload",
     )
     annotate_many(
         "ken-frontend",
@@ -1226,6 +1542,8 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         handoff_group="frontend/posthog",
         reason="The PostHog project identifier can be read from the project settings, but it was not present in readable evidence.",
         data_classification="identifier",
+        broker_action_id="ken-frontend-production-release",
+        action_phase="post-build-sourcemap-upload",
     )
     annotate_many(
         "ken-frontend",
@@ -1237,21 +1555,25 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         reason="This application encryption key must remain stable across replicas; no readable runtime authority was found.",
         downstream_update_steps=[
             "Create a new production-only server-actions encryption authority and populate only Ken Deploy Production/ken-frontend/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY through the temporary migration writer.",
-            "Task 7 must run build-image on ken-deploy-production through task7-fixed-production-image-build; the wrapper obtains the key from the local production broker and passes it only to the fixed production image build.",
-            "The ken-ci pools may run no-secret validation only and must never build or publish the production image artifact.",
-            "Verify the production image build and both production replicas before deleting the GitHub field and revoking the predecessor authority after the rollback window.",
+            "Task 7 must implement fixed action ken-frontend-production-release in production_build mode. The runner sends only action ID, class OIDC JWT, and its short-lived GitHub token and performs no checkout or build.",
+            "The broker fetches the exact reviewed commit before 1Password, then gives the build field only to the rootless action-specific BuildKit secret mount for RUN --network=none pnpm build. ARG, ENV, logs, cache metadata, and layers are forbidden.",
+            "The broker scans OCI config, history, and uncompressed layers for raw, base64, and hex canaries, pushes the computed digest, records the source/run/digest binding, and the fixed deploy executor deploys only that digest.",
+            "Verify the production image, separate PostHog sourcemap step, durable state, cleanup, and both production replicas before deleting the GitHub field and revoking the predecessor authority after the rollback window.",
         ],
         required_runtime_identity="ken-deploy-production",
         execution_boundary={
+            "action_id": "ken-frontend-production-release",
+            "mode": "production_build",
             "workflow": ".github/workflows/deploy.yml",
             "production_build_job": "build-image",
             "deployment_job": "deploy",
             "runner_class": "ken-deploy-production",
-            "build_wrapper": "task7-fixed-production-image-build",
             "broker_only": True,
             "ci_validation_only": True,
             "forbid_ken_ci_production_artifact": True,
         },
+        broker_action_id="ken-frontend-production-release",
+        action_phase="offline-buildkit-secret-phase",
     )
     for repository in ("ken-frontend", "ken-agents"):
         annotate_many(
@@ -1857,15 +2179,23 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     migration_ids = [row["migration_id"] for row in secretless_migrations]
     if len(migration_ids) != len(set(migration_ids)):
         raise ValueError("duplicate secretless migration selector")
+    variable_migration_ids = [
+        row["migration_id"] for row in workflow_variable_migrations
+    ]
+    if len(variable_migration_ids) != len(set(variable_migration_ids)):
+        raise ValueError("duplicate workflow variable migration selector")
     direct_mapping_ids = [
         row["mapping_id"] for row in direct_onepassword_mappings
     ]
     if len(direct_mapping_ids) != len(set(direct_mapping_ids)):
         raise ValueError("duplicate direct 1Password mapping selector")
+    action_ids = [row["action_id"] for row in broker_actions]
+    if len(action_ids) != len(set(action_ids)):
+        raise ValueError("duplicate broker action selector")
     _validate_source_metadata(sources, evidence_dir)
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "evidence_id": EVIDENCE_ID,
         "policy": "Value-free metadata only. Sources record labels, key paths, types, and existence/readability booleans; no credential value was emitted or stored.",
         "sources": dict(sorted(sources.items())),
@@ -1876,8 +2206,14 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         "secretless_migrations": sorted(
             secretless_migrations, key=lambda row: row["migration_id"]
         ),
+        "workflow_variable_migrations": sorted(
+            workflow_variable_migrations, key=lambda row: row["migration_id"]
+        ),
         "direct_onepassword_mappings": sorted(
             direct_onepassword_mappings, key=lambda row: row["mapping_id"]
+        ),
+        "broker_actions": sorted(
+            broker_actions, key=lambda row: row["action_id"]
         ),
         "unresolved_observations": [
             {
