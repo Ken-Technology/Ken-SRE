@@ -204,6 +204,7 @@ run_host() {
   data_root="${test_dir}/data"
   escape_root="${test_dir}/escape"
   mkdir -p "${fake_bin}" "${state_root}" "${data_root}" "${escape_root}"
+  ln -s "$(command -v jq)" "${fake_bin}/jq"
 
   cat >"${fake_ssh}" <<'SH'
 #!/usr/bin/env bash
@@ -410,20 +411,43 @@ if [[ "${1:-}" == network && "${2:-}" == ls ]]; then
   echo network-1
 elif [[ "${1:-}" == network && "${2:-}" == inspect ]]; then
   if [[ "${FAKE_SSH_PROFILE:-good}" == docker-conflict ]]; then
-    echo 192.168.211.0/24
+    subnet=192.168.211.0/24
   else
-    echo 172.17.0.0/16
+    subnet=172.17.0.0/16
+  fi
+  if [[ "$*" == *--format* ]]; then
+    echo "${subnet}"
+  else
+    printf '[{"IPAM":{"Config":[{"Subnet":"%s"}]}}]\n' "${subnet}"
   fi
 elif [[ "${1:-}" == ps && "$*" == *-q* ]]; then
   echo container-1
 elif [[ "${1:-}" == inspect ]]; then
+  if [[ "$*" == *--format* ]]; then
+    if [[ "${FAKE_SSH_PROFILE:-good}" == docker-no-health && "$*" == *'.State.Health'* ]]; then
+      echo 'template parsing error: template: :1:180: executing "" at <.State.Health>: map has no entry for key "Health"' >&2
+      exit 64
+    fi
+    if [[ "${2:-}" == network-1 || "${*: -1}" == network-1 ]]; then
+      echo 172.17.0.0/16
+      exit 0
+    fi
+  fi
   started=2026-08-19T00:00:00Z
   restarts=0
   if [[ "${FAKE_SSH_PROFILE:-good}" == docker-restarted && -e "${FAKE_STATE_ROOT}/packages-installed" ]]; then
     started=2026-08-19T01:00:00Z
     restarts=1
   fi
-  printf 'container-1|/search|elasticsearch:8|running|%s|%s|healthy\n' "${started}" "${restarts}"
+  if [[ "$*" == *--format* ]]; then
+    printf 'container-1|/search|elasticsearch:8|running|%s|%s|healthy\n' "${started}" "${restarts}"
+  elif [[ "${*: -1}" == network-1 ]]; then
+    printf '[{"IPAM":{"Config":[{"Subnet":"172.17.0.0/16"}]}}]\n'
+  elif [[ "${FAKE_SSH_PROFILE:-good}" == docker-no-health ]]; then
+    printf '[{"Id":"container-1","Name":"/search","Config":{"Image":"elasticsearch:8","Env":["SNAPSHOT_SECRET_CANARY=must-not-leak"]},"State":{"Status":"running","StartedAt":"%s"},"RestartCount":%s}]\n' "${started}" "${restarts}"
+  else
+    printf '[{"Id":"container-1","Name":"/search","Config":{"Image":"elasticsearch:8","Env":["SNAPSHOT_SECRET_CANARY=must-not-leak"]},"State":{"Status":"running","StartedAt":"%s","Health":{"Status":"healthy"}},"RestartCount":%s}]\n' "${started}" "${restarts}"
+  fi
 else
   exit 64
 fi
@@ -735,6 +759,17 @@ SH
     pass "restarted running Docker container is detected"
   else
     fail "Docker restart identity drift was accepted"
+  fi
+
+  exercise docker-no-health root@167.235.8.250
+  if (( status == 0 )) &&
+    grep -Fq 'Host provisioning verified' <<<"${output}" &&
+    ! grep -Fq 'SNAPSHOT_SECRET_CANARY' <<<"${output}" &&
+    ! grep -R -Fq 'SNAPSHOT_SECRET_CANARY' "${state_root}"; then
+    pass "container without a healthcheck is snapshotted without leaking environment values"
+  else
+    fail "container without a healthcheck broke or leaked from the protected-state snapshot"
+    printf '%s\n' "${output}"
   fi
 
   exercise memory-after-low root@167.235.8.250

@@ -67,9 +67,10 @@ Provisioning stops unless all of these conditions hold:
 - `MemAvailable` is at least 128 GiB before VM creation.
 - `/dev/kvm` is a readable and writable character device.
 - All six named `hetzner-grok-review-*` runner services exist and are active.
+- `jq` is already available for read-only, field-filtered Docker inspection before any package mutation.
 - The two approved `/24` networks do not overlap any host route, existing bridge, Docker network, or other libvirt network. An existing target network must match the full NAT, bridge, address, netmask, and DHCP contract before any package or network mutation.
 
-The apply step snapshots the Grok runner units, Elasticsearch, Docker, matching processes, running containers, and listening ports before package installation. Container identity includes start time, restart count, and health, so a restarted container cannot pass merely because it returned to `running`. New libvirt processes and ports are allowed; missing or restarted protected processes are not. The 128 GiB `MemAvailable` floor is checked again after pool and network convergence.
+The apply step snapshots the Grok runner units, Elasticsearch, Docker, matching processes, running containers, and listening ports before package installation. Docker JSON is filtered to container ID, name, image, status, start time, restart count, and health only; container environment values and other inspect data are never written to the snapshot or command output. A container without a healthcheck records `none`. Container identity includes start time, restart count, and health, so a restarted container cannot pass merely because it returned to `running`. New libvirt processes and ports are allowed; missing or restarted protected processes are not. The 128 GiB `MemAvailable` floor is checked again after pool and network convergence.
 
 Task 4 has a separate post-start limit. Both guests must leave at least 32 GiB host `MemAvailable` while Elasticsearch and all six Grok runners stay healthy.
 

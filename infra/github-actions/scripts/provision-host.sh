@@ -399,7 +399,7 @@ network_cidr_from_xml() {
 }
 
 validate_network_conflicts() {
-  local name="$1" bridge="$2" subnet="$3" exists=0 line destination dev id other xml other_cidr
+  local name="$1" bridge="$2" subnet="$3" exists=0 line destination dev id other xml other_cidr docker_ids docker_subnets
   network_exists "${name}" && exists=1
 
   if ip -o link show "${bridge}" >/dev/null 2>&1 && (( exists == 0 )); then
@@ -426,15 +426,20 @@ validate_network_conflicts() {
   done < <(ip -o -4 route show table all)
 
   if command -v docker >/dev/null 2>&1; then
+    docker_ids="$(docker network ls -q)" || die "cannot list Docker networks"
     while IFS= read -r id; do
       [[ -n "${id}" ]] || continue
+      docker_subnets="$(
+        docker network inspect "${id}" |
+          jq -r '.[0] | (.IPAM.Config // [])[] | .Subnet // empty'
+      )" || die "cannot inspect Docker network ${id}"
       while IFS= read -r other_cidr; do
         [[ -n "${other_cidr}" ]] || continue
         if cidr_overlaps "${subnet}" "${other_cidr}"; then
           die "network ${subnet} conflicts with Docker network ${id} (${other_cidr})"
         fi
-      done < <(docker network inspect --format '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' "${id}" 2>/dev/null || true)
-    done < <(docker network ls -q 2>/dev/null || true)
+      done <<<"${docker_subnets}"
+    done <<<"${docker_ids}"
   fi
 
   if command -v virsh >/dev/null 2>&1; then
@@ -457,6 +462,7 @@ validate_network_plan() {
 }
 
 read_only_safety_gate() {
+  command -v jq >/dev/null 2>&1 || die "jq is required for filtered Docker inspection"
   validate_storage_path_plan
   validate_network_plan
 }
@@ -471,7 +477,16 @@ snapshot_protected_state() {
   : >"${destination}/docker"
   while IFS= read -r container_id; do
     [[ -n "${container_id}" ]] || continue
-    docker inspect --format '{{.Id}}|{{.Name}}|{{.Config.Image}}|{{.State.Status}}|{{.State.StartedAt}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${container_id}" >>"${destination}/docker"
+    docker inspect "${container_id}" |
+      jq -er '.[0] | [
+        (.Id // error("container Id is missing")),
+        (.Name // error("container Name is missing")),
+        (.Config.Image // error("container image is missing")),
+        (.State.Status // error("container status is missing")),
+        (.State.StartedAt // error("container start time is missing")),
+        ((.RestartCount // error("container restart count is missing")) | tostring),
+        (.State.Health.Status // "none")
+      ] | @tsv' >>"${destination}/docker"
   done < <(docker ps -q 2>/dev/null | sort)
   sort -o "${destination}/docker" "${destination}/docker"
   pgrep -af 'Runner\.(Listener|Worker)|/usr/share/elasticsearch|dockerd' | sort >"${destination}/processes" || true
