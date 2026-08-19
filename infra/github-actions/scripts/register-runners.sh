@@ -263,11 +263,24 @@ def rendered_units(ga_root, platform, runner):
     slice_text = replace_limit(slice_text, "MemoryMax", limits["memory_max"])
     slice_text = replace_limit(slice_text, "MemorySwapMax", limits["memory_swap_max"])
     slice_text = replace_limit(slice_text, "TasksMax", limits["tasks_max"])
+    unit_override = ""
+    docker_environment = ""
+    if runner["docker"]["enabled"]:
+        docker_unit_name = f"ken-runner-docker@{runner['name']}.service"
+        unit_override = (
+            "\n[Unit]\n"
+            f"Requires={docker_unit_name}\n"
+            f"After={docker_unit_name}\n"
+            f"BindsTo={docker_unit_name}\n"
+        )
+        docker_environment = f"Environment=DOCKER_HOST=unix://{runner['docker']['runtime_root']}/docker.sock\n"
     override = (
-        "\n[Service]\n"
+        unit_override
+        + "\n[Service]\n"
         f"User={runner['user']}\n"
         f"Group={runner['user']}\n"
         f"Environment=RUNNER_UID={runner['uid']}\n"
+        f"{docker_environment}"
         f"Slice={runner['slice']}\n"
         f"ReadWritePaths={runner['home']}\n"
         f"ReadWritePaths={runner['work_root']}\n"
@@ -293,6 +306,53 @@ def existing_exact(path, expected):
     return path.is_file() and not path.is_symlink() and read_json(path) == expected
 
 
+def fake_guest_filesystem_path(fake_root, runner, absolute_path):
+    return fake_root / "guests" / runner["vm"] / "filesystem" / absolute_path.lstrip("/")
+
+
+def disabled_state_paths(fake_root, runner):
+    name = runner["name"]
+    guest_root = fake_root / "guests" / runner["vm"]
+    runner_base = str(Path(runner["home"]).parent)
+    filesystem_paths = {
+        "runner base": runner_base,
+        "home directory": runner["home"],
+        "runner directory": runner["runner_root"],
+        "workspace directory": runner["work_root"],
+        "Docker data directory": runner["docker"]["data_root"],
+        "Docker runtime directory": runner["docker"]["runtime_root"],
+        "Docker socket": f"{runner['docker']['runtime_root']}/docker.sock",
+        "listener-ready marker": f"/etc/ken-runners/{name}.ready",
+        "Docker-ready marker": f"/etc/ken-runners/{name}.docker-ready",
+        "dirty-state marker": f"/var/lib/ken-runner-state/{name}.dirty",
+        "clean-state marker": f"/var/lib/ken-runner-state/{name}.clean",
+    }
+    paths = [
+        ("GitHub runner", fake_root / "github" / "runners" / f"{name}.json"),
+        ("local runner", guest_root / "runners" / f"{name}.json"),
+        ("account", guest_root / "accounts" / f"{name}.json"),
+        ("subuid", guest_root / "subuids" / f"{name}.json"),
+        ("subgid", guest_root / "subgids" / f"{name}.json"),
+        ("listener unit", guest_root / "units" / f"ken-runner@{name}.service"),
+        ("Docker unit", guest_root / "units" / f"ken-runner-docker@{name}.service"),
+        ("slice unit", guest_root / "units" / runner["slice"]),
+    ]
+    paths.extend(
+        (label, fake_guest_filesystem_path(fake_root, runner, path))
+        for label, path in filesystem_paths.items()
+    )
+    return paths
+
+
+def verify_disabled_absent(platform, fake_root):
+    for runner in platform["runners"]:
+        if runner["enabled"]:
+            continue
+        for label, path in disabled_state_paths(fake_root, runner):
+            if path.exists() or path.is_symlink():
+                raise ContractError(f"disabled runner local state exists: {runner['name']} {label}")
+
+
 def maybe_fail(point):
     if os.environ.get("KEN_RUNNER_TEST_FAIL_AFTER") == point:
         raise ContractError(f"injected failure after {point}")
@@ -307,6 +367,7 @@ def register_fake(platform, ga_root, fake_root):
     digest = os.environ.get("KEN_RUNNER_TEST_ARCHIVE_SHA256", "")
     if digest != platform["runner_distribution"]["sha256"]:
         raise ContractError("runner archive checksum mismatch")
+    verify_disabled_absent(platform, fake_root)
     transaction = Transaction(fake_root)
     created_runners = 0
     changed = False
@@ -326,8 +387,6 @@ def register_fake(platform, ga_root, fake_root):
             github_path = fake_root / f"github/runners/{runner['name']}.json"
             guest_path = fake_root / f"guests/{runner['vm']}/runners/{runner['name']}.json"
             if not runner["enabled"]:
-                if github_path.exists() or guest_path.exists():
-                    raise ContractError(f"disabled runner already exists: {runner['name']}")
                 continue
             expected_github = github_runner_state(platform, runner)
             expected_local = local_runner_state(platform, runner)

@@ -12,10 +12,12 @@ Slice=ken-runner-%i.slice
 WorkingDirectory=/var/lib/ken-runners/%i/runner
 Environment=HOME=/var/lib/ken-runners/%i/home
 Environment=RUNNER_TOOL_CACHE=/var/lib/ken-runners/%i/runner/_tool
-Environment=DOCKER_HOST=unix:///run/ken-rootless-docker/%i/docker.sock
 Environment=RUNNER_UID=invalid
+ExecStartPre=+/usr/local/libexec/ken-runner-cleanup recover %i ${RUNNER_UID}
+ExecStartPre=+/usr/local/libexec/ken-runner-cleanup assert-clean %i ${RUNNER_UID}
+ExecStartPre=+/usr/local/libexec/ken-runner-cleanup mark-dirty %i ${RUNNER_UID}
 ExecStart=/var/lib/ken-runners/%i/runner/run.sh --once
-ExecStopPost=+/usr/local/libexec/ken-runner-cleanup %i ${RUNNER_UID}
+ExecStopPost=+/usr/local/libexec/ken-runner-cleanup cleanup %i ${RUNNER_UID}
 Restart=always
 RestartSec=5
 KillMode=control-group
@@ -34,6 +36,7 @@ ReadWritePaths=/var/lib/ken-runners/%i/home
 ReadWritePaths=/var/lib/ken-runners/%i/runner/_diag
 ReadWritePaths=/var/lib/ken-runners/%i/runner/_tool
 ReadWritePaths=/var/lib/ken-runners/%i/work
+ReadWritePaths=/var/lib/ken-runner-state
 
 [Install]
 WantedBy=multi-user.target

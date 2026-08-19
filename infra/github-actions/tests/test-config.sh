@@ -2109,7 +2109,13 @@ texts = {path.name: path.read_text() for path in paths}
 listener = texts["ken-runner@.service"]
 for control in ["NoNewPrivileges=true", "PrivateTmp=true", "ProtectSystem=strict", "ProtectHome=read-only", "RestrictSUIDSGID=true", "LockPersonality=true", "Restart=always", "RestartSec=5", "--once", "ExecStopPost=+"]:
     check(control in listener, f"listener unit control {control}")
-check("ExecStopPost=+/usr/local/libexec/ken-runner-cleanup %i ${RUNNER_UID}" in listener, "cleanup receives exact runner instance and rendered numeric service UID")
+for command in [
+    "ExecStartPre=+/usr/local/libexec/ken-runner-cleanup recover %i ${RUNNER_UID}",
+    "ExecStartPre=+/usr/local/libexec/ken-runner-cleanup assert-clean %i ${RUNNER_UID}",
+    "ExecStartPre=+/usr/local/libexec/ken-runner-cleanup mark-dirty %i ${RUNNER_UID}",
+    "ExecStopPost=+/usr/local/libexec/ken-runner-cleanup cleanup %i ${RUNNER_UID}",
+]:
+    check(command in listener, f"listener clean-state lifecycle command {command}")
 check("KillMode=control-group" in listener, "systemd kills leftover job descendants before post-job cleanup")
 docker_unit = texts["ken-runner-docker@.service"]
 check("dockerd-rootless.sh" in docker_unit and "ken-runner-%i.slice" in docker_unit, "rootless Docker shares exact runner slice")
@@ -2310,8 +2316,12 @@ with tempfile.TemporaryDirectory() as temporary:
     docker_unit = (fake_root / "guests/ken-ci/units/ken-runner-docker@ken-ci-standard-01.service").read_text()
     slice_unit = (fake_root / "guests/ken-ci/units/ken-runner-ken-ci-standard-01.slice").read_text()
     check("User=ghr-ci-s01" in runner_unit and "Environment=RUNNER_UID=21001" in runner_unit and "Slice=ken-runner-ken-ci-standard-01.slice" in runner_unit and "Slice=ken-runner-ken-ci-standard-01.slice" in docker_unit, "listener and Docker share rendered identity and slice")
+    docker_dependency = "ken-runner-docker@ken-ci-standard-01.service"
+    check(all(value in runner_unit for value in [f"Requires={docker_dependency}", f"After={docker_dependency}", f"BindsTo={docker_dependency}"]) and "Environment=DOCKER_HOST=unix:///run/ken-rootless-docker/ken-ci-standard-01/docker.sock" in runner_unit, "CI listener is bound and ordered after its exact rootless Docker daemon")
     check(all(value in slice_unit for value in ["CPUQuota=200%", "MemoryMax=8G", "MemorySwapMax=0", "TasksMax=4096"]), "rendered standard limits")
     check(not (fake_root / "guests/ken-deploy/units/ken-runner-docker@ken-deploy-production-01.service").exists(), "deploy Docker stays disabled")
+    deploy_unit = (fake_root / "guests/ken-deploy/units/ken-runner@ken-deploy-production-01.service").read_text()
+    check("ken-runner-docker@" not in deploy_unit and "DOCKER_HOST=" not in deploy_unit, "deploy listener remains independent of Docker")
 
     before = tree_digest(fake_root)
     second = call(fake_command(fake_root), env=fake_env(fake_root))
@@ -2323,11 +2333,86 @@ with tempfile.TemporaryDirectory() as temporary:
     verified = call(verify_command, env={"KEN_RUNNER_OFFLINE_TEST": "1"})
     check(verified.returncode == 0 and "RUNNERS_OK=12" in verified.stdout and tree_digest(fake_root) == verify_before, "read-only verifier accepts exact platform without mutation", verified)
 
+    listener_path = fake_root / "guests/ken-ci/units/ken-runner@ken-ci-standard-01.service"
+    listener_original = listener_path.read_text()
+    listener_path.write_text(listener_original.replace("Requires=ken-runner-docker@ken-ci-standard-01.service\n", ""))
+    dependency_verify = call(verify_command, env={"KEN_RUNNER_OFFLINE_TEST": "1"})
+    check(dependency_verify.returncode != 0 and "Docker dependency mismatch" in dependency_verify.stderr, "verifier rejects a CI listener whose daemon dependency drifted", dependency_verify)
+    listener_path.write_text(listener_original.replace("ExecStartPre=+/usr/local/libexec/ken-runner-cleanup recover %i ${RUNNER_UID}\n", ""))
+    lifecycle_verify = call(verify_command, env={"KEN_RUNNER_OFFLINE_TEST": "1"})
+    check(lifecycle_verify.returncode != 0 and "cleanup lifecycle mismatch" in lifecycle_verify.stderr, "verifier rejects a listener whose recovery gate drifted", lifecycle_verify)
+    listener_path.write_text(listener_original)
+
     disabled_record = fake_root / "github/runners/ken-ci-standard-09.json"
     disabled_record.write_text("{}\n")
     disabled_verify = call(verify_command, env={"KEN_RUNNER_OFFLINE_TEST": "1"})
-    check(disabled_verify.returncode != 0 and "disabled runner present" in disabled_verify.stderr, "verifier rejects reserved runner registration", disabled_verify)
+    check(disabled_verify.returncode != 0 and "disabled runner local state" in disabled_verify.stderr, "verifier rejects reserved runner registration", disabled_verify)
     disabled_record.unlink()
+
+    disabled_name = "ken-ci-standard-09"
+    disabled_states = [
+        (f"github/runners/{disabled_name}.json", False),
+        (f"guests/ken-ci/runners/{disabled_name}.json", False),
+        (f"guests/ken-ci/accounts/{disabled_name}.json", False),
+        (f"guests/ken-ci/subuids/{disabled_name}.json", False),
+        (f"guests/ken-ci/subgids/{disabled_name}.json", False),
+        (f"guests/ken-ci/units/ken-runner@{disabled_name}.service", False),
+        (f"guests/ken-ci/units/ken-runner-docker@{disabled_name}.service", False),
+        (f"guests/ken-ci/units/ken-runner-{disabled_name}.slice", False),
+        (f"guests/ken-ci/filesystem/var/lib/ken-runners/{disabled_name}", True),
+        (f"guests/ken-ci/filesystem/run/ken-rootless-docker/{disabled_name}", True),
+        (f"guests/ken-ci/filesystem/run/ken-rootless-docker/{disabled_name}/docker.sock", False),
+        (f"guests/ken-ci/filesystem/etc/ken-runners/{disabled_name}.ready", False),
+        (f"guests/ken-ci/filesystem/etc/ken-runners/{disabled_name}.docker-ready", False),
+        (f"guests/ken-ci/filesystem/var/lib/ken-runner-state/{disabled_name}.dirty", False),
+        (f"guests/ken-ci/filesystem/var/lib/ken-runner-state/{disabled_name}.clean", False),
+    ]
+    for index, (relative, is_directory) in enumerate(disabled_states):
+        registration_root = base / f"disabled-registration-{index}"
+        evidence(registration_root)
+        forbidden = registration_root / relative
+        if is_directory:
+            forbidden.mkdir(parents=True)
+        else:
+            forbidden.parent.mkdir(parents=True, exist_ok=True)
+            forbidden.write_text("forbidden disabled runner state\n")
+        before_forbidden = tree_digest(registration_root)
+        forbidden_registration = call(fake_command(registration_root), env=fake_env(registration_root))
+        check(forbidden_registration.returncode != 0 and "disabled runner local state" in forbidden_registration.stderr and tree_digest(registration_root) == before_forbidden and not (registration_root / "github/groups").exists(), f"registration rejects disabled state before mutation: {relative}", forbidden_registration)
+
+        verifier_forbidden = fake_root / relative
+        if is_directory:
+            verifier_forbidden.mkdir(parents=True)
+        else:
+            verifier_forbidden.parent.mkdir(parents=True, exist_ok=True)
+            verifier_forbidden.write_text("forbidden disabled runner state\n")
+        forbidden_verification = call(verify_command, env={"KEN_RUNNER_OFFLINE_TEST": "1"})
+        check(forbidden_verification.returncode != 0 and "disabled runner local state" in forbidden_verification.stderr, f"verifier rejects disabled state: {relative}", forbidden_verification)
+        if verifier_forbidden.is_dir():
+            shutil.rmtree(verifier_forbidden)
+        else:
+            verifier_forbidden.unlink()
+            try:
+                verifier_forbidden.parent.rmdir()
+            except OSError:
+                pass
+
+    disabled_ten = "ken-ci-standard-10"
+    disabled_ten_root = base / "disabled-ten-registration"
+    evidence(disabled_ten_root)
+    disabled_ten_account = disabled_ten_root / f"guests/ken-ci/accounts/{disabled_ten}.json"
+    disabled_ten_runtime = disabled_ten_root / f"guests/ken-ci/filesystem/run/ken-rootless-docker/{disabled_ten}"
+    disabled_ten_account.parent.mkdir(parents=True)
+    disabled_ten_account.write_text("forbidden account\n")
+    disabled_ten_runtime.mkdir(parents=True)
+    disabled_ten_registration = call(fake_command(disabled_ten_root), env=fake_env(disabled_ten_root))
+    check(disabled_ten_registration.returncode != 0 and "disabled runner local state" in disabled_ten_registration.stderr and not (disabled_ten_root / "github/groups").exists(), "registration rejects local state for disabled reservation 10", disabled_ten_registration)
+    verifier_ten_account = fake_root / f"guests/ken-ci/accounts/{disabled_ten}.json"
+    verifier_ten_account.write_text("forbidden account\n")
+    disabled_ten_verification = call(verify_command, env={"KEN_RUNNER_OFFLINE_TEST": "1"})
+    check(disabled_ten_verification.returncode != 0 and "disabled runner local state" in disabled_ten_verification.stderr, "verifier rejects local state for disabled reservation 10", disabled_ten_verification)
+    verifier_ten_account.unlink()
+
     status_file = fake_root / "github/runners/ken-ci-standard-01.json"
     status_data = json.loads(status_file.read_text())
     status_data["status"] = "offline"
@@ -2363,18 +2448,40 @@ with tempfile.TemporaryDirectory() as temporary:
 
     cleanup_root = base / "cleanup"
     runtime_root = base / "runtime"
+    runner_state_root = base / "runner-state"
     docker_log = base / "docker.log"
     systemctl_log = base / "systemctl.log"
+    docker_state = base / "docker-state"
     fake_bin = base / "cleanup-bin"
     fake_bin.mkdir()
+    runner_state_root.mkdir()
+    docker_state.mkdir()
     docker = fake_bin / "docker"
     docker.write_text("""#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >>"${KEN_CLEANUP_DOCKER_LOG:?}"
+[[ "${1:-}" == --host && "${2:-}" == unix://* ]] || exit 64
+shift 2
 case "$*" in
-  *' ps -aq') printf 'container-a\\n' ;;
-  *' network ls -q') printf 'network-a\\n' ;;
-  *' volume ls -q') printf 'volume-a\\n' ;;
+  'ps -aq') printf 'container-a\\n' ;;
+  'rm -f container-a')
+    [[ "${KEN_CLEANUP_FAIL_CONTAINER:-0}" != 1 ]] || exit 71
+    : >"${KEN_CLEANUP_DOCKER_STATE:?}/container-removed"
+    ;;
+  'network ls'*)
+    printf 'bridge-id bridge\\nhost-id host\\nnone-id none\\ncustom-id workflow-network\\n'
+    ;;
+  'network rm bridge-id'|'network rm host-id'|'network rm none-id')
+    exit 72
+    ;;
+  'network rm custom-id')
+    : >"${KEN_CLEANUP_DOCKER_STATE:?}/custom-network-removed"
+    ;;
+  'volume ls -q') printf 'volume-a\\n' ;;
+  'volume rm -f volume-a')
+    : >"${KEN_CLEANUP_DOCKER_STATE:?}/volume-removed"
+    ;;
+  *) exit 64 ;;
 esac
 """)
     docker.chmod(0o755)
@@ -2405,29 +2512,59 @@ printf '%s\\n' "$*" >>"${KEN_CLEANUP_SYSTEMCTL_LOG:?}"
         "KEN_RUNNER_CLEANUP_ALLOW_NON_ROOT": "1",
         "KEN_RUNNER_BASE": cleanup_root,
         "KEN_RUNNER_RUNTIME_BASE": runtime_root,
+        "KEN_RUNNER_STATE_BASE": runner_state_root,
         "KEN_RUNNER_DOCKER_BIN": docker,
         "KEN_RUNNER_SYSTEMCTL_BIN": systemctl,
         "KEN_CLEANUP_DOCKER_LOG": docker_log,
         "KEN_CLEANUP_SYSTEMCTL_LOG": systemctl_log,
+        "KEN_CLEANUP_DOCKER_STATE": docker_state,
         "KEN_RUNNER_CLEANUP_TEST_SOCKET_FILE": "1",
     }
-    cleaned = call(["bash", str(cleanup), runner_a, str(uid)], env=cleanup_env)
-    check(cleaned.returncode == 0 and not any((cleanup_root / runner_a / "work").iterdir()) and (cleanup_root / runner_b / "work/sentinel").read_text() == runner_b, "cleanup removes only one runner workspace", cleaned)
+    cleaned = call(["bash", str(cleanup), "cleanup", runner_a, str(uid)], env=cleanup_env)
+    check(cleaned.returncode == 0 and not any((cleanup_root / runner_a / "work").iterdir()) and (cleanup_root / runner_b / "work/sentinel").read_text() == runner_b, "cleanup removes only one runner workspace despite built-in Docker networks", cleaned)
     if cleaned.returncode != 0:
         print("\n".join(f"RUNNER_BEHAVIOR_FAIL {item}" for item in failures))
         raise SystemExit(1)
     docker_calls = docker_log.read_text()
     check(f"--host unix://{socket_path}" in docker_calls and str(runner_b_socket) not in docker_calls and "system prune" not in docker_calls and "/var/run" not in docker_calls, "cleanup uses only runner rootless Docker socket")
+    check(all((docker_state / marker).exists() for marker in ["container-removed", "custom-network-removed", "volume-removed"]) and not any(f"network rm {identifier}" in docker_calls for identifier in ["bridge-id", "host-id", "none-id"]), "cleanup removes only custom runner-daemon networks and reaches volume cleanup")
+    check((runner_state_root / f"{runner_a}.clean").is_file() and not (runner_state_root / f"{runner_a}.dirty").exists(), "successful cleanup restores only the clean-state marker")
     check((cleanup_root / runner_b / "runner/cache-sentinel").read_text() == runner_b and (cleanup_root / runner_b / "runner/process-sentinel").read_text() == runner_b and runner_b_socket.read_text() == "other runner socket stand-in" and rootful_canary.read_text() == "must remain untouched", "cleanup leaves the other runner cache, process canary, socket, and rootful canary untouched")
     check(not systemctl_log.exists() or not systemctl_log.read_text(), "post-job cleanup does not signal its own systemd cgroup")
 
-    malicious = call(["bash", str(cleanup), "../ken-ci-standard-02", str(uid)], env=cleanup_env)
+    marked_dirty = call(["bash", str(cleanup), "mark-dirty", runner_a, str(uid)], env=cleanup_env)
+    (cleanup_root / runner_a / "work/failure-sentinel").write_text("must be removed")
+    failed_cleanup = call(["bash", str(cleanup), "cleanup", runner_a, str(uid)], env={**cleanup_env, "KEN_CLEANUP_FAIL_CONTAINER": "1"})
+    check(marked_dirty.returncode == 0 and failed_cleanup.returncode != 0 and not any((cleanup_root / runner_a / "work").iterdir()) and (runner_state_root / f"{runner_a}.dirty").is_file() and not (runner_state_root / f"{runner_a}.clean").exists() and (docker_state / "volume-removed").exists(), "failed Docker cleanup still reaches bounded volume/workspace cleanup and leaves persistent dirty evidence", failed_cleanup)
+
+    listener_started = base / "listener-started"
+    blocked_recovery = call(["bash", str(cleanup), "recover", runner_a, str(uid)], env={**cleanup_env, "KEN_CLEANUP_FAIL_CONTAINER": "1"})
+    if blocked_recovery.returncode == 0:
+        listener_started.write_text("incorrectly admitted")
+    check(blocked_recovery.returncode != 0 and not listener_started.exists() and (runner_state_root / f"{runner_a}.dirty").is_file(), "Restart=always cannot admit a listener while recovery cleanup fails", blocked_recovery)
+
+    recovered = call(["bash", str(cleanup), "recover", runner_a, str(uid)], env=cleanup_env)
+    clean_gate = call(["bash", str(cleanup), "assert-clean", runner_a, str(uid)], env=cleanup_env)
+    dirty_for_job = call(["bash", str(cleanup), "mark-dirty", runner_a, str(uid)], env=cleanup_env)
+    if recovered.returncode == clean_gate.returncode == dirty_for_job.returncode == 0:
+        listener_started.write_text("admitted after clean recovery")
+    check(listener_started.read_text() == "admitted after clean recovery" and (runner_state_root / f"{runner_a}.dirty").is_file() and not (runner_state_root / f"{runner_a}.clean").exists(), "dirty boot recovery cleans, proves clean state, then marks the admitted job dirty")
+
+    listener_started.unlink()
+    socket_path.unlink()
+    missing_socket = call(["bash", str(cleanup), "recover", runner_a, str(uid)], env=cleanup_env)
+    if missing_socket.returncode == 0:
+        listener_started.write_text("incorrectly admitted")
+    check(missing_socket.returncode != 0 and not listener_started.exists() and (runner_state_root / f"{runner_a}.dirty").is_file(), "CI listener readiness gate rejects a missing rootless Docker socket", missing_socket)
+    socket_path.write_text("sandbox socket stand-in")
+
+    malicious = call(["bash", str(cleanup), "cleanup", "../ken-ci-standard-02", str(uid)], env=cleanup_env)
     check(malicious.returncode != 0 and "invalid runner name" in malicious.stderr, "cleanup rejects malicious runner name", malicious)
-    owner = call(["bash", str(cleanup), runner_b, str(uid + 1)], env=cleanup_env)
+    owner = call(["bash", str(cleanup), "cleanup", runner_b, str(uid + 1)], env=cleanup_env)
     check(owner.returncode != 0 and "owner mismatch" in owner.stderr and (cleanup_root / runner_b / "work/sentinel").exists(), "cleanup owner mismatch fails closed", owner)
-    device = call(["bash", str(cleanup), runner_b, str(uid)], env={**cleanup_env, "KEN_RUNNER_EXPECTED_DEVICE": "999999999"})
+    device = call(["bash", str(cleanup), "cleanup", runner_b, str(uid)], env={**cleanup_env, "KEN_RUNNER_EXPECTED_DEVICE": "999999999"})
     check(device.returncode != 0 and "device mismatch" in device.stderr and (cleanup_root / runner_b / "work/sentinel").exists(), "cleanup device mismatch fails closed", device)
-    runtime_device = call(["bash", str(cleanup), runner_b, str(uid)], env={**cleanup_env, "KEN_RUNNER_EXPECTED_RUNTIME_DEVICE": "999999999"})
+    runtime_device = call(["bash", str(cleanup), "cleanup", runner_b, str(uid)], env={**cleanup_env, "KEN_RUNNER_EXPECTED_RUNTIME_DEVICE": "999999999"})
     check(runtime_device.returncode != 0 and "runtime device mismatch" in runtime_device.stderr and (cleanup_root / runner_b / "work/sentinel").exists(), "cleanup rootless runtime device mismatch fails closed", runtime_device)
     outside = base / "outside"
     outside.mkdir()
@@ -2435,7 +2572,7 @@ printf '%s\\n' "$*" >>"${KEN_CLEANUP_SYSTEMCTL_LOG:?}"
     work = cleanup_root / runner_b / "work"
     shutil.rmtree(work)
     work.symlink_to(outside, target_is_directory=True)
-    symlink = call(["bash", str(cleanup), runner_b, str(uid)], env=cleanup_env)
+    symlink = call(["bash", str(cleanup), "cleanup", runner_b, str(uid)], env=cleanup_env)
     check(symlink.returncode != 0 and "symlink" in symlink.stderr and (outside / "sentinel").exists(), "cleanup symlink escape fails closed", symlink)
 
 if failures:

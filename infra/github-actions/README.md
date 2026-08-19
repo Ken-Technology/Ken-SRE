@@ -191,7 +191,11 @@ credential_delivery: broker-only-pending-task-6
 
 The listener units do not expose a 1Password token, systemd credential directory, `ken-op-exec`, the rootful Docker socket, sudo, or Docker-group membership. Task 6 alone owns the broker and credential delivery.
 
-`ken-runner-cleanup` is a root-owned `ExecStopPost` boundary. Systemd first kills all remaining descendants in the completed listener's control group. The helper then validates the exact runner name, numeric service UID, canonical base/child paths, ownership, filesystem device, and non-symlink state before deleting only that runner's work directory. For CI identities it contacts only that runner's rootless Docker socket and removes objects returned by that daemon individually; it never invokes a global prune or a rootful socket. The other identities' caches, sockets, processes, and workspaces are out of scope.
+`ken-runner-cleanup` is the root-owned listener admission and `ExecStopPost` boundary. Before each listener start, it recovers the prior workspace, proves a root-owned clean marker, and replaces that marker with persistent dirty evidence for the admitted job. A failed post-job cleanup or dirty boot therefore cannot reach `run.sh`; `Restart=always` retries only the cleanup gate. Only a fully successful cleanup restores the clean marker.
+
+The helper validates the exact runner name, numeric service UID, canonical base/child paths, ownership, filesystem device, and non-symlink state before deleting only that runner's work directory. For CI identities it contacts only that runner's rootless Docker socket. It explicitly preserves Docker's built-in `bridge`, `host`, and `none` networks and removes only custom networks from that per-runner daemon. Container, custom-network, or volume failures are accumulated so the bounded workspace cleanup still runs, but the helper returns failure and leaves the runner dirty. It never invokes a global prune or a rootful socket. The other identities' caches, sockets, processes, and workspaces are out of scope.
+
+Each rendered CI listener `Requires`, starts `After`, and `BindsTo` its exact `ken-runner-docker@<name>.service`. The rootless daemon must reach systemd readiness and its runner-owned socket must pass the pre-start cleanup check before the listener can accept a job. Deployment listeners have no Docker dependency or `DOCKER_HOST`. Registration and read-only verification reject any GitHub record, local record, account/subordinate-ID state, unit, directory, ready marker, dirty/clean marker, runtime directory, or socket for disabled reservations 09 and 10.
 
 ### Offline checks and live boundary
 
@@ -201,7 +205,7 @@ Run the complete Task 5 offline suite with:
 bash infra/github-actions/tests/test-config.sh runners
 ```
 
-The suite exercises schema and unit security, fake selected-repository resolution, missing/unhealthy Task 4 evidence, low-memory gates, archive checksum failure, exact/idempotent registration, local/GitHub drift, rollback, read-only verification, and adversarial two-runner cleanup.
+The suite exercises schema and unit security, fake selected-repository resolution, missing/unhealthy Task 4 evidence, low-memory gates, archive checksum failure, exact/idempotent registration, local/GitHub drift, rollback, disabled-state mutations, read-only verification, built-in-network handling, persistent dirty/clean admission, daemon readiness, cleanup failure, and adversarial two-runner isolation.
 
 The only supported controller preview is read-only:
 
