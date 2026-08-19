@@ -26,6 +26,9 @@ VALUE_SHAPED_RE = re.compile(
     r"-----BEGIN [A-Z0-9 ]+PRIVATE KEY-----\s+[A-Za-z0-9+/=\n]{64,}|\bghp_[A-Za-z0-9]{20,}|\bgho_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bAKIA[0-9A-Z]{16}\b"
 )
 GITHUB_EXPRESSION_RE = re.compile(r"\$\{\{(?P<body>.*?)\}\}", re.DOTALL)
+DIRECT_OP_REFERENCE_RE = re.compile(
+    r"^op://(?P<vault>[^/\s]+)/(?P<item>[^/\s]+)/(?P<field>[^/\s]+)$"
+)
 
 BUILD_HINTS = (
     "docker build",
@@ -225,6 +228,47 @@ def extract_names(pattern: re.Pattern[str], text: str) -> list[str]:
             if name and name not in names:
                 names.append(name)
     return names
+
+
+def extract_direct_onepassword_references(
+    workflow_env: dict[str, Any], job: dict[str, Any]
+) -> list[dict[str, str]]:
+    env_blocks: list[dict[str, Any]] = []
+    if workflow_env:
+        env_blocks.append(workflow_env)
+    job_env = job.get("env")
+    if isinstance(job_env, dict):
+        env_blocks.append(job_env)
+    for step in job.get("steps") or []:
+        if isinstance(step, dict) and isinstance(step.get("env"), dict):
+            env_blocks.append(step["env"])
+
+    references: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for env in env_blocks:
+        for environment_name, raw in env.items():
+            if not isinstance(raw, str) or "op://" not in raw:
+                continue
+            source_reference = raw.strip()
+            match = DIRECT_OP_REFERENCE_RE.fullmatch(source_reference)
+            if not match:
+                raise ValueError(
+                    "direct workflow env references must be fixed direct 1Password references"
+                )
+            key = (str(environment_name), source_reference)
+            if key in seen:
+                continue
+            seen.add(key)
+            references.append(
+                {
+                    "environment_name": str(environment_name),
+                    "source_reference": source_reference,
+                    "source_vault": match.group("vault"),
+                    "source_item": match.group("item"),
+                    "source_field": match.group("field"),
+                }
+            )
+    return references
 
 
 def workflow_triggers(on_block: Any) -> list[str]:
@@ -466,6 +510,109 @@ def apply_secret_consumer(entry: dict[str, Any], classified: dict[str, Any]) -> 
     return entry
 
 
+def assert_secret_trust_compatible(
+    existing: dict[str, Any], candidate: dict[str, Any], job_id: str
+) -> None:
+    for field in (
+        "target_vault",
+        "consumer",
+        "classification",
+        "authority_status",
+        "migration_action",
+        "source_authority",
+        "data_classification",
+    ):
+        if existing.get(field) != candidate.get(field):
+            raise ValueError(
+                "secret trust-boundary collision for "
+                f"{existing.get('repository')}:{existing.get('workflow')}:"
+                f"{existing.get('github_secret_name')} at job {job_id}: {field}"
+            )
+
+
+def apply_direct_onepassword_mapping(
+    repository: str,
+    workflow: str,
+    job: str,
+    reference: dict[str, Any],
+    evidence: dict[str, Any] | None,
+) -> dict[str, Any]:
+    evidence = evidence or {}
+    _reject_value_bearing_evidence(evidence)
+    matches = [
+        mapping
+        for mapping in evidence.get("direct_onepassword_mappings") or []
+        if isinstance(mapping, dict)
+        and mapping.get("repository") == repository
+        and mapping.get("workflow") == workflow
+        and mapping.get("job") == job
+        and mapping.get("environment_name") == reference.get("environment_name")
+        and mapping.get("source_reference") == reference.get("source_reference")
+    ]
+    if not matches:
+        raise ValueError(
+            "unregistered direct 1Password reference for "
+            f"{repository}:{workflow}#{job}:{reference.get('environment_name')}"
+        )
+    if len(matches) != 1:
+        raise ValueError("multiple direct 1Password mappings matched one reference")
+    mapping = matches[0]
+    mapping_id = str(mapping.get("mapping_id") or "").strip()
+    if not mapping_id:
+        raise ValueError("direct 1Password mapping requires mapping_id")
+    for field in ("source_vault", "source_item", "source_field"):
+        if mapping.get(field) != reference.get(field):
+            raise ValueError(f"direct 1Password mapping source mismatch: {field}")
+    if mapping.get("target_vault") not in {
+        "Ken CI Runtime",
+        "Ken Deploy Nonproduction",
+        "Ken Deploy Production",
+    }:
+        raise ValueError("direct 1Password mapping requires an approved target vault")
+    if not all(mapping.get(field) for field in ("target_item", "target_field")):
+        raise ValueError("direct 1Password mapping requires exact target item and field")
+    if mapping.get("field_type") not in {"concealed", "string"}:
+        raise ValueError("direct 1Password mapping requires an explicit field type")
+    if mapping.get("consumer") not in {
+        "ken-ci-runtime",
+        "ken-deploy-nonproduction",
+        "ken-deploy-production",
+    }:
+        raise ValueError("direct 1Password mapping requires a one-vault runtime consumer")
+    for field in (
+        "source_to_target_steps",
+        "broker_cutover_steps",
+        "live_verification_steps",
+        "retirement_steps",
+    ):
+        _nonempty_steps(mapping.get(field), field)
+    return {
+        "reference_class": "direct-onepassword",
+        "mapping_id": mapping_id,
+        "repository": repository,
+        "workflow": workflow,
+        "job": job,
+        "environment_name": reference["environment_name"],
+        "source_reference": reference["source_reference"],
+        "source_vault": reference["source_vault"],
+        "source_item": reference["source_item"],
+        "source_field": reference["source_field"],
+        "source_readable": False,
+        "authority_status": "existing-direct-reference",
+        "target_vault": mapping["target_vault"],
+        "target_item": mapping["target_item"],
+        "target_field": mapping["target_field"],
+        "field_type": mapping["field_type"],
+        "consumer": mapping["consumer"],
+        "migration_action": "copy-direct-onepassword-reference",
+        "source_to_target_steps": list(mapping["source_to_target_steps"]),
+        "broker_cutover_steps": list(mapping["broker_cutover_steps"]),
+        "live_verification_steps": list(mapping["live_verification_steps"]),
+        "retirement_steps": list(mapping["retirement_steps"]),
+        "rotation_required": False,
+    }
+
+
 def _reject_value_bearing_evidence(value: Any, path: str = "evidence") -> None:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -512,6 +659,36 @@ def apply_secretless_migration(
         raise ValueError("secretless migration requires explicit workflow permissions")
     if action == "oidc-trusted-publisher" and required_permissions.get("id-token") != "write":
         raise ValueError("OIDC trusted publisher requires id-token: write")
+    if action == "oidc-trusted-publisher":
+        publisher = migration.get("trusted_publisher")
+        packaging = migration.get("packaging_contract")
+        if not isinstance(publisher, dict) or publisher != {
+            "project": "derisk-mono",
+            "owner": "Ken-Technology",
+            "repository": "Ken-SRE",
+            "workflow": "python-publish.yml",
+            "environment": "pypi",
+        }:
+            raise ValueError("OIDC trusted publisher requires the exact derisk-mono contract")
+        if (
+            not isinstance(packaging, dict)
+            or packaging.get("source") != "pyproject.toml"
+            or packaging.get("backend") != "hatchling.build"
+            or packaging.get("project") != "derisk-mono"
+            or packaging.get("build_command")
+            != "python -m build --sdist --wheel ."
+            or packaging.get("verification_command")
+            != "python -m twine check dist/*"
+            or "setup.py" not in str(packaging.get("broken_command_to_remove") or "")
+            or packaging.get("task") != "Task 7"
+            or packaging.get("checked_default_sha")
+            != "61622aa518666c30db703acb939cd4ab7f58d128"
+            or packaging.get("pyproject_blob_sha")
+            != "a2a0651ca856601492b914c4cdc92ba1955667a4"
+            or packaging.get("root_setup_py_present") is not False
+            or packaging.get("status") != "task7-change-required"
+        ):
+            raise ValueError("OIDC publication requires the checked packaging contract")
     if action == "pull-based-publisher":
         cross_repo = migration.get("cross_repo_task")
         if (
@@ -558,6 +735,8 @@ def apply_secretless_migration(
     entry["live_verification_steps"] = migration["live_verification_steps"]
     entry["retirement_steps"] = migration["retirement_steps"]
     entry["required_permissions"] = required_permissions
+    entry["trusted_publisher"] = migration.get("trusted_publisher")
+    entry["packaging_contract"] = migration.get("packaging_contract")
     entry["cross_repo_task"] = migration.get("cross_repo_task")
     entry["replacement_required"] = True
     entry["alias_group"] = None
@@ -786,18 +965,36 @@ def apply_unresolved_annotation(
         entry["required_runtime_identity"] = annotation[
             "required_runtime_identity"
         ]
+    if annotation.get("execution_boundary"):
+        boundary = annotation["execution_boundary"]
+        expected = {
+            "workflow": ".github/workflows/deploy.yml",
+            "production_build_job": "build-image",
+            "deployment_job": "deploy",
+            "runner_class": "ken-deploy-production",
+            "build_wrapper": "task7-fixed-production-image-build",
+            "broker_only": True,
+            "ci_validation_only": True,
+            "forbid_ken_ci_production_artifact": True,
+        }
+        if boundary != expected:
+            raise ValueError("invalid fixed production build execution boundary")
+        entry["execution_boundary"] = dict(boundary)
     if annotation.get("data_classification"):
         entry["data_classification"] = annotation["data_classification"]
     return entry
 
 
 def validate_authority_mapping_coverage(
-    evidence: dict[str, Any], entries: list[dict[str, Any]]
+    evidence: dict[str, Any],
+    entries: list[dict[str, Any]],
+    direct_entries: list[dict[str, Any]] | None = None,
 ) -> None:
     mappings = evidence.get("mappings") or []
     annotations = evidence.get("unresolved_annotations") or []
     migrations = evidence.get("secretless_migrations") or []
-    if not mappings and not annotations and not migrations:
+    direct_mappings = evidence.get("direct_onepassword_mappings") or []
+    if not mappings and not annotations and not migrations and not direct_mappings:
         return
     mapping_ids: list[str] = []
     for mapping in mappings:
@@ -855,6 +1052,27 @@ def validate_authority_mapping_coverage(
     unused_migrations = sorted(set(migration_ids) - used_migrations)
     if unused_migrations:
         raise ValueError(f"unused secretless migrations: {', '.join(unused_migrations)}")
+
+    direct_mapping_ids: list[str] = []
+    for mapping in direct_mappings:
+        if not isinstance(mapping, dict):
+            raise ValueError("direct 1Password mapping must be an object")
+        mapping_id = str(mapping.get("mapping_id") or "").strip()
+        if not mapping_id:
+            raise ValueError("direct 1Password mapping requires mapping_id")
+        direct_mapping_ids.append(mapping_id)
+    if len(direct_mapping_ids) != len(set(direct_mapping_ids)):
+        raise ValueError("duplicate direct 1Password mapping_id")
+    used_direct = {
+        str(entry["mapping_id"])
+        for entry in direct_entries or []
+        if entry.get("mapping_id")
+    }
+    unused_direct = sorted(set(direct_mapping_ids) - used_direct)
+    if unused_direct:
+        raise ValueError(
+            f"unused direct 1Password mappings: {', '.join(unused_direct)}"
+        )
 
 
 def load_billing_evidence(path: Path) -> dict[str, Any]:
@@ -1345,6 +1563,24 @@ def classify_job(
 
     if (
         vis == "private"
+        and repo == "ken-frontend"
+        and Path(workflow_path).name in {"deploy.yml", "deploy.yaml"}
+        and job_id == "build-image"
+    ):
+        flags.append("FIXED_PRODUCTION_BUILD_BOUNDARY")
+        return {
+            "classification": "production-build",
+            "target_runner_class": "ken-deploy-production",
+            "target_runs_on": "[self-hosted, linux, x64, ken-deploy, production]",
+            "secret_class": "deploy-production",
+            "production_impact": True,
+            "deploys_or_publishes": True,
+            "combined_build_and_deploy": combined,
+            "flags": flags,
+        }
+
+    if (
+        vis == "private"
         and Path(workflow_path).stem.lower() == "eval-prod"
         and long_lived
     ):
@@ -1522,6 +1758,9 @@ def parse_workflow(path: str, text: str) -> dict[str, Any]:
             uses = uses_from(job)
             secrets = extract_names(SECRET_NAME_RE, effective_job_text)
             variables = extract_names(VAR_NAME_RE, effective_job_text)
+            direct_onepassword_references = extract_direct_onepassword_references(
+                workflow_env, job
+            )
             env_name, env_obj = job_environment(job)
             runs_on = job.get("runs-on")
             jobs.append(
@@ -1537,6 +1776,7 @@ def parse_workflow(path: str, text: str) -> dict[str, Any]:
                     "uses": uses,
                     "secret_names": secrets,
                     "variable_names": variables,
+                    "direct_onepassword_references": direct_onepassword_references,
                     "artifacts": artifact_refs(job_text, uses),
                     "target_hints": target_hints(effective_job_text),
                     "raw_text": effective_job_text,
@@ -1553,6 +1793,11 @@ def parse_workflow(path: str, text: str) -> dict[str, Any]:
         "concurrency": data.get("concurrency"),
         "secret_names": extract_names(SECRET_NAME_RE, wf_text),
         "variable_names": extract_names(VAR_NAME_RE, wf_text),
+        "direct_onepassword_references": [
+            {"job": job["id"], **reference}
+            for job in jobs
+            for reference in job["direct_onepassword_references"]
+        ],
         "jobs": jobs,
     }
 
@@ -1875,7 +2120,10 @@ def _handoff_procedure(entry: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def build_secret_handoff(
-    entries: list[dict[str, Any]], organization: str, generated_at: str
+    entries: list[dict[str, Any]],
+    organization: str,
+    generated_at: str,
+    direct_onepassword_entries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     grouped: dict[tuple[str, str, str | None], list[dict[str, Any]]] = {}
     excluded = {"github-provided": 0, "preserved-existing": 0}
@@ -1904,6 +2152,9 @@ def build_secret_handoff(
         "field_type",
         "rotation_required",
         "required_runtime_identity",
+        "execution_boundary",
+        "trusted_publisher",
+        "packaging_contract",
     )
     for (repository, name, target_vault), members in sorted(
         grouped.items(), key=lambda item: (item[0][0].lower(), item[0][1], item[0][2] or "")
@@ -1929,6 +2180,7 @@ def build_secret_handoff(
         )
         coordinate = f"{repository}|{name}|{target_vault or 'no-1password-target'}"
         row = {
+            "reference_class": "github-secret",
             "coordinate": coordinate,
             "repository": repository,
             "github_secret_name": name,
@@ -1944,6 +2196,9 @@ def build_secret_handoff(
             "handoff_group": first.get("handoff_group") or coordinate,
             "rotation_required": first.get("rotation_required"),
             "required_runtime_identity": first.get("required_runtime_identity"),
+            "execution_boundary": first.get("execution_boundary"),
+            "trusted_publisher": first.get("trusted_publisher"),
+            "packaging_contract": first.get("packaging_contract"),
             "workflows": workflows,
             "consumers": consumers,
             "consuming_jobs": consuming_jobs,
@@ -1963,6 +2218,86 @@ def build_secret_handoff(
             _nonempty_steps(row[field], field)
         rows.append(row)
 
+    direct_rows: list[dict[str, Any]] = []
+    for entry in sorted(
+        direct_onepassword_entries or [],
+        key=lambda row: (
+            row["repository"].lower(),
+            row["workflow"],
+            row["job"],
+            row["environment_name"],
+            row["source_reference"],
+            row["target_vault"],
+        ),
+    ):
+        coordinate = "|".join(
+            (
+                "direct-op",
+                entry["repository"],
+                entry["workflow"],
+                entry["job"],
+                entry["environment_name"],
+                entry["source_reference"],
+                entry["target_vault"],
+            )
+        )
+        row = {
+            "reference_class": "direct-onepassword",
+            "coordinate": coordinate,
+            "repository": entry["repository"],
+            "workflow": entry["workflow"],
+            "job": entry["job"],
+            "environment_name": entry["environment_name"],
+            "source_reference": entry["source_reference"],
+            "source_vault": entry["source_vault"],
+            "source_item": entry["source_item"],
+            "source_field": entry["source_field"],
+            "target_vault": entry["target_vault"],
+            "target_item": entry["target_item"],
+            "target_field": entry["target_field"],
+            "field_type": entry["field_type"],
+            "authority_status": entry["authority_status"],
+            "migration_action": entry["migration_action"],
+            "consumer": entry["consumer"],
+            "handoff_group": (
+                f"direct-op/{entry['repository']}/{Path(entry['workflow']).stem}/"
+                f"{entry['job']}"
+            ),
+            "rotation_required": False,
+            "source_to_target_steps": _nonempty_steps(
+                entry["source_to_target_steps"], "source_to_target_steps"
+            ),
+            "broker_or_workflow_cutover_steps": _nonempty_steps(
+                entry["broker_cutover_steps"], "broker_cutover_steps"
+            ),
+            "live_verification_steps": _nonempty_steps(
+                entry["live_verification_steps"], "live_verification_steps"
+            ),
+            "github_deletion_steps": _nonempty_steps(
+                entry["retirement_steps"], "retirement_steps"
+            ),
+            "revocation_steps": [
+                f"Retain {entry['source_reference']} until its owner confirms no other consumer remains; no source-vault access is granted to {entry['consumer']}."
+            ],
+            "user_only_actions": [
+                f"Copy {entry['source_reference']} into the exact target field through task6-temporary-migration-writer without placing a value in chat."
+            ],
+        }
+        for field in (
+            "source_to_target_steps",
+            "broker_or_workflow_cutover_steps",
+            "live_verification_steps",
+            "github_deletion_steps",
+            "revocation_steps",
+            "user_only_actions",
+        ):
+            _nonempty_steps(row[field], field)
+        direct_rows.append(row)
+    rows.extend(direct_rows)
+    coordinates = [row["coordinate"] for row in rows]
+    if len(coordinates) != len(set(coordinates)):
+        raise ValueError("duplicate combined handoff coordinate")
+
     def counts(field: str) -> dict[str, int]:
         output: dict[str, int] = {}
         for row in rows:
@@ -1971,12 +2306,12 @@ def build_secret_handoff(
         return dict(sorted(output.items()))
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "organization": organization,
         "generated_at": generated_at,
         "policy": (
-            "One value-free row per repository, GitHub field name, and target trust-domain coordinate. "
-            "GitHub deletion and predecessor revocation are delayed until live verification passes."
+            "One value-free row per GitHub-field trust coordinate plus one row per direct 1Password repository, workflow, job, environment name, source reference, and target trust-domain coordinate. "
+            "GitHub deletion or direct-reference retirement and predecessor revocation are delayed until live verification passes."
         ),
         "runtime_access": {
             "runtime_accounts": [
@@ -2011,6 +2346,8 @@ def build_secret_handoff(
         },
         "counts": {
             "rows": len(rows),
+            "github_field_rows": len(rows) - len(direct_rows),
+            "direct_onepassword_rows": len(direct_rows),
             "excluded_no_action_references": excluded,
             "by_authority_status": counts("authority_status"),
             "by_target_vault": counts("target_vault"),
@@ -2147,6 +2484,10 @@ def generate_from_inputs(
     repositories: list[dict[str, Any]] = []
     secret_entries: list[dict[str, Any]] = []
     secret_entries_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    direct_onepassword_entries: list[dict[str, Any]] = []
+    direct_onepassword_coordinates: set[
+        tuple[str, str, str, str, str, str]
+    ] = set()
 
     repository_inputs = {repo["name"]: repo for repo in data["repositories"]}
     for repo_info in repos_meta:
@@ -2229,6 +2570,33 @@ def generate_from_inputs(
                     job["secret_names"],
                     job["variable_names"],
                 )
+                job_direct_entries: list[dict[str, Any]] = []
+                for reference in job["direct_onepassword_references"]:
+                    direct_entry = apply_direct_onepassword_mapping(
+                        name,
+                        rel,
+                        job["id"],
+                        reference,
+                        authority_evidence,
+                    )
+                    if direct_entry["consumer"] != classified["target_runner_class"]:
+                        raise ValueError(
+                            "direct 1Password trust-boundary collision for "
+                            f"{name}:{rel}#{job['id']}:{reference['environment_name']}"
+                        )
+                    coordinate = (
+                        name,
+                        rel,
+                        job["id"],
+                        reference["environment_name"],
+                        reference["source_reference"],
+                        direct_entry["target_vault"],
+                    )
+                    if coordinate in direct_onepassword_coordinates:
+                        raise ValueError("duplicate direct 1Password reference coordinate")
+                    direct_onepassword_coordinates.add(coordinate)
+                    direct_onepassword_entries.append(direct_entry)
+                    job_direct_entries.append(direct_entry)
                 hint_list = list(job["target_hints"])
                 for extra in (
                     target["host_secret_names"] + target["host_variable_names"]
@@ -2255,6 +2623,22 @@ def generate_from_inputs(
                         "uses": job["uses"],
                         "secret_names": job["secret_names"],
                         "variable_names": job["variable_names"],
+                        "direct_onepassword_references": [
+                            {
+                                "environment_name": entry["environment_name"],
+                                "source_reference": entry["source_reference"],
+                                "source_vault": entry["source_vault"],
+                                "source_item": entry["source_item"],
+                                "source_field": entry["source_field"],
+                                "target_vault": entry["target_vault"],
+                                "target_item": entry["target_item"],
+                                "target_field": entry["target_field"],
+                                "field_type": entry["field_type"],
+                                "consumer": entry["consumer"],
+                                "migration_action": entry["migration_action"],
+                            }
+                            for entry in job_direct_entries
+                        ],
                         "artifacts": job["artifacts"],
                         "target_hints": hint_list,
                         "target": target,
@@ -2273,17 +2657,27 @@ def generate_from_inputs(
                 for secret_name in job["secret_names"]:
                     key = (name, rel, secret_name)
                     existing = secret_entries_by_key.get(key)
-                    if existing is not None:
-                        if job["id"] not in existing["consuming_jobs"]:
-                            existing["consuming_jobs"].append(job["id"])
-                        continue
-                    entry = apply_secret_consumer(
+                    candidate = apply_secret_consumer(
                         secret_authority(secret_name, name, listed_secrets, rel),
                         classified,
                     )
-                    entry = apply_secretless_migration(entry, authority_evidence)
-                    entry = apply_authority_evidence(entry, authority_evidence)
-                    entry = apply_unresolved_annotation(entry, authority_evidence)
+                    candidate = apply_secretless_migration(
+                        candidate, authority_evidence
+                    )
+                    candidate = apply_authority_evidence(
+                        candidate, authority_evidence
+                    )
+                    candidate = apply_unresolved_annotation(
+                        candidate, authority_evidence
+                    )
+                    if existing is not None:
+                        assert_secret_trust_compatible(
+                            existing, candidate, job["id"]
+                        )
+                        if job["id"] not in existing["consuming_jobs"]:
+                            existing["consuming_jobs"].append(job["id"])
+                        continue
+                    entry = candidate
                     entry["consuming_jobs"] = [job["id"]]
                     secret_entries_by_key[key] = entry
                     secret_entries.append(entry)
@@ -2296,6 +2690,9 @@ def generate_from_inputs(
                     "concurrency": parsed["concurrency"],
                     "secret_names": parsed["secret_names"],
                     "variable_names": parsed["variable_names"],
+                    "direct_onepassword_references": parsed[
+                        "direct_onepassword_references"
+                    ],
                     "jobs": jobs_out,
                 }
             )
@@ -2314,7 +2711,9 @@ def generate_from_inputs(
         )
 
     repositories.sort(key=lambda item: item["name"].lower())
-    validate_authority_mapping_coverage(authority_evidence, secret_entries)
+    validate_authority_mapping_coverage(
+        authority_evidence, secret_entries, direct_onepassword_entries
+    )
     private = [r for r in repositories if r["visibility"] == "private"]
     public = [r for r in repositories if r["visibility"] == "public"]
 
@@ -2375,7 +2774,7 @@ def generate_from_inputs(
     }
 
     secrets_doc = {
-        "schema_version": 2,
+        "schema_version": 3,
         "organization": org.get("login") or "Ken-Technology",
         "generated_at": generated_at,
         "policy": (
@@ -2388,11 +2787,13 @@ def generate_from_inputs(
         "onepassword_visible_vaults": data["onepassword_vaults"],
         "authority_evidence_id": authority_evidence.get("evidence_id"),
         "entries": secret_entries,
+        "direct_onepassword_entries": direct_onepassword_entries,
     }
     handoff_doc = build_secret_handoff(
         secret_entries,
         str(org.get("login") or "Ken-Technology"),
         generated_at,
+        direct_onepassword_entries,
     )
 
     manifest = build_input_manifest(inputs, snapshot_time)
@@ -2407,6 +2808,7 @@ def generate_from_inputs(
         "jobs": sum(r["job_count"] for r in repositories),
         "secrets": len(secret_entries),
         "handoff_rows": len(handoff_doc["rows"]),
+        "direct_onepassword_references": len(direct_onepassword_entries),
         "input_hash": manifest["input_hash"],
         "output_dir": str(output_dir),
     }

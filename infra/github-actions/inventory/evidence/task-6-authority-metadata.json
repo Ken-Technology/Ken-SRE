@@ -1,4 +1,325 @@
 {
+  "direct_onepassword_mappings": [
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://Development/vexa-mcp-auth-deploy-ssh/host env reference in ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_HOST with the fixed production broker field Ken Deploy Production/ken-vexa-mcp-auth/SERVER_HOST under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "SERVER_HOST",
+      "field_type": "string",
+      "job": "deploy",
+      "live_verification_steps": [
+        "Run ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_HOST and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-vexa-mcp-auth-github-workflows-deploy-yml-deploy-server-host",
+      "repository": "ken-vexa-mcp-auth",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://Development/vexa-mcp-auth-deploy-ssh/host workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "host",
+      "source_item": "vexa-mcp-auth-deploy-ssh",
+      "source_reference": "op://Development/vexa-mcp-auth-deploy-ssh/host",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://Development/vexa-mcp-auth-deploy-ssh/host directly into Ken Deploy Production/ken-vexa-mcp-auth/SERVER_HOST without displaying the value."
+      ],
+      "source_vault": "Development",
+      "target_field": "SERVER_HOST",
+      "target_item": "ken-vexa-mcp-auth",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/deploy.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://Development/vexa-mcp-auth-deploy-ssh/port env reference in ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_PORT with the fixed production broker field Ken Deploy Production/ken-vexa-mcp-auth/SERVER_PORT under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "SERVER_PORT",
+      "field_type": "string",
+      "job": "deploy",
+      "live_verification_steps": [
+        "Run ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_PORT and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-vexa-mcp-auth-github-workflows-deploy-yml-deploy-server-port",
+      "repository": "ken-vexa-mcp-auth",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://Development/vexa-mcp-auth-deploy-ssh/port workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "port",
+      "source_item": "vexa-mcp-auth-deploy-ssh",
+      "source_reference": "op://Development/vexa-mcp-auth-deploy-ssh/port",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://Development/vexa-mcp-auth-deploy-ssh/port directly into Ken Deploy Production/ken-vexa-mcp-auth/SERVER_PORT without displaying the value."
+      ],
+      "source_vault": "Development",
+      "target_field": "SERVER_PORT",
+      "target_item": "ken-vexa-mcp-auth",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/deploy.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://Development/vexa-mcp-auth-deploy-ssh/private_key env reference in ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_SSH_KEY with the fixed production broker field Ken Deploy Production/ken-vexa-mcp-auth/SERVER_SSH_KEY under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "SERVER_SSH_KEY",
+      "field_type": "concealed",
+      "job": "deploy",
+      "live_verification_steps": [
+        "Run ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_SSH_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-vexa-mcp-auth-github-workflows-deploy-yml-deploy-server-ssh-key",
+      "repository": "ken-vexa-mcp-auth",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://Development/vexa-mcp-auth-deploy-ssh/private_key workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "private_key",
+      "source_item": "vexa-mcp-auth-deploy-ssh",
+      "source_reference": "op://Development/vexa-mcp-auth-deploy-ssh/private_key",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://Development/vexa-mcp-auth-deploy-ssh/private_key directly into Ken Deploy Production/ken-vexa-mcp-auth/SERVER_SSH_KEY without displaying the value."
+      ],
+      "source_vault": "Development",
+      "target_field": "SERVER_SSH_KEY",
+      "target_item": "ken-vexa-mcp-auth",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/deploy.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://ken-website/beehiiv/credential env reference in ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_API_KEY with the fixed production broker field Ken Deploy Production/ken-website/BEEHIIV_API_KEY under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "BEEHIIV_API_KEY",
+      "field_type": "concealed",
+      "job": "sync",
+      "live_verification_steps": [
+        "Run ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_API_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-website-github-workflows-beehiiv-sync-yml-sync-beehiiv-api-key",
+      "repository": "ken-website",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://ken-website/beehiiv/credential workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "credential",
+      "source_item": "beehiiv",
+      "source_reference": "op://ken-website/beehiiv/credential",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://ken-website/beehiiv/credential directly into Ken Deploy Production/ken-website/BEEHIIV_API_KEY without displaying the value."
+      ],
+      "source_vault": "ken-website",
+      "target_field": "BEEHIIV_API_KEY",
+      "target_item": "ken-website",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/beehiiv-sync.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://ken-website/beehiiv/publication_id env reference in ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_PUBLICATION_ID with the fixed production broker field Ken Deploy Production/ken-website/BEEHIIV_PUBLICATION_ID under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "BEEHIIV_PUBLICATION_ID",
+      "field_type": "string",
+      "job": "sync",
+      "live_verification_steps": [
+        "Run ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_PUBLICATION_ID and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-website-github-workflows-beehiiv-sync-yml-sync-beehiiv-publication-id",
+      "repository": "ken-website",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://ken-website/beehiiv/publication_id workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "publication_id",
+      "source_item": "beehiiv",
+      "source_reference": "op://ken-website/beehiiv/publication_id",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://ken-website/beehiiv/publication_id directly into Ken Deploy Production/ken-website/BEEHIIV_PUBLICATION_ID without displaying the value."
+      ],
+      "source_vault": "ken-website",
+      "target_field": "BEEHIIV_PUBLICATION_ID",
+      "target_item": "ken-website",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/beehiiv-sync.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://ken-website/blog-sync-deploy/private_key env reference in ken-website:.github/workflows/beehiiv-sync.yml#sync:DEPLOY_SSH_KEY with the fixed production broker field Ken Deploy Production/ken-website/DEPLOY_SSH_KEY under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "DEPLOY_SSH_KEY",
+      "field_type": "concealed",
+      "job": "sync",
+      "live_verification_steps": [
+        "Run ken-website:.github/workflows/beehiiv-sync.yml#sync:DEPLOY_SSH_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-website-github-workflows-beehiiv-sync-yml-sync-deploy-ssh-key",
+      "repository": "ken-website",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://ken-website/blog-sync-deploy/private_key workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "private_key",
+      "source_item": "blog-sync-deploy",
+      "source_reference": "op://ken-website/blog-sync-deploy/private_key",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://ken-website/blog-sync-deploy/private_key directly into Ken Deploy Production/ken-website/DEPLOY_SSH_KEY without displaying the value."
+      ],
+      "source_vault": "ken-website",
+      "target_field": "DEPLOY_SSH_KEY",
+      "target_item": "ken-website",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/beehiiv-sync.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://ken-website/posthog/project_token env reference in ken-website:.github/workflows/deploy.yml#deploy:NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN with the fixed production broker field Ken Deploy Production/ken-website/NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+      "field_type": "string",
+      "job": "deploy",
+      "live_verification_steps": [
+        "Run ken-website:.github/workflows/deploy.yml#deploy:NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-next-public-posthog-project-token",
+      "repository": "ken-website",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://ken-website/posthog/project_token workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "project_token",
+      "source_item": "posthog",
+      "source_reference": "op://ken-website/posthog/project_token",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://ken-website/posthog/project_token directly into Ken Deploy Production/ken-website/NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN without displaying the value."
+      ],
+      "source_vault": "ken-website",
+      "target_field": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+      "target_item": "ken-website",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/deploy.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://ken-website/posthog/personal_api_key env reference in ken-website:.github/workflows/deploy.yml#deploy:POSTHOG_PERSONAL_API_KEY with the fixed production broker field Ken Deploy Production/ken-website/POSTHOG_PERSONAL_API_KEY under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "POSTHOG_PERSONAL_API_KEY",
+      "field_type": "concealed",
+      "job": "deploy",
+      "live_verification_steps": [
+        "Run ken-website:.github/workflows/deploy.yml#deploy:POSTHOG_PERSONAL_API_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-posthog-personal-api-key",
+      "repository": "ken-website",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://ken-website/posthog/personal_api_key workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "personal_api_key",
+      "source_item": "posthog",
+      "source_reference": "op://ken-website/posthog/personal_api_key",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://ken-website/posthog/personal_api_key directly into Ken Deploy Production/ken-website/POSTHOG_PERSONAL_API_KEY without displaying the value."
+      ],
+      "source_vault": "ken-website",
+      "target_field": "POSTHOG_PERSONAL_API_KEY",
+      "target_item": "ken-website",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/deploy.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://ken-website/deploy-ssh/host env reference in ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_HOST with the fixed production broker field Ken Deploy Production/ken-website/WEBSITE_HOST under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "WEBSITE_HOST",
+      "field_type": "string",
+      "job": "deploy",
+      "live_verification_steps": [
+        "Run ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_HOST and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-website-host",
+      "repository": "ken-website",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://ken-website/deploy-ssh/host workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "host",
+      "source_item": "deploy-ssh",
+      "source_reference": "op://ken-website/deploy-ssh/host",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://ken-website/deploy-ssh/host directly into Ken Deploy Production/ken-website/WEBSITE_HOST without displaying the value."
+      ],
+      "source_vault": "ken-website",
+      "target_field": "WEBSITE_HOST",
+      "target_item": "ken-website",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/deploy.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://ken-website/deploy-ssh/port env reference in ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_PORT with the fixed production broker field Ken Deploy Production/ken-website/WEBSITE_PORT under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "WEBSITE_PORT",
+      "field_type": "string",
+      "job": "deploy",
+      "live_verification_steps": [
+        "Run ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_PORT and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-website-port",
+      "repository": "ken-website",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://ken-website/deploy-ssh/port workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "port",
+      "source_item": "deploy-ssh",
+      "source_reference": "op://ken-website/deploy-ssh/port",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://ken-website/deploy-ssh/port directly into Ken Deploy Production/ken-website/WEBSITE_PORT without displaying the value."
+      ],
+      "source_vault": "ken-website",
+      "target_field": "WEBSITE_PORT",
+      "target_item": "ken-website",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/deploy.yml"
+    },
+    {
+      "broker_cutover_steps": [
+        "Replace the direct op://ken-website/deploy-ssh/private_key env reference in ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_SSH_KEY with the fixed production broker field Ken Deploy Production/ken-website/WEBSITE_SSH_KEY under ken-deploy-production.",
+        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+      ],
+      "consumer": "ken-deploy-production",
+      "environment_name": "WEBSITE_SSH_KEY",
+      "field_type": "concealed",
+      "job": "deploy",
+      "live_verification_steps": [
+        "Run ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_SSH_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+      ],
+      "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-website-ssh-key",
+      "repository": "ken-website",
+      "retirement_steps": [
+        "Only after live verification, remove the direct op://ken-website/deploy-ssh/private_key workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+      ],
+      "source_field": "private_key",
+      "source_item": "deploy-ssh",
+      "source_reference": "op://ken-website/deploy-ssh/private_key",
+      "source_to_target_steps": [
+        "Use task6-temporary-migration-writer to copy op://ken-website/deploy-ssh/private_key directly into Ken Deploy Production/ken-website/WEBSITE_SSH_KEY without displaying the value."
+      ],
+      "source_vault": "ken-website",
+      "target_field": "WEBSITE_SSH_KEY",
+      "target_item": "ken-website",
+      "target_vault": "Ken Deploy Production",
+      "workflow": ".github/workflows/deploy.yml"
+    }
+  ],
   "evidence_id": "task6-authorities-2026-08-19",
   "mappings": [
     {
@@ -2525,16 +2846,31 @@
     },
     {
       "downstream_update_steps": [
-        "Keep the publisher on a GitHub-hosted runner, set top-level workflow permissions to contents: read and id-token: write, and configure pypa/gh-action-pypi-publish without a password input or PYPI_API_TOKEN reference."
+        "Task 7 must remove the broken root python setup.py sdist bdist_wheel path, install build and twine with python -m pip install --upgrade build twine, build the checked root pyproject.toml with python -m build --sdist --wheel ., and pass python -m twine check dist/* before publication.",
+        "Separate the artifact build from the publish job, keep both on GitHub-hosted runners, set top-level workflow permissions to contents: read and id-token: write, ensure the build job overrides permissions to contents: read only, bind the publish job to environment pypi, and configure pypa/gh-action-pypi-publish without a password input or PYPI_API_TOKEN reference."
       ],
       "github_secret_name": "PYPI_API_TOKEN",
       "live_verification_steps": [
-        "Publish one intended Ken-SRE release through Trusted Publishing and verify the expected PyPI project version and provenance before removing the old path."
+        "Publish one intended derisk-mono release through the exact PyPI Trusted Publisher and verify the expected project version plus provenance before removing the old path."
       ],
       "migration_action": "oidc-trusted-publisher",
       "migration_id": "ken-sre-pypi-trusted-publisher",
+      "packaging_contract": {
+        "backend": "hatchling.build",
+        "broken_command_to_remove": "python setup.py sdist bdist_wheel",
+        "build_command": "python -m build --sdist --wheel .",
+        "checked_default_sha": "61622aa518666c30db703acb939cd4ab7f58d128",
+        "install_command": "python -m pip install --upgrade build twine",
+        "project": "derisk-mono",
+        "pyproject_blob_sha": "a2a0651ca856601492b914c4cdc92ba1955667a4",
+        "root_setup_py_present": false,
+        "source": "pyproject.toml",
+        "status": "task7-change-required",
+        "task": "Task 7",
+        "verification_command": "python -m twine check dist/*"
+      },
       "provider_setup_steps": [
-        "In the PyPI Ken-SRE project, add a Trusted Publisher for owner Ken-Technology, repository Ken-SRE, workflow python-publish.yml, and the exact GitHub environment if the workflow names one."
+        "In the PyPI derisk-mono project, add a Trusted Publisher for owner Ken-Technology, repository Ken-SRE, workflow python-publish.yml, and environment pypi."
       ],
       "repository": "Ken-SRE",
       "required_permissions": {
@@ -2548,6 +2884,13 @@
       "target_item": null,
       "target_runner_class": "public-github-hosted",
       "target_vault": null,
+      "trusted_publisher": {
+        "environment": "pypi",
+        "owner": "Ken-Technology",
+        "project": "derisk-mono",
+        "repository": "Ken-SRE",
+        "workflow": "python-publish.yml"
+      },
       "workflow": ".github/workflows/python-publish.yml"
     }
   ],
@@ -5156,14 +5499,26 @@
       "authority_owner": "ken-frontend runtime owner",
       "data_classification": "credential",
       "downstream_update_steps": [
-        "Create a new authority dedicated to ken-frontend/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY in Ken Deploy Production (frontend/server-actions-encryption); do not reuse an authority from another trust boundary.",
-        "Populate the exact target 1Password field through the temporary migration writer, then cut the exact workflow consumers over to the local broker.",
-        "Verify the live consumer, then delete the GitHub secret field and revoke the predecessor authority after the rollback window."
+        "Create a new production-only server-actions encryption authority and populate only Ken Deploy Production/ken-frontend/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY through the temporary migration writer.",
+        "Task 7 must run build-image on ken-deploy-production through task7-fixed-production-image-build; the wrapper obtains the key from the local production broker and passes it only to the fixed production image build.",
+        "The ken-ci pools may run no-secret validation only and must never build or publish the production image artifact.",
+        "Verify the production image build and both production replicas before deleting the GitHub field and revoking the predecessor authority after the rollback window."
       ],
+      "execution_boundary": {
+        "broker_only": true,
+        "build_wrapper": "task7-fixed-production-image-build",
+        "ci_validation_only": true,
+        "deployment_job": "deploy",
+        "forbid_ken_ci_production_artifact": true,
+        "production_build_job": "build-image",
+        "runner_class": "ken-deploy-production",
+        "workflow": ".github/workflows/deploy.yml"
+      },
       "github_secret_name": "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
       "handoff_group": "frontend/server-actions-encryption",
       "provider_rotation_steps": null,
       "repository": "ken-frontend",
+      "required_runtime_identity": "ken-deploy-production",
       "resolution_class": "independent-trust-authority",
       "target_vault": "Ken Deploy Production",
       "unresolved_reason": "This application encryption key must remain stable across replicas; no readable runtime authority was found."

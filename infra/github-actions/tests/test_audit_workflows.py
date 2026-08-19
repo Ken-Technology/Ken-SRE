@@ -124,6 +124,256 @@ class OnePasswordEnvMetadataTests(unittest.TestCase):
         self.assertNotIn(canary, str(caught.exception))
 
 
+class DirectOnePasswordReferenceTests(unittest.TestCase):
+    EXPECTED_CHECKED_REFERENCES = {
+        (
+            "ken-vexa-mcp-auth",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "SERVER_HOST",
+            "op://Development/vexa-mcp-auth-deploy-ssh/host",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-vexa-mcp-auth",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "SERVER_PORT",
+            "op://Development/vexa-mcp-auth-deploy-ssh/port",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-vexa-mcp-auth",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "SERVER_SSH_KEY",
+            "op://Development/vexa-mcp-auth-deploy-ssh/private_key",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-website",
+            ".github/workflows/beehiiv-sync.yml",
+            "sync",
+            "DEPLOY_SSH_KEY",
+            "op://ken-website/blog-sync-deploy/private_key",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-website",
+            ".github/workflows/beehiiv-sync.yml",
+            "sync",
+            "BEEHIIV_API_KEY",
+            "op://ken-website/beehiiv/credential",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-website",
+            ".github/workflows/beehiiv-sync.yml",
+            "sync",
+            "BEEHIIV_PUBLICATION_ID",
+            "op://ken-website/beehiiv/publication_id",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-website",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+            "op://ken-website/posthog/project_token",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-website",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "POSTHOG_PERSONAL_API_KEY",
+            "op://ken-website/posthog/personal_api_key",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-website",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "WEBSITE_HOST",
+            "op://ken-website/deploy-ssh/host",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-website",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "WEBSITE_PORT",
+            "op://ken-website/deploy-ssh/port",
+            "Ken Deploy Production",
+        ),
+        (
+            "ken-website",
+            ".github/workflows/deploy.yml",
+            "deploy",
+            "WEBSITE_SSH_KEY",
+            "op://ken-website/deploy-ssh/private_key",
+            "Ken Deploy Production",
+        ),
+    }
+
+    def test_parser_emits_only_active_fixed_env_references(self):
+        workflow = """
+on: push
+env:
+  GLOBAL_HOST: op://Development/global/host
+# COMMENTED_REF: op://Development/commented/credential
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      JOB_PORT: op://Development/service/port
+    steps:
+      - env:
+          STEP_KEY: op://Development/service/private_key
+        run: deploy
+  # inactive:
+  #   runs-on: ubuntu-latest
+  #   env:
+  #     INACTIVE_KEY: op://Development/inactive/credential
+"""
+        parsed = aw.parse_workflow(".github/workflows/deploy.yml", workflow)
+        refs = parsed["jobs"][0]["direct_onepassword_references"]
+        self.assertEqual(
+            refs,
+            [
+                {
+                    "environment_name": "GLOBAL_HOST",
+                    "source_reference": "op://Development/global/host",
+                    "source_vault": "Development",
+                    "source_item": "global",
+                    "source_field": "host",
+                },
+                {
+                    "environment_name": "JOB_PORT",
+                    "source_reference": "op://Development/service/port",
+                    "source_vault": "Development",
+                    "source_item": "service",
+                    "source_field": "port",
+                },
+                {
+                    "environment_name": "STEP_KEY",
+                    "source_reference": "op://Development/service/private_key",
+                    "source_vault": "Development",
+                    "source_item": "service",
+                    "source_field": "private_key",
+                },
+            ],
+        )
+        self.assertNotIn("commented", str(refs).lower())
+        self.assertNotIn("inactive", str(refs).lower())
+
+    def test_parser_rejects_dynamic_or_malformed_direct_reference(self):
+        workflow = """
+on: push
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      BAD: op://Development/${{ vars.ITEM }}/credential
+"""
+        with self.assertRaisesRegex(ValueError, "fixed direct 1Password"):
+            aw.parse_workflow(".github/workflows/deploy.yml", workflow)
+
+    def test_committed_checked_inventory_has_exact_direct_reference_handoff(self):
+        import yaml
+
+        inventory = ROOT / "infra/github-actions/inventory"
+        repositories = yaml.safe_load((inventory / "repositories.yaml").read_text())
+        secrets = yaml.safe_load((inventory / "secrets.yaml").read_text())
+        handoff = yaml.safe_load((inventory / "secret-handoff.yaml").read_text())
+
+        parsed = {
+            (
+                repo["name"],
+                workflow["path"],
+                job["id"],
+                ref["environment_name"],
+                ref["source_reference"],
+                ref["target_vault"],
+            )
+            for repo in repositories["repositories"]
+            for workflow in repo["workflows"]
+            for job in workflow["jobs"]
+            for ref in job.get("direct_onepassword_references") or []
+        }
+        direct_entries = {
+            (
+                row["repository"],
+                row["workflow"],
+                row["job"],
+                row["environment_name"],
+                row["source_reference"],
+                row["target_vault"],
+            )
+            for row in secrets["direct_onepassword_entries"]
+        }
+        direct_handoff = {
+            (
+                row["repository"],
+                row["workflow"],
+                row["job"],
+                row["environment_name"],
+                row["source_reference"],
+                row["target_vault"],
+            )
+            for row in handoff["rows"]
+            if row.get("reference_class") == "direct-onepassword"
+        }
+        self.assertEqual(len(secrets["entries"]), 343)
+        self.assertEqual(len(secrets["direct_onepassword_entries"]), 11)
+        self.assertEqual(parsed, self.EXPECTED_CHECKED_REFERENCES)
+        self.assertEqual(direct_entries, parsed)
+        self.assertEqual(direct_handoff, parsed)
+        self.assertEqual(handoff["counts"]["direct_onepassword_rows"], 11)
+
+    def test_unregistered_direct_reference_fails_closed(self):
+        reference = {
+            "environment_name": "UNKNOWN",
+            "source_reference": "op://Development/unknown/credential",
+            "source_vault": "Development",
+            "source_item": "unknown",
+            "source_field": "credential",
+        }
+        with self.assertRaisesRegex(ValueError, "unregistered direct 1Password"):
+            aw.apply_direct_onepassword_mapping(
+                "ken-website",
+                ".github/workflows/deploy.yml",
+                "deploy",
+                reference,
+                {"direct_onepassword_mappings": []},
+            )
+
+    def test_authority_builder_registers_exact_checked_direct_references(self):
+        import build_task6_authority_evidence as builder
+
+        mappings = builder.build_evidence()["direct_onepassword_mappings"]
+        actual = {
+            (
+                row["repository"],
+                row["workflow"],
+                row["job"],
+                row["environment_name"],
+                row["source_reference"],
+                row["target_vault"],
+            )
+            for row in mappings
+        }
+        self.assertEqual(actual, self.EXPECTED_CHECKED_REFERENCES)
+        self.assertEqual(len(mappings), 11)
+        for row in mappings:
+            self.assertEqual(row["consumer"], "ken-deploy-production")
+            self.assertIn(row["field_type"], {"concealed", "string"})
+            self.assertTrue(row["source_to_target_steps"])
+            self.assertTrue(row["broker_cutover_steps"])
+            self.assertTrue(row["live_verification_steps"])
+            self.assertTrue(row["retirement_steps"])
+
+
 class ConnectionMetadataTests(unittest.TestCase):
     def test_emits_only_mysql_component_names_and_mongo_presence(self):
         import extract_connection_metadata as extractor
@@ -327,6 +577,46 @@ class ScheduledSecretRoutingTests(unittest.TestCase):
         self.assertEqual(result["target_runner_class"], "ken-deploy-production")
         self.assertTrue(result["production_impact"])
         self.assertFalse(result["deploys_or_publishes"])
+
+    def test_frontend_production_image_build_is_pinned_to_deploy_boundary(self):
+        result = classify(
+            repo="ken-frontend",
+            workflow_path=".github/workflows/deploy.yml",
+            job_id="build-image",
+            env_name="",
+            runs_on="blacksmith-4vcpu-ubuntu-2404",
+            secrets=[
+                "GITHUB_TOKEN",
+                "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+            ],
+            uses=["docker/build-push-action@v6"],
+            text="docker/build-push-action push ghcr production image",
+        )
+        self.assertEqual(result["classification"], "production-build")
+        self.assertEqual(result["target_runner_class"], "ken-deploy-production")
+        self.assertEqual(result["secret_class"], "deploy-production")
+        self.assertTrue(result["production_impact"])
+        self.assertIn("FIXED_PRODUCTION_BUILD_BOUNDARY", result["flags"])
+
+    def test_frontend_production_key_cannot_join_ci_coordinate(self):
+        existing = {
+            "repository": "ken-frontend",
+            "workflow": ".github/workflows/deploy.yml",
+            "github_secret_name": "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+            "target_vault": "Ken Deploy Production",
+            "consumer": "ken-deploy-production",
+            "classification": "deployment-production",
+        }
+        candidate = dict(existing)
+        candidate.update(
+            {
+                "target_vault": "Ken CI Runtime",
+                "consumer": "ken-ci-heavy",
+                "classification": "ci-nonproduction",
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "trust-boundary collision"):
+            aw.assert_secret_trust_compatible(existing, candidate, "build-image")
 
     def test_op_bootstrap_token_never_targets_ken_ci(self):
         result = classify(
@@ -2102,6 +2392,48 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         self.assertIn("target 1Password", rendered)
         self.assertNotIn("1Password-to-GitHub", rendered)
 
+    def test_frontend_encryption_authority_has_fixed_production_build_boundary(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        annotation = next(
+            row
+            for row in evidence["unresolved_annotations"]
+            if row["repository"] == "ken-frontend"
+            and row["github_secret_name"]
+            == "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
+        )
+        self.assertEqual(
+            annotation["execution_boundary"],
+            {
+                "workflow": ".github/workflows/deploy.yml",
+                "production_build_job": "build-image",
+                "deployment_job": "deploy",
+                "runner_class": "ken-deploy-production",
+                "build_wrapper": "task7-fixed-production-image-build",
+                "broker_only": True,
+                "ci_validation_only": True,
+                "forbid_ken_ci_production_artifact": True,
+            },
+        )
+
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+                "ken-frontend",
+                self.empty_scopes,
+                ".github/workflows/deploy.yml",
+            ),
+            self.production,
+        )
+        annotated = aw.apply_unresolved_annotation(entry, evidence)
+        self.assertEqual(
+            annotated["execution_boundary"], annotation["execution_boundary"]
+        )
+        self.assertEqual(
+            annotated["required_runtime_identity"], "ken-deploy-production"
+        )
+
     def test_hermes_keeps_dedicated_deploy_identity_unresolved(self):
         import build_task6_authority_evidence as builder
 
@@ -2169,6 +2501,42 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
         self.assertTrue(pypi["downstream_update_steps"])
         self.assertTrue(pypi["live_verification_steps"])
         self.assertTrue(pypi["retirement_steps"])
+        self.assertEqual(
+            pypi["trusted_publisher"],
+            {
+                "project": "derisk-mono",
+                "owner": "Ken-Technology",
+                "repository": "Ken-SRE",
+                "workflow": "python-publish.yml",
+                "environment": "pypi",
+            },
+        )
+        self.assertEqual(
+            pypi["packaging_contract"],
+            {
+                "source": "pyproject.toml",
+                "backend": "hatchling.build",
+                "project": "derisk-mono",
+                "install_command": "python -m pip install --upgrade build twine",
+                "build_command": "python -m build --sdist --wheel .",
+                "verification_command": "python -m twine check dist/*",
+                "broken_command_to_remove": "python setup.py sdist bdist_wheel",
+                "task": "Task 7",
+                "checked_default_sha": "61622aa518666c30db703acb939cd4ab7f58d128",
+                "pyproject_blob_sha": "a2a0651ca856601492b914c4cdc92ba1955667a4",
+                "root_setup_py_present": False,
+                "status": "task7-change-required",
+            },
+        )
+        self.assertIn("environment pypi", " ".join(pypi["provider_setup_steps"]))
+        self.assertIn(
+            "python -m build --sdist --wheel .",
+            " ".join(pypi["downstream_update_steps"]),
+        )
+        self.assertIn(
+            "build job overrides permissions to contents: read only",
+            " ".join(pypi["downstream_update_steps"]),
+        )
 
         plugin = migrations[("ken-ai-plugin", "COLD_EMAIL_SKILLS_DEPLOY_KEY")]
         self.assertEqual(plugin["migration_action"], "pull-based-publisher")
@@ -2217,6 +2585,27 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                     "required_permissions": {
                         "contents": "read",
                         "id-token": "write",
+                    },
+                    "trusted_publisher": {
+                        "project": "derisk-mono",
+                        "owner": "Ken-Technology",
+                        "repository": "Ken-SRE",
+                        "workflow": "python-publish.yml",
+                        "environment": "pypi",
+                    },
+                    "packaging_contract": {
+                        "source": "pyproject.toml",
+                        "backend": "hatchling.build",
+                        "project": "derisk-mono",
+                        "install_command": "python -m pip install --upgrade build twine",
+                        "build_command": "python -m build --sdist --wheel .",
+                        "verification_command": "python -m twine check dist/*",
+                        "broken_command_to_remove": "python setup.py sdist bdist_wheel",
+                        "task": "Task 7",
+                        "checked_default_sha": "61622aa518666c30db703acb939cd4ab7f58d128",
+                        "pyproject_blob_sha": "a2a0651ca856601492b914c4cdc92ba1955667a4",
+                        "root_setup_py_present": False,
+                        "status": "task7-change-required",
                     },
                     "provider_setup_steps": ["Register the exact trusted publisher."],
                     "downstream_update_steps": ["Remove password input."],

@@ -65,6 +65,7 @@ repositories:
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: ci
       name: CI
@@ -80,6 +81,7 @@ repositories:
       - astral-sh/setup-uv@v5
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -133,6 +135,7 @@ repositories:
     - OAUTH2_PROXY_COOKIE_SECRET_LANGGRAPH
     - CLICKUP_WEBHOOK_URL
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build-image
       name: Build & push langgraph-api image
@@ -152,6 +155,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -211,6 +215,7 @@ repositories:
       - LANGGRAPH_OAUTH_CLIENT_SECRET
       - OAUTH2_PROXY_COOKIE_SECRET_LANGGRAPH
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -251,6 +256,7 @@ repositories:
       secret_names:
       - CLICKUP_WEBHOOK_URL
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - ClickUp
@@ -286,6 +292,7 @@ repositories:
     - LANGFUSE_SECRET_KEY
     - CLICKUP_API_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: scoreboard
       name: Weekly eval pass-rate
@@ -304,6 +311,7 @@ repositories:
       - LANGFUSE_SECRET_KEY
       - CLICKUP_API_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - ClickUp
@@ -344,6 +352,7 @@ repositories:
     secret_names:
     - GROK_REVIEW_GH_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: gate
       name: Should review?
@@ -358,6 +367,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -394,6 +404,7 @@ repositories:
       secret_names:
       - GROK_REVIEW_GH_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
@@ -429,6 +440,7 @@ repositories:
     - LANGFUSE_PUBLIC_KEY
     - LANGFUSE_SECRET_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: parity
       name: Langfuse prompt parity
@@ -446,6 +458,7 @@ repositories:
       - LANGFUSE_PUBLIC_KEY
       - LANGFUSE_SECRET_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - Langfuse
@@ -488,6 +501,7 @@ repositories:
     secret_names:
     - KEN_BACKEND_READ_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: drift-check
       name: drift-check
@@ -505,6 +519,7 @@ repositories:
       secret_names:
       - KEN_BACKEND_READ_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -558,6 +573,7 @@ repositories:
     - KEN_CLERK_SCOPES
     - KEN_MCP_CLIENT_FACING
     - KEN_MCP_ALLOW_APIKEY
+    direct_onepassword_references: []
     jobs:
     - id: should-deploy
       name: should-deploy
@@ -571,6 +587,7 @@ repositories:
       uses: []
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -634,6 +651,7 @@ repositories:
       - KEN_CLERK_SCOPES
       - KEN_MCP_CLIENT_FACING
       - KEN_MCP_ALLOW_APIKEY
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - Worldstream
@@ -682,6 +700,7 @@ repositories:
     secret_names:
     - GROK_REVIEW_GH_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: gate
       name: Should review?
@@ -696,6 +715,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -732,6 +752,7 @@ repositories:
       secret_names:
       - GROK_REVIEW_GH_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
@@ -764,6 +785,7 @@ repositories:
     secret_names:
     - KEN_BACKEND_READ_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: tests
       name: tests
@@ -779,6 +801,7 @@ repositories:
       - actions/setup-python@v5
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -814,6 +837,7 @@ repositories:
       secret_names:
       - KEN_BACKEND_READ_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -865,6 +889,7 @@ repositories:
       cancel-in-progress: true
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: check
       name: check
@@ -880,6 +905,7 @@ repositories:
       - actions/setup-node@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -910,6 +936,7 @@ repositories:
     secret_names:
     - COLD_EMAIL_SKILLS_DEPLOY_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: publish
@@ -926,6 +953,7 @@ repositories:
       secret_names:
       - COLD_EMAIL_SKILLS_DEPLOY_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - git-deploy-key
@@ -965,6 +993,7 @@ repositories:
     - WORLDSTREAM_USER
     - WORLDSTREAM_PASSWORD
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: deploy
       name: deploy
@@ -993,6 +1022,7 @@ repositories:
       - WORLDSTREAM_USER
       - WORLDSTREAM_PASSWORD
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - Worldstream
@@ -1037,6 +1067,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: validate
       name: Validate repository config
@@ -1051,6 +1082,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -1088,6 +1120,7 @@ repositories:
     - DEPLOY_PORT
     - DEPLOY_PATH
     - ANALYTICS_URL
+    direct_onepassword_references: []
     jobs:
     - id: validate
       name: Validate repository config
@@ -1102,6 +1135,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -1149,6 +1183,7 @@ repositories:
       - DEPLOY_PORT
       - DEPLOY_PATH
       - ANALYTICS_URL
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - DEPLOY_HOST
@@ -1184,6 +1219,7 @@ repositories:
       uses: []
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -1229,6 +1265,7 @@ repositories:
       cancel-in-progress: true
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: guardrails
       name: guardrails
@@ -1245,6 +1282,7 @@ repositories:
       - actions/cache@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - NuGet
@@ -1276,6 +1314,7 @@ repositories:
       cancel-in-progress: true
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: verify-contracts
       name: verify-contracts
@@ -1291,6 +1330,7 @@ repositories:
       - actions/setup-dotnet@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -1337,6 +1377,7 @@ repositories:
     - CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET
     - CLOUDFLARE_EDGE_SPEND_GUARD_API_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: deploy
       name: deploy
@@ -1376,6 +1417,7 @@ repositories:
       - CLOUDFLARE_EDGE_CLICK_INGEST_HMAC_SECRET
       - CLOUDFLARE_EDGE_SPEND_GUARD_API_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       target_hints:
@@ -1418,6 +1460,7 @@ repositories:
     - REDIRECT_DEPLOY_HOST_KEY
     variable_names:
     - CLOUDFLARE_REDIRECT_INGRESS_ENABLED
+    direct_onepassword_references: []
     jobs:
     - id: deploy
       name: deploy
@@ -1452,6 +1495,7 @@ repositories:
       - REDIRECT_DEPLOY_HOST_KEY
       variable_names:
       - CLOUDFLARE_REDIRECT_INGRESS_ENABLED
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - Cloudflare
@@ -1496,6 +1540,7 @@ repositories:
     - STAGING_BACKEND_HOST
     - STAGING_BACKEND_SSH_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: deploy
       name: deploy
@@ -1523,6 +1568,7 @@ repositories:
       - STAGING_BACKEND_HOST
       - STAGING_BACKEND_SSH_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - STAGING_BACKEND_HOST
@@ -1675,6 +1721,7 @@ repositories:
     - TechnologyObservationOutbox__AllowedClientIds__0
     - KenSearch__Enabled
     - QuartzJobConfiguration__Jobs__2__Enabled
+    direct_onepassword_references: []
     jobs:
     - id: should-deploy
       name: should-deploy
@@ -1688,6 +1735,7 @@ repositories:
       uses: []
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -1846,6 +1894,7 @@ repositories:
       - TechnologyObservationOutbox__AllowedClientIds__0
       - KenSearch__Enabled
       - QuartzJobConfiguration__Jobs__2__Enabled
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - Worldstream
@@ -1907,6 +1956,7 @@ repositories:
     secret_names:
     - GROK_REVIEW_GH_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: gate
       name: Should review?
@@ -1921,6 +1971,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -1957,6 +2008,7 @@ repositories:
       secret_names:
       - GROK_REVIEW_GH_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
@@ -1993,6 +2045,7 @@ repositories:
     - REDIRECT_DEPLOY_HOST
     - REDIRECT_DEPLOY_HOST_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: pin
       name: pin
@@ -2019,6 +2072,7 @@ repositories:
       - REDIRECT_DEPLOY_HOST
       - REDIRECT_DEPLOY_HOST_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - REDIRECT_DEPLOY_HOST
@@ -2052,6 +2106,7 @@ repositories:
       cancel-in-progress: true
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: validate
       name: validate
@@ -2066,6 +2121,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -2098,6 +2154,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: publish
@@ -2114,6 +2171,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - NuGet
@@ -2143,6 +2201,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: lint
       name: lint
@@ -2157,6 +2216,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -2186,6 +2246,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: test
       name: test
@@ -2202,6 +2263,7 @@ repositories:
       - actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - npm
@@ -2232,6 +2294,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: test
       name: test
@@ -2247,6 +2310,7 @@ repositories:
       - actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -2290,6 +2354,7 @@ repositories:
     - SSH_HOST
     - SSH_USER
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: test
       name: test
@@ -2305,6 +2370,7 @@ repositories:
       - astral-sh/setup-uv@v5
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -2350,6 +2416,7 @@ repositories:
       - SSH_HOST
       - SSH_USER
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - Hetzner
@@ -2407,6 +2474,7 @@ repositories:
     - OAUTH2_PROXY_CLIENT_SECRET
     - OAUTH2_PROXY_COOKIE_SECRET
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: deploy
       name: deploy
@@ -2441,6 +2509,7 @@ repositories:
       - OAUTH2_PROXY_CLIENT_SECRET
       - OAUTH2_PROXY_COOKIE_SECRET
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -2487,6 +2556,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: test
       name: Lint & test
@@ -2502,6 +2572,7 @@ repositories:
       - astral-sh/setup-uv@v5
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -2535,6 +2606,7 @@ repositories:
     - DEPLOY_SSH_KEY
     - CLICKUP_WEBHOOK_URL
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: deploy
       name: Build on server & deploy
@@ -2552,6 +2624,7 @@ repositories:
       - DEPLOY_USER
       - DEPLOY_SSH_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - DEPLOY_HOST
@@ -2590,6 +2663,7 @@ repositories:
       secret_names:
       - CLICKUP_WEBHOOK_URL
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - ClickUp
@@ -2638,6 +2712,7 @@ repositories:
     secret_names:
     - CLERK_SECRET_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: ci
       name: CI
@@ -2656,6 +2731,7 @@ repositories:
       secret_names:
       - CLERK_SECRET_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v7
       target_hints:
@@ -2692,6 +2768,7 @@ repositories:
       - actions/checkout@v7
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -2759,6 +2836,7 @@ repositories:
     - NEXT_PUBLIC_TECHNOLOGY_FILTER_ENABLED
     - NEXT_PUBLIC_TECHNOLOGY_FILTER_ALLOWED_CLIENT_IDS
     - NEXT_PUBLIC_EXPERIMENTS_ALLOWED_CLIENT_IDS
+    direct_onepassword_references: []
     jobs:
     - id: should-deploy
       name: should-deploy
@@ -2772,6 +2850,7 @@ repositories:
       uses: []
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -2825,6 +2904,7 @@ repositories:
       - NEXT_PUBLIC_TECHNOLOGY_FILTER_ENABLED
       - NEXT_PUBLIC_TECHNOLOGY_FILTER_ALLOWED_CLIENT_IDS
       - NEXT_PUBLIC_EXPERIMENTS_ALLOWED_CLIENT_IDS
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -2839,7 +2919,7 @@ repositories:
         host_variable_names: []
         registry_or_package: ghcr.io
         unknown_reason: null
-      classification: production-impact-deploy
+      classification: production-build
       target_runner_class: ken-deploy-production
       target_runs_on: '[self-hosted, linux, x64, ken-deploy, production]'
       secret_class: deploy-production
@@ -2850,6 +2930,7 @@ repositories:
       - BLACKSMITH
       - COMBINED_BUILD_AND_DEPLOY
       - SCHEDULED_LONG_LIVED_SECRET
+      - FIXED_PRODUCTION_BUILD_BOUNDARY
     - id: deploy
       name: Deploy to Server
       runs_on: '[self-hosted, ken-ci]'
@@ -2896,6 +2977,7 @@ repositories:
       - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
       - KEN_AGENTS_INTERNAL_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -2942,6 +3024,7 @@ repositories:
     secret_names:
     - GROK_REVIEW_GH_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: gate
       name: Should review?
@@ -2956,6 +3039,7 @@ repositories:
       - actions/checkout@v7
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -2992,6 +3076,7 @@ repositories:
       secret_names:
       - GROK_REVIEW_GH_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v7
       target_hints: []
@@ -3026,6 +3111,7 @@ repositories:
     - LANGFUSE_PUBLIC_KEY
     - LANGFUSE_SECRET_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: Publish to Langfuse (production)
@@ -3044,6 +3130,7 @@ repositories:
       - LANGFUSE_PUBLIC_KEY
       - LANGFUSE_SECRET_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - npm
@@ -3087,6 +3174,7 @@ repositories:
     - DEPLOY_HOST
     - DEPLOY_PATH
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build
       name: Lint, content-check & build
@@ -3104,6 +3192,7 @@ repositories:
       - actions/upload-artifact@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v4
       target_hints:
@@ -3144,6 +3233,7 @@ repositories:
       - DEPLOY_HOST
       - DEPLOY_PATH
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/download-artifact@v4
       target_hints:
@@ -3191,6 +3281,7 @@ repositories:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: test
       name: tests
@@ -3206,6 +3297,7 @@ repositories:
       - actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -3239,6 +3331,7 @@ repositories:
       - actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -3271,6 +3364,7 @@ repositories:
       - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - ClickUp
@@ -3307,6 +3401,7 @@ repositories:
     - DEPLOY_SSH_KEY
     - DEPLOY_SSH_KNOWN_HOSTS
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: test
       name: test
@@ -3320,6 +3415,7 @@ repositories:
       - ./.github/workflows/ci.yml
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -3364,6 +3460,7 @@ repositories:
       - DEPLOY_SSH_KEY
       - DEPLOY_SSH_KNOWN_HOSTS
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - ClickUp
@@ -3413,6 +3510,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build
       name: build
@@ -3431,6 +3529,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3469,6 +3568,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3501,6 +3601,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: push-app-image
       name: push-app-image
@@ -3519,6 +3620,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3552,6 +3654,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: push-app-image
       name: push-app-image
@@ -3568,6 +3671,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3603,6 +3707,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build
       name: build
@@ -3621,6 +3726,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3659,6 +3765,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3691,6 +3798,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: push-app-image
       name: push-app-image
@@ -3707,6 +3815,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3766,6 +3875,7 @@ repositories:
     - OVH_ENV_PROXY_CHEAP_REFRESH_INTERVAL_MS
     - OVH_ENV_CAPTCHA_API_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: deploy
       name: deploy
@@ -3804,6 +3914,7 @@ repositories:
       - OVH_ENV_PROXY_CHEAP_REFRESH_INTERVAL_MS
       - OVH_ENV_CAPTCHA_API_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - OVH
@@ -3837,6 +3948,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build
       name: build
@@ -3855,6 +3967,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3893,6 +4006,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3925,6 +4039,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: push-app-image
       name: push-app-image
@@ -3941,6 +4056,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -3976,6 +4092,7 @@ repositories:
     - EVAL_API_KEY
     - EVAL_BENCHMARK_EXPERIMENT_ID
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: run-eval-benchmark-prod
       name: run-eval-benchmark-prod
@@ -3993,6 +4110,7 @@ repositories:
       - EVAL_API_KEY
       - EVAL_BENCHMARK_EXPERIMENT_ID
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -4022,6 +4140,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: delete-untagged-images
       name: Delete Untagged Images
@@ -4037,6 +4156,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - GHCR
@@ -4075,6 +4195,7 @@ repositories:
     secret_names:
     - GROK_REVIEW_GH_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: gate
       name: Should review?
@@ -4089,6 +4210,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -4125,6 +4247,7 @@ repositories:
       secret_names:
       - GROK_REVIEW_GH_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
@@ -4157,6 +4280,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: actionlint
       name: actionlint
@@ -4171,6 +4295,7 @@ repositories:
       - actions/checkout@v5
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -4198,6 +4323,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: audit
       name: audit
@@ -4213,6 +4339,7 @@ repositories:
       - pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - npm
@@ -4243,6 +4370,7 @@ repositories:
     secret_names:
     - NUGET_API_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: Publish to NuGet
@@ -4260,6 +4388,7 @@ repositories:
       secret_names:
       - NUGET_API_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - NuGet
@@ -4293,6 +4422,7 @@ repositories:
     secret_names:
     - HEX_API_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: regenerate
       name: regenerate
@@ -4308,6 +4438,7 @@ repositories:
       - erlef/setup-beam@ee09b1e59bb240681c382eb1f0abc6a04af72764
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -4342,6 +4473,7 @@ repositories:
       secret_names:
       - HEX_API_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - hex.pm
@@ -4373,6 +4505,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: Tag and index on pkg.go.dev
@@ -4390,6 +4523,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - github-packages
@@ -4423,6 +4557,7 @@ repositories:
     - GPG_SIGNING_KEY
     - GPG_SIGNING_PASSWORD
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: Publish to Maven Central
@@ -4444,6 +4579,7 @@ repositories:
       - GPG_SIGNING_KEY
       - GPG_SIGNING_PASSWORD
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - Maven
@@ -4474,6 +4610,7 @@ repositories:
     - TEST_API_KEY
     - NPM_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: Publish
@@ -4492,6 +4629,7 @@ repositories:
       - TEST_API_KEY
       - NPM_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - npm
@@ -4525,6 +4663,7 @@ repositories:
     - PACKAGIST_USERNAME
     - PACKAGIST_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: Publish to Packagist
@@ -4545,6 +4684,7 @@ repositories:
       - PACKAGIST_USERNAME
       - PACKAGIST_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - packagist
@@ -4576,6 +4716,7 @@ repositories:
     - PYPI_USERNAME
     - PYPI_PASSWORD
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build-and-publish
       name: build-and-publish
@@ -4593,6 +4734,7 @@ repositories:
       - PYPI_USERNAME
       - PYPI_PASSWORD
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - PyPI
@@ -4624,6 +4766,7 @@ repositories:
     secret_names:
     - RUBYGEMS_API_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: Publish to RubyGems
@@ -4641,6 +4784,7 @@ repositories:
       secret_names:
       - RUBYGEMS_API_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - rubygems
@@ -4671,6 +4815,7 @@ repositories:
     secret_names:
     - CRATES_IO_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: publish
       name: Publish to crates.io
@@ -4689,6 +4834,7 @@ repositories:
       secret_names:
       - CRATES_IO_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - crates.io
@@ -4720,6 +4866,7 @@ repositories:
     secret_names:
     - SCRAPE_EVALS_PAT
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: quality-eval
       name: quality-eval
@@ -4735,6 +4882,7 @@ repositories:
       secret_names:
       - SCRAPE_EVALS_PAT
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -4769,6 +4917,7 @@ repositories:
       secret_names:
       - SCRAPE_EVALS_PAT
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -4799,6 +4948,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build-and-test
       name: Build and Test
@@ -4815,6 +4965,7 @@ repositories:
       - dorny/test-reporter@3eeb9fc888e82e8be2fb356bbeec2750231672bc
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -4844,6 +4995,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build-and-vet
       name: Build and Vet
@@ -4859,6 +5011,7 @@ repositories:
       - actions/setup-go@v5
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -4889,6 +5042,7 @@ repositories:
     secret_names:
     - FIRECRAWL_API_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build-and-test
       name: Build and Test
@@ -4907,6 +5061,7 @@ repositories:
       secret_names:
       - FIRECRAWL_API_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -4938,6 +5093,7 @@ repositories:
     - TS_OAUTH_CLIENT_ID
     - TS_OAUTH_SECRET
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: test
       name: Run tests
@@ -4958,6 +5114,7 @@ repositories:
       - TS_OAUTH_CLIENT_ID
       - TS_OAUTH_SECRET
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - npm
@@ -4990,6 +5147,7 @@ repositories:
     secret_names:
     - FIRECRAWL_API_KEY
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build-and-test
       name: Build and Test
@@ -5007,6 +5165,7 @@ repositories:
       secret_names:
       - FIRECRAWL_API_KEY
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5037,6 +5196,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build-and-test
       name: Build and Test
@@ -5052,6 +5212,7 @@ repositories:
       - ruby/setup-ruby@v1
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5079,6 +5240,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: test
       name: Build and Test
@@ -5095,6 +5257,7 @@ repositories:
       - actions/cache@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5129,6 +5292,7 @@ repositories:
     - PROXY_USERNAME
     - PROXY_PASSWORD
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: self-host
       name: Self-hosted environment tests
@@ -5154,6 +5318,7 @@ repositories:
       - PROXY_USERNAME
       - PROXY_PASSWORD
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v4
       target_hints:
@@ -5184,6 +5349,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: validate
       name: validate
@@ -5199,6 +5365,7 @@ repositories:
       - pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - npm
@@ -5236,6 +5403,7 @@ repositories:
     concurrency: null
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: check-database-files
       name: check-database-files
@@ -5250,6 +5418,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5301,6 +5470,7 @@ repositories:
     - KEN_SEARCH_CLERK_AUTHORITY
     - TechnologySearch__TechnologyFiltersEnabled
     - TechnologySearch__AllowedClientIds__0
+    direct_onepassword_references: []
     jobs:
     - id: should-deploy
       name: should-deploy
@@ -5314,6 +5484,7 @@ repositories:
       uses: []
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5375,6 +5546,7 @@ repositories:
       - KEN_SEARCH_CLERK_AUTHORITY
       - TechnologySearch__TechnologyFiltersEnabled
       - TechnologySearch__AllowedClientIds__0
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - NuGet
@@ -5421,6 +5593,7 @@ repositories:
     secret_names:
     - GROK_REVIEW_GH_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: gate
       name: Should review?
@@ -5435,6 +5608,7 @@ repositories:
       - actions/checkout@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5471,6 +5645,7 @@ repositories:
       secret_names:
       - GROK_REVIEW_GH_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v4
       target_hints: []
@@ -5506,6 +5681,7 @@ repositories:
     - KEN_GITHUB_PACKAGES_READ_TOKEN
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: projection-mysql
       name: projection-mysql
@@ -5525,6 +5701,7 @@ repositories:
       - KEN_GITHUB_PACKAGES_READ_TOKEN
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - NuGet
@@ -5560,6 +5737,7 @@ repositories:
     - KEN_GITHUB_PACKAGES_READ_TOKEN
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: residual-mysql
       name: residual-mysql
@@ -5579,6 +5757,7 @@ repositories:
       - KEN_GITHUB_PACKAGES_READ_TOKEN
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - NuGet
@@ -5614,6 +5793,7 @@ repositories:
     - KEN_GITHUB_PACKAGES_READ_TOKEN
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: technology-full-schedule-mysql
       name: technology-full-schedule-mysql
@@ -5633,6 +5813,7 @@ repositories:
       - KEN_GITHUB_PACKAGES_READ_TOKEN
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - NuGet
@@ -5668,6 +5849,7 @@ repositories:
     - KEN_GITHUB_PACKAGES_READ_TOKEN
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: technology-refresh-mysql
       name: technology-refresh-mysql
@@ -5687,6 +5869,7 @@ repositories:
       - KEN_GITHUB_PACKAGES_READ_TOKEN
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints:
       - NuGet
@@ -5727,6 +5910,7 @@ repositories:
       cancel-in-progress: true
     secret_names: []
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: build-web
       name: build-web
@@ -5743,6 +5927,7 @@ repositories:
       - actions/setup-node@v4
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5772,6 +5957,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: close-issues
       name: close-issues
@@ -5789,6 +5975,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5817,6 +6004,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: homebrew
       name: homebrew
@@ -5833,6 +6021,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5863,6 +6052,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: main
       name: main
@@ -5878,6 +6068,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -5909,6 +6100,7 @@ repositories:
     secret_names:
     - PYPI_API_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: deploy
       name: deploy
@@ -5927,6 +6119,7 @@ repositories:
       secret_names:
       - PYPI_API_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts:
       - actions/upload-artifact@v3
       target_hints:
@@ -5963,6 +6156,7 @@ repositories:
     secret_names:
     - GITHUB_TOKEN
     variable_names: []
+    direct_onepassword_references: []
     jobs:
     - id: main
       name: main
@@ -5978,6 +6172,7 @@ repositories:
       secret_names:
       - GITHUB_TOKEN
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -6017,6 +6212,25 @@ repositories:
     secret_names:
     - OP_SERVICE_ACCOUNT_TOKEN
     variable_names: []
+    direct_onepassword_references:
+    - job: deploy
+      environment_name: SERVER_HOST
+      source_reference: op://Development/vexa-mcp-auth-deploy-ssh/host
+      source_vault: Development
+      source_item: vexa-mcp-auth-deploy-ssh
+      source_field: host
+    - job: deploy
+      environment_name: SERVER_PORT
+      source_reference: op://Development/vexa-mcp-auth-deploy-ssh/port
+      source_vault: Development
+      source_item: vexa-mcp-auth-deploy-ssh
+      source_field: port
+    - job: deploy
+      environment_name: SERVER_SSH_KEY
+      source_reference: op://Development/vexa-mcp-auth-deploy-ssh/private_key
+      source_vault: Development
+      source_item: vexa-mcp-auth-deploy-ssh
+      source_field: private_key
     jobs:
     - id: test
       name: test
@@ -6033,6 +6247,7 @@ repositories:
       - astral-sh/setup-uv@v5
       secret_names: []
       variable_names: []
+      direct_onepassword_references: []
       artifacts: []
       target_hints: []
       target:
@@ -6071,6 +6286,40 @@ repositories:
       secret_names:
       - OP_SERVICE_ACCOUNT_TOKEN
       variable_names: []
+      direct_onepassword_references:
+      - environment_name: SERVER_HOST
+        source_reference: op://Development/vexa-mcp-auth-deploy-ssh/host
+        source_vault: Development
+        source_item: vexa-mcp-auth-deploy-ssh
+        source_field: host
+        target_vault: Ken Deploy Production
+        target_item: ken-vexa-mcp-auth
+        target_field: SERVER_HOST
+        field_type: string
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
+      - environment_name: SERVER_PORT
+        source_reference: op://Development/vexa-mcp-auth-deploy-ssh/port
+        source_vault: Development
+        source_item: vexa-mcp-auth-deploy-ssh
+        source_field: port
+        target_vault: Ken Deploy Production
+        target_item: ken-vexa-mcp-auth
+        target_field: SERVER_PORT
+        field_type: string
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
+      - environment_name: SERVER_SSH_KEY
+        source_reference: op://Development/vexa-mcp-auth-deploy-ssh/private_key
+        source_vault: Development
+        source_item: vexa-mcp-auth-deploy-ssh
+        source_field: private_key
+        target_vault: Ken Deploy Production
+        target_item: ken-vexa-mcp-auth
+        target_field: SERVER_SSH_KEY
+        field_type: concealed
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
       artifacts: []
       target_hints:
       - 1Password
@@ -6116,6 +6365,25 @@ repositories:
     secret_names:
     - OP_SERVICE_ACCOUNT_TOKEN
     variable_names: []
+    direct_onepassword_references:
+    - job: sync
+      environment_name: DEPLOY_SSH_KEY
+      source_reference: op://ken-website/blog-sync-deploy/private_key
+      source_vault: ken-website
+      source_item: blog-sync-deploy
+      source_field: private_key
+    - job: sync
+      environment_name: BEEHIIV_API_KEY
+      source_reference: op://ken-website/beehiiv/credential
+      source_vault: ken-website
+      source_item: beehiiv
+      source_field: credential
+    - job: sync
+      environment_name: BEEHIIV_PUBLICATION_ID
+      source_reference: op://ken-website/beehiiv/publication_id
+      source_vault: ken-website
+      source_item: beehiiv
+      source_field: publication_id
     jobs:
     - id: sync
       name: sync
@@ -6133,6 +6401,40 @@ repositories:
       secret_names:
       - OP_SERVICE_ACCOUNT_TOKEN
       variable_names: []
+      direct_onepassword_references:
+      - environment_name: DEPLOY_SSH_KEY
+        source_reference: op://ken-website/blog-sync-deploy/private_key
+        source_vault: ken-website
+        source_item: blog-sync-deploy
+        source_field: private_key
+        target_vault: Ken Deploy Production
+        target_item: ken-website
+        target_field: DEPLOY_SSH_KEY
+        field_type: concealed
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
+      - environment_name: BEEHIIV_API_KEY
+        source_reference: op://ken-website/beehiiv/credential
+        source_vault: ken-website
+        source_item: beehiiv
+        source_field: credential
+        target_vault: Ken Deploy Production
+        target_item: ken-website
+        target_field: BEEHIIV_API_KEY
+        field_type: concealed
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
+      - environment_name: BEEHIIV_PUBLICATION_ID
+        source_reference: op://ken-website/beehiiv/publication_id
+        source_vault: ken-website
+        source_item: beehiiv
+        source_field: publication_id
+        target_vault: Ken Deploy Production
+        target_item: ken-website
+        target_field: BEEHIIV_PUBLICATION_ID
+        field_type: string
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
       artifacts: []
       target_hints:
       - npm
@@ -6176,6 +6478,37 @@ repositories:
     - NEXT_PUBLIC_CF_STREAM_FILM_UID
     - NEXT_PUBLIC_CF_STREAM_LOOP_UID
     - NEXT_PUBLIC_TURNSTILE_SITE_KEY
+    direct_onepassword_references:
+    - job: deploy
+      environment_name: NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
+      source_reference: op://ken-website/posthog/project_token
+      source_vault: ken-website
+      source_item: posthog
+      source_field: project_token
+    - job: deploy
+      environment_name: POSTHOG_PERSONAL_API_KEY
+      source_reference: op://ken-website/posthog/personal_api_key
+      source_vault: ken-website
+      source_item: posthog
+      source_field: personal_api_key
+    - job: deploy
+      environment_name: WEBSITE_HOST
+      source_reference: op://ken-website/deploy-ssh/host
+      source_vault: ken-website
+      source_item: deploy-ssh
+      source_field: host
+    - job: deploy
+      environment_name: WEBSITE_PORT
+      source_reference: op://ken-website/deploy-ssh/port
+      source_vault: ken-website
+      source_item: deploy-ssh
+      source_field: port
+    - job: deploy
+      environment_name: WEBSITE_SSH_KEY
+      source_reference: op://ken-website/deploy-ssh/private_key
+      source_vault: ken-website
+      source_item: deploy-ssh
+      source_field: private_key
     jobs:
     - id: deploy
       name: deploy
@@ -6201,6 +6534,62 @@ repositories:
       - NEXT_PUBLIC_CF_STREAM_FILM_UID
       - NEXT_PUBLIC_CF_STREAM_LOOP_UID
       - NEXT_PUBLIC_TURNSTILE_SITE_KEY
+      direct_onepassword_references:
+      - environment_name: NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
+        source_reference: op://ken-website/posthog/project_token
+        source_vault: ken-website
+        source_item: posthog
+        source_field: project_token
+        target_vault: Ken Deploy Production
+        target_item: ken-website
+        target_field: NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
+        field_type: string
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
+      - environment_name: POSTHOG_PERSONAL_API_KEY
+        source_reference: op://ken-website/posthog/personal_api_key
+        source_vault: ken-website
+        source_item: posthog
+        source_field: personal_api_key
+        target_vault: Ken Deploy Production
+        target_item: ken-website
+        target_field: POSTHOG_PERSONAL_API_KEY
+        field_type: concealed
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
+      - environment_name: WEBSITE_HOST
+        source_reference: op://ken-website/deploy-ssh/host
+        source_vault: ken-website
+        source_item: deploy-ssh
+        source_field: host
+        target_vault: Ken Deploy Production
+        target_item: ken-website
+        target_field: WEBSITE_HOST
+        field_type: string
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
+      - environment_name: WEBSITE_PORT
+        source_reference: op://ken-website/deploy-ssh/port
+        source_vault: ken-website
+        source_item: deploy-ssh
+        source_field: port
+        target_vault: Ken Deploy Production
+        target_item: ken-website
+        target_field: WEBSITE_PORT
+        field_type: string
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
+      - environment_name: WEBSITE_SSH_KEY
+        source_reference: op://ken-website/deploy-ssh/private_key
+        source_vault: ken-website
+        source_item: deploy-ssh
+        source_field: private_key
+        target_vault: Ken Deploy Production
+        target_item: ken-website
+        target_field: WEBSITE_SSH_KEY
+        field_type: concealed
+        consumer: ken-deploy-production
+        migration_action: copy-direct-onepassword-reference
       artifacts: []
       target_hints:
       - Cloudflare
@@ -6229,4 +6618,4 @@ repositories:
       - COMBINED_BUILD_AND_DEPLOY
       - SCHEDULED_LONG_LIVED_SECRET
       - OP_BOOTSTRAP_TOKEN
-input_hash: 42bee5da8e6835186154c4310a885c4a66aa31a38dba0ad322a314d2019521bf
+input_hash: ea441076c6e63417132634f86494e032364b5128666bde0cc7ece336c2dd9964

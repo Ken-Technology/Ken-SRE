@@ -230,6 +230,7 @@ def _unresolved_annotation(
     workflow: str | None = None,
     data_classification: str = "credential",
     required_runtime_identity: str | None = None,
+    execution_boundary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "annotation_id": (
@@ -258,7 +259,55 @@ def _unresolved_annotation(
         result["workflow"] = workflow
     if required_runtime_identity:
         result["required_runtime_identity"] = required_runtime_identity
+    if execution_boundary:
+        result["execution_boundary"] = execution_boundary
     return result
+
+
+def _direct_onepassword_mapping(
+    repository: str,
+    workflow: str,
+    job: str,
+    environment_name: str,
+    source_reference: str,
+    field_type: str,
+) -> dict[str, Any]:
+    match = re.fullmatch(r"op://([^/\s]+)/([^/\s]+)/([^/\s]+)", source_reference)
+    if not match:
+        raise ValueError("direct 1Password mapping requires a fixed source reference")
+    source_vault, source_item, source_field = match.groups()
+    target_vault = PRODUCTION_VAULT
+    target_item = repository
+    coordinate = f"{repository}:{workflow}#{job}:{environment_name}"
+    return {
+        "mapping_id": f"direct-op-{_slug(coordinate)}",
+        "repository": repository,
+        "workflow": workflow,
+        "job": job,
+        "environment_name": environment_name,
+        "source_reference": source_reference,
+        "source_vault": source_vault,
+        "source_item": source_item,
+        "source_field": source_field,
+        "target_vault": target_vault,
+        "target_item": target_item,
+        "target_field": environment_name,
+        "field_type": field_type,
+        "consumer": "ken-deploy-production",
+        "source_to_target_steps": [
+            f"Use task6-temporary-migration-writer to copy {source_reference} directly into {target_vault}/{target_item}/{environment_name} without displaying the value."
+        ],
+        "broker_cutover_steps": [
+            f"Replace the direct {source_reference} env reference in {coordinate} with the fixed production broker field {target_vault}/{target_item}/{environment_name} under ken-deploy-production.",
+            "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover.",
+        ],
+        "live_verification_steps": [
+            f"Run {coordinate} and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+        ],
+        "retirement_steps": [
+            f"Only after live verification, remove the direct {source_reference} workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+        ],
+    }
 
 
 def _load_metadata(evidence_dir: Path, name: str) -> dict[str, Any]:
@@ -519,6 +568,24 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     mappings: list[dict[str, Any]] = []
     unresolved_annotations: list[dict[str, Any]] = []
     secretless_migrations: list[dict[str, Any]] = []
+    direct_onepassword_mappings: list[dict[str, Any]] = []
+
+    direct_specs = (
+        ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_HOST", "op://Development/vexa-mcp-auth-deploy-ssh/host", "string"),
+        ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_PORT", "op://Development/vexa-mcp-auth-deploy-ssh/port", "string"),
+        ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_SSH_KEY", "op://Development/vexa-mcp-auth-deploy-ssh/private_key", "concealed"),
+        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "DEPLOY_SSH_KEY", "op://ken-website/blog-sync-deploy/private_key", "concealed"),
+        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_API_KEY", "op://ken-website/beehiiv/credential", "concealed"),
+        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_PUBLICATION_ID", "op://ken-website/beehiiv/publication_id", "string"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "op://ken-website/posthog/project_token", "string"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "POSTHOG_PERSONAL_API_KEY", "op://ken-website/posthog/personal_api_key", "concealed"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_HOST", "op://ken-website/deploy-ssh/host", "string"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_PORT", "op://ken-website/deploy-ssh/port", "string"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_SSH_KEY", "op://ken-website/deploy-ssh/private_key", "concealed"),
+    )
+    direct_onepassword_mappings.extend(
+        _direct_onepassword_mapping(*spec) for spec in direct_specs
+    )
 
     def add_source(source: tuple[str, dict[str, Any]]) -> str:
         source_id, metadata = source
@@ -539,6 +606,8 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         provider_rotation_steps: list[str] | None = None,
         downstream_update_steps: list[str] | None = None,
         data_classification: str = "credential",
+        required_runtime_identity: str | None = None,
+        execution_boundary: dict[str, Any] | None = None,
     ) -> None:
         for name in names:
             unresolved_annotations.append(
@@ -553,6 +622,8 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
                     provider_rotation_steps=provider_rotation_steps,
                     downstream_update_steps=downstream_update_steps,
                     data_classification=data_classification,
+                    required_runtime_identity=required_runtime_identity,
+                    execution_boundary=execution_boundary,
                 )
             )
 
@@ -893,14 +964,36 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
                 "target_field": None,
                 "target_runner_class": "public-github-hosted",
                 "required_permissions": {"contents": "read", "id-token": "write"},
+                "trusted_publisher": {
+                    "project": "derisk-mono",
+                    "owner": "Ken-Technology",
+                    "repository": "Ken-SRE",
+                    "workflow": "python-publish.yml",
+                    "environment": "pypi",
+                },
+                "packaging_contract": {
+                    "source": "pyproject.toml",
+                    "backend": "hatchling.build",
+                    "project": "derisk-mono",
+                    "install_command": "python -m pip install --upgrade build twine",
+                    "build_command": "python -m build --sdist --wheel .",
+                    "verification_command": "python -m twine check dist/*",
+                    "broken_command_to_remove": "python setup.py sdist bdist_wheel",
+                    "task": "Task 7",
+                    "checked_default_sha": "61622aa518666c30db703acb939cd4ab7f58d128",
+                    "pyproject_blob_sha": "a2a0651ca856601492b914c4cdc92ba1955667a4",
+                    "root_setup_py_present": False,
+                    "status": "task7-change-required",
+                },
                 "provider_setup_steps": [
-                    "In the PyPI Ken-SRE project, add a Trusted Publisher for owner Ken-Technology, repository Ken-SRE, workflow python-publish.yml, and the exact GitHub environment if the workflow names one."
+                    "In the PyPI derisk-mono project, add a Trusted Publisher for owner Ken-Technology, repository Ken-SRE, workflow python-publish.yml, and environment pypi."
                 ],
                 "downstream_update_steps": [
-                    "Keep the publisher on a GitHub-hosted runner, set top-level workflow permissions to contents: read and id-token: write, and configure pypa/gh-action-pypi-publish without a password input or PYPI_API_TOKEN reference."
+                    "Task 7 must remove the broken root python setup.py sdist bdist_wheel path, install build and twine with python -m pip install --upgrade build twine, build the checked root pyproject.toml with python -m build --sdist --wheel ., and pass python -m twine check dist/* before publication.",
+                    "Separate the artifact build from the publish job, keep both on GitHub-hosted runners, set top-level workflow permissions to contents: read and id-token: write, ensure the build job overrides permissions to contents: read only, bind the publish job to environment pypi, and configure pypa/gh-action-pypi-publish without a password input or PYPI_API_TOKEN reference."
                 ],
                 "live_verification_steps": [
-                    "Publish one intended Ken-SRE release through Trusted Publishing and verify the expected PyPI project version and provenance before removing the old path."
+                    "Publish one intended derisk-mono release through the exact PyPI Trusted Publisher and verify the expected project version plus provenance before removing the old path."
                 ],
                 "retirement_steps": [
                     "After the verified OIDC publish, revoke the predecessor PyPI credential and delete PYPI_API_TOKEN from GitHub."
@@ -1142,6 +1235,23 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         authority_owner="ken-frontend runtime owner",
         handoff_group="frontend/server-actions-encryption",
         reason="This application encryption key must remain stable across replicas; no readable runtime authority was found.",
+        downstream_update_steps=[
+            "Create a new production-only server-actions encryption authority and populate only Ken Deploy Production/ken-frontend/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY through the temporary migration writer.",
+            "Task 7 must run build-image on ken-deploy-production through task7-fixed-production-image-build; the wrapper obtains the key from the local production broker and passes it only to the fixed production image build.",
+            "The ken-ci pools may run no-secret validation only and must never build or publish the production image artifact.",
+            "Verify the production image build and both production replicas before deleting the GitHub field and revoking the predecessor authority after the rollback window.",
+        ],
+        required_runtime_identity="ken-deploy-production",
+        execution_boundary={
+            "workflow": ".github/workflows/deploy.yml",
+            "production_build_job": "build-image",
+            "deployment_job": "deploy",
+            "runner_class": "ken-deploy-production",
+            "build_wrapper": "task7-fixed-production-image-build",
+            "broker_only": True,
+            "ci_validation_only": True,
+            "forbid_ken_ci_production_artifact": True,
+        },
     )
     for repository in ("ken-frontend", "ken-agents"):
         annotate_many(
@@ -1747,6 +1857,11 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     migration_ids = [row["migration_id"] for row in secretless_migrations]
     if len(migration_ids) != len(set(migration_ids)):
         raise ValueError("duplicate secretless migration selector")
+    direct_mapping_ids = [
+        row["mapping_id"] for row in direct_onepassword_mappings
+    ]
+    if len(direct_mapping_ids) != len(set(direct_mapping_ids)):
+        raise ValueError("duplicate direct 1Password mapping selector")
     _validate_source_metadata(sources, evidence_dir)
 
     return {
@@ -1760,6 +1875,9 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         ),
         "secretless_migrations": sorted(
             secretless_migrations, key=lambda row: row["migration_id"]
+        ),
+        "direct_onepassword_mappings": sorted(
+            direct_onepassword_mappings, key=lambda row: row["mapping_id"]
         ),
         "unresolved_observations": [
             {
