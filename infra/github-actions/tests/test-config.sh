@@ -731,7 +731,7 @@ SH
     [[ "$(grep -Fxc preflight "${ssh_log}")" == 1 ]] &&
     [[ "$(grep -Fxc apply "${ssh_log}")" == 1 ]] &&
     grep -Fq "Host provisioning verified" <<<"${output}" &&
-    grep -Fq 'apt-get install -y --no-install-recommends qemu-kvm libvirt-daemon-system libvirt-clients virtinst cloud-image-utils jq nftables dnsmasq-base' "${command_log}" &&
+    grep -Fq 'apt-get install -y --no-install-recommends qemu-kvm libvirt-daemon-system libvirt-clients virtinst cloud-image-utils jq nftables dnsmasq-base libguestfs-tools' "${command_log}" &&
     grep -Fq "Rollback state:" <<<"${output}"; then
     pass "real embedded apply converges with exact packages and rollback evidence"
   else

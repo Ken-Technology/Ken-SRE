@@ -41,9 +41,12 @@ cloud-image-utils
 jq
 nftables
 dnsmasq-base
+libguestfs-tools
 ```
 
 `dnsmasq-base` is a Recommends of `libvirt-daemon-system` on Ubuntu 24.04, so `--no-install-recommends` does not install it. That package provides `/usr/sbin/dnsmasq`, which libvirt needs to start the NAT networks. The script requires that binary before `virsh net-start` and does not install the service-owning `dnsmasq` package.
+
+`libguestfs-tools` provides `virt-customize`. Task 4 uses it to seed guest packages into a checksum-verified, derived qcow2 image before either VM starts, so the deployment guest never needs temporary access to Ubuntu package mirrors.
 
 It enables `libvirtd`, creates the `ken-actions` directory pool, and creates two NAT networks:
 
