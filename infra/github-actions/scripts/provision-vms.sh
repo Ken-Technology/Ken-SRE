@@ -4,7 +4,11 @@ set -euo pipefail
 readonly APPROVED_TARGET="root@167.235.8.250"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SCRIPT_DIR
-GA_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
+if [[ -n "${PROVISION_VMS_GA_ROOT:-}" ]]; then
+  GA_ROOT="$(cd "${PROVISION_VMS_GA_ROOT}" && pwd -P)"
+else
+  GA_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
+fi
 readonly GA_ROOT
 
 die() {
@@ -30,6 +34,34 @@ validate_local_contract() {
   done
 }
 
+read_vm_contract() {
+  local name="$1"
+  python3 - "${GA_ROOT}/libvirt/${name}.xml" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+domain = ET.parse(sys.argv[1]).getroot()
+memory = domain.find("memory")
+vcpu = domain.find("vcpu")
+contract = domain.find("./metadata/{urn:ken-actions:v1}vm-contract")
+if (
+    memory is None
+    or memory.attrib.get("unit") != "KiB"
+    or vcpu is None
+    or contract is None
+    or contract.attrib.get("image-customization-network") != "disabled"
+):
+    raise SystemExit("invalid machine-readable VM contract")
+memory_kib = int(memory.text or "0")
+if memory_kib <= 0 or memory_kib % (1024 * 1024):
+    raise SystemExit("VM memory must be a positive whole GiB")
+disk_gib = int(contract.attrib.get("disk-capacity-gib", "0"))
+if disk_gib <= 0:
+    raise SystemExit("VM disk capacity must be positive")
+print(f"{int(vcpu.text or '0')}|{memory_kib // (1024 * 1024)}|{disk_gib}")
+PY
+}
+
 dry_run=0
 if [[ "${1:-}" == --dry-run ]]; then
   dry_run=1
@@ -49,10 +81,15 @@ target="$1"
 
 validate_local_contract
 
+IFS='|' read -r ci_vcpu ci_memory_gib ci_disk_gib < <(read_vm_contract ken-ci)
+IFS='|' read -r deploy_vcpu deploy_memory_gib deploy_disk_gib < <(read_vm_contract ken-deploy)
+
 cat <<'EOF'
 Approved VM plan:
-  ken-ci: 32 vCPU, 112 GiB RAM, 750 GiB qcow2, ken-ci-net only
-  ken-deploy: 4 vCPU, 12 GiB RAM, 80 GiB qcow2, ken-deploy-net only
+EOF
+printf '  ken-ci: %s vCPU, %s GiB RAM, %s GiB qcow2, ken-ci-net only\n' "${ci_vcpu}" "${ci_memory_gib}" "${ci_disk_gib}"
+printf '  ken-deploy: %s vCPU, %s GiB RAM, %s GiB qcow2, ken-deploy-net only\n' "${deploy_vcpu}" "${deploy_memory_gib}" "${deploy_disk_gib}"
+cat <<'EOF'
   image: Ubuntu 24.04 cloud image, checksum-verified and customized offline
   storage: /mnt/data/libvirt/images and /mnt/data/libvirt/seed only
   access: host-managed SSH keys; no credentials in definitions or seed templates

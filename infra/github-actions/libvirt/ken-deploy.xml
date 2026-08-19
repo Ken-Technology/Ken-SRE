@@ -7,6 +7,9 @@
   <resource>
     <partition>/machine/ken-actions</partition>
   </resource>
+  <metadata>
+    <ken:vm-contract xmlns:ken='urn:ken-actions:v1' disk-capacity-gib='80' image-customization-network='disabled'/>
+  </metadata>
   <os>
     <type arch='x86_64' machine='q35'>hvm</type>
     <boot dev='hd'/>

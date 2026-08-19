@@ -69,6 +69,11 @@ render_ken_actions_firewall() {
   cat >"${destination}" <<EOF
 table inet ken_actions_vms {
   comment "managed-by=ken-actions generation=${generation}"
+  set ci_denied_v4 {
+    type ipv4_addr
+    flags interval
+    elements = { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4, 167.235.8.250, 185.183.35.189 }
+  }
   set deploy_https_v4 {
     type ipv4_addr
     flags interval
@@ -77,6 +82,10 @@ table inet ken_actions_vms {
 
   chain input {
     type filter hook input priority -20; policy accept;
+    iifname "virbr-ci" ct state invalid drop
+    iifname "virbr-deploy" ct state invalid drop
+    iifname "virbr-ci" ct state established,related accept
+    iifname "virbr-deploy" ct state established,related accept
     iifname "virbr-ci" udp sport 68 udp dport 67 accept
     iifname "virbr-deploy" udp sport 68 udp dport 67 accept
     iifname "virbr-ci" meta l4proto { tcp, udp } th dport 53 accept
@@ -87,18 +96,26 @@ table inet ken_actions_vms {
 
   chain forward {
     type filter hook forward priority -20; policy accept;
-    iifname "virbr-ci" ip daddr { 192.168.210.1, 192.168.211.0/24, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 185.183.35.189 } drop
-    iifname "virbr-ci" ct state invalid drop
-    iifname "virbr-ci" tcp dport { 80, 443 } accept
-    iifname "virbr-ci" udp dport 443 accept
-    iifname "virbr-ci" drop
     oifname "virbr-ci" ct state established,related accept
+    oifname "virbr-ci" ct state invalid drop
+    oifname "virbr-ci" ct state new drop
+    oifname "virbr-ci" drop
+    oifname "virbr-deploy" ct state established,related accept
+    oifname "virbr-deploy" ct state invalid drop
+    oifname "virbr-deploy" ct state new drop
+    oifname "virbr-deploy" drop
+
+    iifname "virbr-ci" ct state invalid drop
+    iifname "virbr-ci" meta nfproto ipv6 drop
+    iifname "virbr-ci" ip daddr @ci_denied_v4 drop
+    iifname "virbr-ci" meta nfproto ipv4 tcp dport { 80, 443 } accept
+    iifname "virbr-ci" meta nfproto ipv4 udp dport 443 accept
+    iifname "virbr-ci" drop
 
     iifname "virbr-deploy" ct state invalid drop
     iifname "virbr-deploy" ip daddr @deploy_https_v4 tcp dport 443 accept
     iifname "virbr-deploy" ip daddr 185.183.35.189 tcp dport 22 accept
     iifname "virbr-deploy" drop
-    oifname "virbr-deploy" ct state established,related accept
   }
 }
 EOF

@@ -872,7 +872,9 @@ SH
 }
 
 run_vm_definitions() {
-  local path output status vm_test_dir fake_ssh fake_bin vm_state vm_data command_log
+  local path output status vm_test_dir fake_ssh fake_bin vm_state vm_data command_log summary_label
+  summary_label=vm-definitions
+  [[ "${VM_TEST_STATIC_ONLY:-0}" == 1 ]] && summary_label=vm-static
 
   echo "== VM definition files =="
   for path in \
@@ -904,11 +906,11 @@ def check(condition, message):
 
 
 contracts = {
-    "ken-ci": (112 * 1024 * 1024, 32, "ken-ci-net", "192.168.210.1", "ken-ci-runner"),
-    "ken-deploy": (12 * 1024 * 1024, 4, "ken-deploy-net", "192.168.211.1", "ken-deploy-runner"),
+    "ken-ci": (112 * 1024 * 1024, 32, 750, "ken-ci-net", "192.168.210.1", "ken-ci-runner"),
+    "ken-deploy": (12 * 1024 * 1024, 4, 80, "ken-deploy-net", "192.168.211.1", "ken-deploy-runner"),
 }
 
-for name, (memory_kib, vcpus, network, gateway, runner_name) in contracts.items():
+for name, (memory_kib, vcpus, disk_gib, network, gateway, runner_name) in contracts.items():
     xml_path = root / "libvirt" / f"{name}.xml"
     user_data_path = root / "cloud-init" / f"{name}-user-data.yaml"
     if not xml_path.is_file() or not user_data_path.is_file():
@@ -925,6 +927,13 @@ for name, (memory_kib, vcpus, network, gateway, runner_name) in contracts.items(
     check(vcpu is not None and int(vcpu.text or 0) == vcpus, f"{name}: vCPU")
     check(cpu is not None and cpu.attrib.get("mode") == "host-passthrough", f"{name}: host-passthrough CPU")
     check(clock is not None and clock.attrib.get("offset") == "utc", f"{name}: UTC clock")
+    vm_contract = domain.find("./metadata/{urn:ken-actions:v1}vm-contract")
+    check(
+        vm_contract is not None
+        and vm_contract.attrib.get("disk-capacity-gib") == str(disk_gib)
+        and vm_contract.attrib.get("image-customization-network") == "disabled",
+        f"{name}: machine-readable disk and offline-image contract",
+    )
 
     os_disks = []
     seeds = []
@@ -948,7 +957,8 @@ for name, (memory_kib, vcpus, network, gateway, runner_name) in contracts.items(
 
     data = yaml.safe_load(user_data_path.read_text())
     check(data.get("hostname") == name and data.get("timezone") == "UTC", f"{name}: identity and UTC")
-    check(data.get("package_update") is False, f"{name}: no guest package-mirror refresh")
+    check(data.get("package_update") is False and data.get("package_upgrade") is False, f"{name}: no guest package-mirror refresh")
+    check("packages" not in data and "apt" not in data, f"{name}: no cloud-init package installation")
     check(data.get("ssh_pwauth") is False and data.get("disable_root") is True, f"{name}: password and root SSH disabled")
     users = {u.get("name"): u for u in data.get("users") or [] if isinstance(u, dict)}
     check(set(users) == {"ken-admin", runner_name}, f"{name}: exact users")
@@ -957,13 +967,22 @@ for name, (memory_kib, vcpus, network, gateway, runner_name) in contracts.items(
     check(not set(runner.get("groups") or []) & {"sudo", "adm", "wheel"}, f"{name}: runner outside admin groups")
     admin = users.get("ken-admin", {})
     check(admin.get("lock_passwd") is True and admin.get("ssh_authorized_keys") == ["__HOST_ADMIN_SSH_KEY__"], f"{name}: host-managed admin key")
-    packages = set(data.get("packages") or [])
-    check({"qemu-guest-agent", "nftables", "docker.io", "uidmap", "slirp4netns", "fuse-overlayfs"} <= packages, f"{name}: VM prerequisites")
     files = {entry.get("path"): entry for entry in data.get("write_files") or [] if isinstance(entry, dict)}
+    package_verifier = files.get("/usr/local/sbin/verify-offline-image", {}).get("content", "")
+    check(
+        "dpkg-query" in package_verifier
+        and "qemu-guest-agent" in package_verifier
+        and "docker.io" in package_verifier
+        and "apt-get" not in package_verifier
+        and "curl --" not in package_verifier,
+        f"{name}: offline package presence verifier",
+    )
     firewall = files.get("/etc/nftables.conf", {}).get("content", "")
     check("policy drop" in firewall and gateway in firewall and "tcp dport 22 accept" in firewall, f"{name}: host-only inbound SSH")
     check("0.0.0.0/0" not in firewall, f"{name}: no public SSH source")
-    check("systemctl enable --now qemu-guest-agent nftables" in [str(c).strip() for c in data.get("runcmd") or []], f"{name}: services enabled")
+    commands = [str(c).strip() for c in data.get("runcmd") or []]
+    check(commands[0] == "/usr/local/sbin/verify-offline-image", f"{name}: offline image verified before services")
+    check("systemctl enable --now qemu-guest-agent nftables" in commands, f"{name}: services enabled")
     if name == "ken-deploy":
         op_verifier = files.get("/usr/local/sbin/verify-1password-cli", {}).get("content", "")
         check("command -v op" in op_verifier and "apt-get" not in op_verifier and "curl" not in op_verifier, "ken-deploy: offline-seeded 1Password CLI required")
@@ -1004,6 +1023,24 @@ PY
     fail "VM dry run boundary"
     printf '%s\n' "${output}"
   fi
+
+  contract_dir="$(mktemp -d)"
+  mkdir -p "${contract_dir}/libvirt" "${contract_dir}/cloud-init" "${contract_dir}/scripts/lib"
+  cp "${LIBVIRT_ROOT}/ken-ci.xml" "${LIBVIRT_ROOT}/ken-deploy.xml" "${contract_dir}/libvirt/"
+  cp "${CLOUD_INIT_ROOT}/ken-ci-user-data.yaml" "${CLOUD_INIT_ROOT}/ken-deploy-user-data.yaml" "${contract_dir}/cloud-init/"
+  cp "${VM_FIREWALL}" "${contract_dir}/scripts/lib/vm-firewall.sh"
+  sed -i.bak "s/disk-capacity-gib='750'/disk-capacity-gib='751'/" "${contract_dir}/libvirt/ken-ci.xml"
+  rm -f "${contract_dir}/libvirt/ken-ci.xml.bak"
+  set +e
+  output="$(PROVISION_VMS_GA_ROOT="${contract_dir}" bash "${VM_PROVISION}" --dry-run root@167.235.8.250 2>&1)"
+  status=$?
+  set -e
+  if (( status == 0 )) && grep -Fq 'ken-ci: 32 vCPU, 112 GiB RAM, 751 GiB qcow2' <<<"${output}"; then
+    pass "VM dry run consumes machine-readable disk capacity"
+  else
+    fail "VM dry run ignored machine-readable disk capacity"
+  fi
+  rm -rf "${contract_dir}"
 
   set +e
   output="$(bash "${VM_PROVISION}" --dry-run root@185.183.35.189 2>&1)"
@@ -1046,24 +1083,164 @@ SH
     # shellcheck source=/dev/null
     source "${VM_FIREWALL}"
     render_ken_actions_firewall "${firewall_path}" 140.82.112.3 140.82.114.21 13.107.42.16
-    if python3 - "${firewall_path}" <<'PY'
+    if python3 - "${firewall_path}" "${VM_FIREWALL}" "${VM_PROVISION}" <<'PY'
+import ipaddress
+import re
 import sys
 from pathlib import Path
 
 text = Path(sys.argv[1]).read_text()
-checks = {
-    "CI blocks host and deploy subnet": all(value in text for value in ["192.168.210.1", "192.168.211.0/24"]),
-    "CI blocks private ranges": all(value in text for value in ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]),
-    "CI blocks recorded production": "185.183.35.189" in text,
-    "CI public web allow follows private blocks": text.index("185.183.35.189") < text.index("iifname \"virbr-ci\" tcp dport { 80, 443 } accept"),
-    "CI ends fail closed": "iifname \"virbr-ci\" drop" in text,
-    "deploy HTTPS is set-scoped": "iifname \"virbr-deploy\" ip daddr @deploy_https_v4 tcp dport 443 accept" in text,
-    "deploy SSH is production-target-scoped": "iifname \"virbr-deploy\" ip daddr 185.183.35.189 tcp dport 22 accept" in text,
-    "deploy ends fail closed": "iifname \"virbr-deploy\" drop" in text,
-    "resolved endpoint set is exact": all(value in text for value in ["13.107.42.16", "140.82.112.3", "140.82.114.21"]),
-    "guest cannot reach non-DNS host services": all(value in text for value in ["udp dport 67 accept", "th dport 53 accept", "iifname \"virbr-deploy\" drop"]),
+helper = Path(sys.argv[2]).read_text()
+provisioner = Path(sys.argv[3]).read_text()
+
+
+def block(kind, name):
+    match = re.search(rf"  {kind} {re.escape(name)} \{{\n(.*?)\n  \}}", text, re.S)
+    if not match:
+        raise AssertionError(f"missing {kind} {name}")
+    return match.group(1)
+
+
+def addresses_from_set(name):
+    body = block("set", name)
+    match = re.search(r"elements = \{(.*?)\}", body, re.S)
+    if not match:
+        return []
+    return [part.strip() for part in match.group(1).split(",") if part.strip()]
+
+
+named_sets = {
+    "ci_denied_v4": addresses_from_set("ci_denied_v4"),
+    "deploy_https_v4": addresses_from_set("deploy_https_v4"),
 }
-failed = [name for name, ok in checks.items() if not ok]
+
+
+def port_matches(line, packet):
+    if "tcp dport" in line and packet["proto"] != "tcp":
+        return False
+    if "udp dport" in line and packet["proto"] != "udp":
+        return False
+    l4 = re.search(r"meta l4proto \{ ([^}]*) \}", line)
+    if l4 and packet["proto"] not in {item.strip() for item in l4.group(1).split(",")}:
+        return False
+    dport_set = re.search(r"(?:tcp|udp) dport \{ ([^}]*) \}", line)
+    if dport_set and packet["dport"] not in {int(item.strip()) for item in dport_set.group(1).split(",")}:
+        return False
+    dport = re.search(r"(?:tcp|udp|th) dport ([0-9]+)", line)
+    if dport and packet["dport"] != int(dport.group(1)):
+        return False
+    sport = re.search(r"udp sport ([0-9]+)", line)
+    return not sport or packet["sport"] == int(sport.group(1))
+
+
+def address_matches(line, packet):
+    if "ip daddr" not in line:
+        return True
+    address = ipaddress.ip_address(packet["dest"])
+    if address.version != 4:
+        return False
+    named = re.search(r"ip daddr @([a-z0-9_]+)", line)
+    if named:
+        return any(address in ipaddress.ip_network(value) for value in named_sets[named.group(1)])
+    inline = re.search(r"ip daddr \{ ([^}]*) \}", line)
+    if inline:
+        return any(address in ipaddress.ip_network(value.strip()) for value in inline.group(1).split(","))
+    exact = re.search(r"ip daddr ([0-9./]+)", line)
+    return not exact or address in ipaddress.ip_network(exact.group(1))
+
+
+def matches(line, packet):
+    interface = re.search(r'iifname "([^"]+)"', line)
+    if interface and packet["iif"] != interface.group(1):
+        return False
+    interface = re.search(r'oifname "([^"]+)"', line)
+    if interface and packet["oif"] != interface.group(1):
+        return False
+    state = re.search(r"ct state ([a-z,]+)", line)
+    if state and packet["state"] not in state.group(1).split(","):
+        return False
+    family = re.search(r"meta nfproto (ipv[46])", line)
+    if family and packet["family"] != family.group(1):
+        return False
+    return address_matches(line, packet) and port_matches(line, packet)
+
+
+def decide(chain_name, **overrides):
+    packet = {
+        "iif": "eth0",
+        "oif": "eth1",
+        "state": "new",
+        "family": "ipv4",
+        "dest": "8.8.8.8",
+        "proto": "tcp",
+        "sport": 50000,
+        "dport": 443,
+    }
+    packet.update(overrides)
+    body = block("chain", chain_name)
+    policy = re.search(r"policy (accept|drop);", body).group(1)
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line.endswith((" accept", " drop")):
+            continue
+        if matches(line, packet):
+            return line.rsplit(maxsplit=1)[1]
+    return policy
+
+
+fixtures = {
+    "host SSH return from CI": ("input", "accept", {"iif": "virbr-ci", "oif": "", "state": "established", "dest": "192.168.210.1"}),
+    "host related return from deploy": ("input", "accept", {"iif": "virbr-deploy", "oif": "", "state": "related", "dest": "192.168.211.1"}),
+    "new CI DNS to host": ("input", "accept", {"iif": "virbr-ci", "oif": "", "dest": "192.168.210.1", "proto": "udp", "dport": 53}),
+    "new deploy DHCP to host": ("input", "accept", {"iif": "virbr-deploy", "oif": "", "dest": "192.168.211.1", "proto": "udp", "sport": 68, "dport": 67}),
+    "new guest Elasticsearch to host": ("input", "drop", {"iif": "virbr-ci", "oif": "", "dest": "192.168.210.1", "dport": 9200}),
+    "CI public HTTPS": ("forward", "accept", {"iif": "virbr-ci", "dest": "8.8.8.8"}),
+    "CI host public IP": ("forward", "drop", {"iif": "virbr-ci", "dest": "167.235.8.250"}),
+    "CI production IP": ("forward", "drop", {"iif": "virbr-ci", "dest": "185.183.35.189"}),
+    "CI host bridge": ("forward", "drop", {"iif": "virbr-ci", "dest": "192.168.210.1"}),
+    "CI deploy bridge": ("forward", "drop", {"iif": "virbr-ci", "dest": "192.168.211.1"}),
+    "CI Tailscale": ("forward", "drop", {"iif": "virbr-ci", "dest": "100.100.100.100"}),
+    "CI loopback": ("forward", "drop", {"iif": "virbr-ci", "dest": "127.0.0.1"}),
+    "CI documentation range": ("forward", "drop", {"iif": "virbr-ci", "dest": "192.0.2.10"}),
+    "CI IPv6 global": ("forward", "drop", {"iif": "virbr-ci", "family": "ipv6", "dest": "2606:4700:4700::1111"}),
+    "CI IPv6 ULA": ("forward", "drop", {"iif": "virbr-ci", "family": "ipv6", "dest": "fd00::1"}),
+    "CI IPv6 link local": ("forward", "drop", {"iif": "virbr-ci", "family": "ipv6", "dest": "fe80::1"}),
+    "CI IPv6 loopback": ("forward", "drop", {"iif": "virbr-ci", "family": "ipv6", "dest": "::1"}),
+    "invalid CI egress": ("forward", "drop", {"iif": "virbr-ci", "state": "invalid"}),
+    "established inbound to CI": ("forward", "accept", {"oif": "virbr-ci", "state": "established", "dest": "192.168.210.10"}),
+    "new inbound to CI": ("forward", "drop", {"oif": "virbr-ci", "state": "new", "dest": "192.168.210.10"}),
+    "invalid inbound to deploy": ("forward", "drop", {"oif": "virbr-deploy", "state": "invalid", "dest": "192.168.211.10"}),
+    "related inbound to deploy": ("forward", "accept", {"oif": "virbr-deploy", "state": "related", "dest": "192.168.211.10"}),
+    "deploy approved HTTPS": ("forward", "accept", {"iif": "virbr-deploy", "dest": "140.82.112.3"}),
+    "deploy unapproved HTTPS": ("forward", "drop", {"iif": "virbr-deploy", "dest": "8.8.8.8"}),
+    "deploy production SSH": ("forward", "accept", {"iif": "virbr-deploy", "dest": "185.183.35.189", "dport": 22}),
+}
+
+failed = []
+for name, (chain, expected, packet) in fixtures.items():
+    actual = decide(chain, **packet)
+    if actual != expected:
+        failed.append(f"{name}: expected {expected}, got {actual}")
+
+required_non_global = {
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+    "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+    "192.88.99.0/24", "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24",
+    "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+    "167.235.8.250", "185.183.35.189",
+}
+if not required_non_global <= set(named_sets["ci_denied_v4"]):
+    failed.append("CI non-global/reserved IPv4 set is incomplete")
+for network_text in required_non_global:
+    network = ipaddress.ip_network(network_text)
+    representative = str(network.network_address if network.prefixlen == 32 else network.network_address + 1)
+    actual = decide("forward", iif="virbr-ci", dest=representative)
+    if actual != "drop":
+        failed.append(f"CI non-global/reserved fixture {representative} was {actual}")
+if "api.cloudflare.com" in helper:
+    failed.append("Cloudflare was added without an inventory target")
+if "flush ruleset" in helper + provisioner or "/etc/nftables.conf" in helper + provisioner:
+    failed.append("host firewall code contains a global ruleset mutation")
 if failed:
     print("FIREWALL_FAIL " + "; ".join(failed))
     raise SystemExit(1)
@@ -1345,6 +1522,7 @@ SH
     [[ "$(cat "${vm_data}/libvirt/images/ken-deploy.qcow2.size")" == 80G ]] &&
     grep -Fq 'qemu-img convert -O qcow2' "${command_log}" &&
     grep -Fq 'virt-customize -a' "${command_log}" &&
+    grep -Fq -- '--no-network' "${command_log}" &&
     grep -Fq '185.183.35.189 tcp dport 22 accept' "${vm_state}/nft-loaded" &&
     ! grep -R -Eq '(__HOST_ADMIN_SSH_KEY__|BEGIN .*PRIVATE KEY|gh[op]_)' "${vm_data}/libvirt/seed"; then
     pass "VM apply verifies image, thin disks, seeds, guests, guest agent, and host firewall"
@@ -1364,10 +1542,10 @@ SH
 
   echo
   if (( FAILED == 0 )); then
-    echo "vm-definitions: ${RAN} assertions passed"
+    echo "${summary_label}: ${RAN} assertions passed"
     return 0
   fi
-  echo "vm-definitions: ${FAILED} failed / ${RAN} assertions"
+  echo "${summary_label}: ${FAILED} failed / ${RAN} assertions"
   return 1
 }
 

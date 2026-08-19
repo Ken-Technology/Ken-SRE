@@ -138,11 +138,13 @@ Rollback is complete only after the readback above shows the original pool/netwo
 
 ## Task 4 VM definitions and approval boundary
 
-Task 4 defines `ken-ci` (32 vCPU, 112 GiB RAM, 750 GiB disk) and `ken-deploy` (4 vCPU, 12 GiB RAM, 80 GiB disk), their cloud-init contracts, and a host firewall renderer. The definitions contain no credentials. The CI guest uses only `ken-ci-net`; the deployment guest uses only `ken-deploy-net`. Deployment HTTPS is limited to the inventory-reviewed GitHub and 1Password endpoints in `scripts/lib/vm-firewall.sh`, and deployment SSH is limited to `185.183.35.189`.
+Task 4 defines `ken-ci` (32 vCPU, 112 GiB RAM, 750 GiB disk) and `ken-deploy` (4 vCPU, 12 GiB RAM, 80 GiB disk), their cloud-init contracts, and a host firewall renderer. Disk capacity and the offline-customization requirement are recorded in machine-readable XML metadata. The definitions contain no credentials. The CI guest uses only `ken-ci-net`; the deployment guest uses only `ken-deploy-net`. Deployment HTTPS is limited to the inventory-reviewed GitHub and 1Password endpoints in `scripts/lib/vm-firewall.sh`, and deployment SSH is limited to `185.183.35.189`.
 
 Cloudflare remains blocked. The current inventory has no normalized, machine-readable Cloudflare deployment target, so `api.cloudflare.com` is not hardcoded into the allowlist. A later task must first add and audit that target record.
 
-The guest image must be built offline from a checksum-verified Ubuntu 24.04 qcow2 using `virt-customize`; the host prerequisite for that operation is committed separately. Neither guest may receive temporary access to Ubuntu package mirrors.
+The guest image must be built from a checksum-verified Ubuntu 24.04 qcow2 using `virt-customize --no-network` and a reviewed local package cache; the host prerequisite for that operation is committed separately. The builder must write `/etc/ken-actions-image-manifest.sha256`. Cloud-init performs no package installation or update: its first boot command verifies the required packages and manifest before enabling services. Neither guest may receive temporary access to Ubuntu package mirrors.
+
+The dedicated host policy drops all CI IPv6 and the complete configured non-global/reserved IPv4 set before permitting IPv4 web traffic. That set includes the dev host public address `167.235.8.250`, the Worldstream production address, bridge/private ranges, loopback, link-local, Tailscale CGNAT, documentation, benchmark, multicast, and reserved ranges. Forwarded NEW or invalid traffic into either guest bridge is dropped; only established/related return traffic is accepted. The host input path similarly accepts established/related replies from each bridge before allowing DHCP/DNS and dropping every other guest-originated host connection. This preserves host-initiated admin SSH without exposing host services to the guests.
 
 Live VM creation is intentionally fail-closed pending one consolidated approval for these exact persistent host units:
 

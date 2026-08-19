@@ -23,25 +23,31 @@ users:
     shell: /bin/bash
     sudo: []
 
-packages:
-  - ca-certificates
-  - curl
-  - docker.io
-  - fuse-overlayfs
-  - git
-  - gnupg
-  - jq
-  - libicu74
-  - libssl3
-  - nftables
-  - qemu-guest-agent
-  - slirp4netns
-  - uidmap
-  - unzip
-  - xz-utils
-  - zip
-
 write_files:
+  - path: /usr/local/sbin/verify-offline-image
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      required_packages=(
+        1password-cli ca-certificates curl docker.io fuse-overlayfs git gnupg jq
+        libicu74 libssl3 nftables qemu-guest-agent slirp4netns uidmap unzip xz-utils zip
+      )
+      missing=()
+      for package in "${required_packages[@]}"; do
+        dpkg-query -W -f='${db:Status-Status}\n' "${package}" 2>/dev/null | grep -qx installed || missing+=("${package}")
+      done
+      (( ${#missing[@]} == 0 )) || {
+        printf 'offline image is missing required packages: %s\n' "${missing[*]}" >&2
+        exit 1
+      }
+      manifest=/etc/ken-actions-image-manifest.sha256
+      [[ -f "${manifest}" && ! -L "${manifest}" ]] || {
+        echo 'offline image checksum manifest is missing' >&2
+        exit 1
+      }
+      (cd / && sha256sum -c "${manifest}")
   - path: /etc/nftables.conf
     owner: root:root
     permissions: "0644"
@@ -74,6 +80,7 @@ write_files:
       }
 
 runcmd:
+  - /usr/local/sbin/verify-offline-image
   - systemctl disable --now docker.service docker.socket || true
   - /usr/local/sbin/verify-1password-cli
   - loginctl enable-linger ken-deploy-runner
