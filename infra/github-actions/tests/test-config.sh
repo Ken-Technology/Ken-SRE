@@ -1035,24 +1035,25 @@ for name, (memory_kib, vcpus, disk_gib, network, gateway, runner_name) in contra
     admin = users.get("ken-admin", {})
     check(admin.get("lock_passwd") is True and admin.get("ssh_authorized_keys") == ["__HOST_ADMIN_SSH_KEY__"], f"{name}: host-managed admin key")
     files = {entry.get("path"): entry for entry in data.get("write_files") or [] if isinstance(entry, dict)}
-    package_verifier = files.get("/usr/local/sbin/verify-offline-image", {}).get("content", "")
+    bootstrap = files.get("/usr/local/sbin/bootstrap-ken-actions-guest", {}).get("content", "")
     check(
-        "dpkg-query" in package_verifier
-        and "qemu-guest-agent" in package_verifier
-        and "docker.io" in package_verifier
-        and "apt-get" not in package_verifier
-        and "curl --" not in package_verifier,
-        f"{name}: offline package presence verifier",
+        "set -euo pipefail" in bootstrap
+        and "dpkg-query" in bootstrap
+        and "ken-actions-image-manifest.sha256" in bootstrap
+        and "qemu-guest-agent" in bootstrap
+        and "docker.io" in bootstrap
+        and "systemctl enable --now qemu-guest-agent nftables" in bootstrap
+        and "apt-get" not in bootstrap
+        and "curl --" not in bootstrap,
+        f"{name}: single fail-closed offline bootstrap",
     )
     firewall = files.get("/etc/nftables.conf", {}).get("content", "")
     check("policy drop" in firewall and gateway in firewall and "tcp dport 22 accept" in firewall, f"{name}: host-only inbound SSH")
     check("0.0.0.0/0" not in firewall, f"{name}: no public SSH source")
     commands = [str(c).strip() for c in data.get("runcmd") or []]
-    check(commands[0] == "/usr/local/sbin/verify-offline-image", f"{name}: offline image verified before services")
-    check("systemctl enable --now qemu-guest-agent nftables" in commands, f"{name}: services enabled")
+    check(commands == ["/usr/local/sbin/bootstrap-ken-actions-guest"], f"{name}: one fail-closed first-boot gate")
     if name == "ken-deploy":
-        op_verifier = files.get("/usr/local/sbin/verify-1password-cli", {}).get("content", "")
-        check("command -v op" in op_verifier and "apt-get" not in op_verifier and "curl" not in op_verifier, "ken-deploy: offline-seeded 1Password CLI required")
+        check("command -v op" in bootstrap, "ken-deploy: offline-seeded 1Password CLI required")
 
 secret_patterns = [
     re.compile(r"-----BEGIN [A-Z0-9 ]+PRIVATE KEY-----"),
@@ -1074,6 +1075,280 @@ PY
     pass "VM XML and cloud-init contracts"
   else
     fail "VM XML and cloud-init contracts"
+  fi
+
+  echo "== offline image first-boot gate =="
+  if python3 - "${CLOUD_INIT_ROOT}" <<'PY'
+import hashlib
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import yaml
+
+cloud_init_root = Path(sys.argv[1])
+common_manifest_paths = [
+    "etc/ssl/certs/ca-certificates.crt",
+    "usr/bin/curl",
+    "usr/bin/docker",
+    "usr/bin/dockerd",
+    "usr/bin/fuse-overlayfs",
+    "usr/bin/git",
+    "usr/bin/jq",
+    "usr/bin/newgidmap",
+    "usr/bin/newuidmap",
+    "usr/bin/slirp4netns",
+    "usr/bin/unzip",
+    "usr/bin/xz",
+    "usr/bin/zip",
+    "usr/sbin/nft",
+    "usr/sbin/qemu-ga",
+]
+contracts = {
+    "ken-ci": {
+        "runner": "ken-ci-runner",
+        "manifest_paths": common_manifest_paths,
+        "packages": [
+            "ca-certificates", "curl", "docker.io", "fuse-overlayfs", "git", "jq",
+            "libicu74", "libssl3", "nftables", "qemu-guest-agent", "slirp4netns",
+            "uidmap", "unzip", "xz-utils", "zip",
+        ],
+        "needs_op": False,
+    },
+    "ken-deploy": {
+        "runner": "ken-deploy-runner",
+        "manifest_paths": common_manifest_paths + ["usr/bin/gpg", "usr/bin/op"],
+        "packages": [
+            "1password-cli", "ca-certificates", "curl", "docker.io", "fuse-overlayfs",
+            "git", "gnupg", "jq", "libicu74", "libssl3", "nftables",
+            "qemu-guest-agent", "slirp4netns", "uidmap", "unzip", "xz-utils", "zip",
+        ],
+        "needs_op": True,
+    },
+}
+failures = []
+real_sha256sum = shutil.which("sha256sum")
+if not real_sha256sum:
+    raise SystemExit("sha256sum is required for offline bootstrap tests")
+
+
+def write_executable(path, content):
+    path.write_text(content)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def manifest_text(root, paths):
+    lines = []
+    for relative in paths:
+        payload = (root / relative).read_bytes()
+        lines.append(f"{hashlib.sha256(payload).hexdigest()}  {relative}")
+    return "\n".join(lines) + "\n"
+
+
+def prepare_fixture(base, profile, bootstrap):
+    contract = contracts[profile]
+    image_root = base / "image"
+    fake_bin = base / "bin"
+    image_root.mkdir()
+    fake_bin.mkdir()
+    for relative in contract["manifest_paths"]:
+        target = image_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"reviewed test payload for {relative}\n")
+    manifest = image_root / "etc/ken-actions-image-manifest.sha256"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(manifest_text(image_root, contract["manifest_paths"]))
+    script = base / "bootstrap"
+    write_executable(script, bootstrap)
+    command_log = base / "commands.log"
+
+    write_executable(
+        fake_bin / "dpkg-query",
+        """#!/usr/bin/env python3
+import os, sys
+package = sys.argv[-1]
+if os.environ.get("DPKG_QUERY_ERROR") == "1":
+    raise SystemExit(42)
+if package == os.environ.get("MISSING_PACKAGE"):
+    raise SystemExit(1)
+print("installed")
+""",
+    )
+    write_executable(
+        fake_bin / "stat",
+        """#!/usr/bin/env python3
+import os, sys
+fmt = sys.argv[sys.argv.index("-c") + 1]
+if fmt == "%u":
+    print(os.environ.get("MANIFEST_UID", "0"))
+elif fmt == "%a":
+    print(os.environ.get("MANIFEST_MODE", "644"))
+else:
+    raise SystemExit(64)
+""",
+    )
+    write_executable(
+        fake_bin / "sha256sum",
+        f"""#!/usr/bin/env python3
+import os
+import sys
+if os.environ.get("SHA256SUM_ERROR") == "1":
+    raise SystemExit(42)
+os.execv({real_sha256sum!r}, [{real_sha256sum!r}, *sys.argv[1:]])
+""",
+    )
+    for command in ("systemctl", "loginctl"):
+        write_executable(
+            fake_bin / command,
+            """#!/usr/bin/env python3
+import os, pathlib, sys
+with pathlib.Path(os.environ["BOOTSTRAP_COMMAND_LOG"]).open("a") as handle:
+    handle.write(pathlib.Path(sys.argv[0]).name + " " + " ".join(sys.argv[1:]) + "\\n")
+""",
+        )
+    if contract["needs_op"]:
+        write_executable(fake_bin / "op", "#!/bin/sh\nexit 0\n")
+    return image_root, fake_bin, manifest, script, command_log
+
+
+def run_case(profile, bootstrap, mutate=None, env_update=None):
+    with tempfile.TemporaryDirectory(prefix=f"{profile}-offline-gate-") as raw:
+        base = Path(raw)
+        image_root, fake_bin, manifest, script, command_log = prepare_fixture(base, profile, bootstrap)
+        if mutate:
+            mutate(image_root, fake_bin, manifest)
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
+                "KEN_OFFLINE_IMAGE_ROOT": str(image_root),
+                "BOOTSTRAP_COMMAND_LOG": str(command_log),
+            }
+        )
+        if env_update:
+            env.update(env_update)
+        result = subprocess.run(
+            ["/bin/bash", str(script)],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+        log = command_log.read_text() if command_log.exists() else ""
+        return result.returncode, result.stdout, log
+
+
+def expect_blocked(profile, bootstrap, name, mutate=None, env_update=None):
+    status, output, log = run_case(profile, bootstrap, mutate, env_update)
+    if status == 0 or log:
+        failures.append(f"{profile} {name}: status={status}, later_commands={log!r}, output={output!r}")
+
+
+def require_sha256sum_alone_would_accept(profile, bootstrap, name, mutate):
+    with tempfile.TemporaryDirectory(prefix=f"{profile}-sha-only-") as raw:
+        base = Path(raw)
+        image_root, fake_bin, manifest, _script, _command_log = prepare_fixture(base, profile, bootstrap)
+        mutate(image_root, fake_bin, manifest)
+        result = subprocess.run(
+            [real_sha256sum, "-c", str(manifest)],
+            cwd=image_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            failures.append(f"{profile} {name}: sha256sum alone unexpectedly rejected fixture: {result.stdout!r}")
+
+
+def remove_manifest(_root, _bin, manifest):
+    manifest.unlink()
+
+
+def non_regular_manifest(_root, _bin, manifest):
+    manifest.unlink()
+    manifest.mkdir()
+
+
+def empty_manifest(_root, _bin, manifest):
+    manifest.write_text("")
+
+
+def malformed_manifest(_root, _bin, manifest):
+    manifest.write_text("not a checksum manifest\n")
+
+
+def duplicate_manifest(_root, _bin, manifest):
+    first = manifest.read_text().splitlines()[0]
+    manifest.write_text(manifest.read_text() + first + "\n")
+
+
+def out_of_root_manifest(root, _bin, manifest):
+    first, *rest = manifest.read_text().splitlines()
+    digest = first.split()[0]
+    (root.parent / "outside").write_bytes((root / common_manifest_paths[0]).read_bytes())
+    manifest.write_text("\n".join([f"{digest}  ../outside", *rest]) + "\n")
+
+
+def wrong_checksum(root, _bin, _manifest):
+    (root / common_manifest_paths[0]).write_text("changed after manifest generation\n")
+
+
+def remove_op(_root, fake_bin, _manifest):
+    (fake_bin / "op").unlink()
+
+
+for profile, contract in contracts.items():
+    data = yaml.safe_load((cloud_init_root / f"{profile}-user-data.yaml").read_text())
+    files = {entry.get("path"): entry for entry in data.get("write_files") or [] if isinstance(entry, dict)}
+    bootstrap = files.get("/usr/local/sbin/bootstrap-ken-actions-guest", {}).get("content", "")
+    if not bootstrap:
+        failures.append(f"{profile}: missing bootstrap-ken-actions-guest")
+        continue
+
+    status, output, log = run_case(profile, bootstrap)
+    expected_log = (
+        "systemctl disable --now docker.service docker.socket\n"
+        f"loginctl enable-linger {contract['runner']}\n"
+        "systemctl enable --now qemu-guest-agent nftables\n"
+    )
+    if status != 0 or log != expected_log:
+        failures.append(f"{profile} valid image: status={status}, log={log!r}, output={output!r}")
+
+    require_sha256sum_alone_would_accept(profile, bootstrap, "empty manifest", empty_manifest)
+    require_sha256sum_alone_would_accept(profile, bootstrap, "duplicate manifest", duplicate_manifest)
+    require_sha256sum_alone_would_accept(profile, bootstrap, "out-of-root manifest", out_of_root_manifest)
+
+    expect_blocked(profile, bootstrap, "missing package", env_update={"MISSING_PACKAGE": "docker.io"})
+    expect_blocked(profile, bootstrap, "package verifier error", env_update={"DPKG_QUERY_ERROR": "1"})
+    expect_blocked(profile, bootstrap, "missing manifest", mutate=remove_manifest)
+    expect_blocked(profile, bootstrap, "non-regular manifest", mutate=non_regular_manifest)
+    expect_blocked(profile, bootstrap, "wrong owner", env_update={"MANIFEST_UID": "501"})
+    expect_blocked(profile, bootstrap, "group/world writable manifest", env_update={"MANIFEST_MODE": "666"})
+    expect_blocked(profile, bootstrap, "empty manifest", mutate=empty_manifest)
+    expect_blocked(profile, bootstrap, "malformed manifest", mutate=malformed_manifest)
+    expect_blocked(profile, bootstrap, "duplicate manifest entry", mutate=duplicate_manifest)
+    expect_blocked(profile, bootstrap, "out-of-root manifest entry", mutate=out_of_root_manifest)
+    expect_blocked(profile, bootstrap, "wrong checksum", mutate=wrong_checksum)
+    expect_blocked(profile, bootstrap, "checksum verifier error", env_update={"SHA256SUM_ERROR": "1"})
+    if contract["needs_op"]:
+        expect_blocked(profile, bootstrap, "missing op", mutate=remove_op)
+
+if failures:
+    print("OFFLINE_BOOTSTRAP_FAIL")
+    print("\n".join(failures))
+    raise SystemExit(1)
+print("OFFLINE_BOOTSTRAP_OK")
+PY
+  then
+    pass "offline first-boot verification gates every later mutation"
+  else
+    fail "offline first-boot verification gate"
   fi
 
   echo "== VM provisioning boundary =="

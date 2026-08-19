@@ -24,30 +24,89 @@ users:
     sudo: []
 
 write_files:
-  - path: /usr/local/sbin/verify-offline-image
+  - path: /usr/local/sbin/bootstrap-ken-actions-guest
     owner: root:root
     permissions: "0755"
     content: |
       #!/usr/bin/env bash
       set -euo pipefail
+
+      fail_bootstrap() {
+        printf 'deployment guest bootstrap refused: %s\n' "$*" >&2
+        exit 1
+      }
+
+      image_root="${KEN_OFFLINE_IMAGE_ROOT:-/}"
+      [[ -d "${image_root}" && ! -L "${image_root}" ]] || fail_bootstrap "image root is not a real directory"
+      image_root="$(realpath -- "${image_root}")"
+
       required_packages=(
         1password-cli ca-certificates curl docker.io fuse-overlayfs git gnupg jq
         libicu74 libssl3 nftables qemu-guest-agent slirp4netns uidmap unzip xz-utils zip
       )
+      required_manifest_paths=(
+        etc/ssl/certs/ca-certificates.crt
+        usr/bin/curl
+        usr/bin/docker
+        usr/bin/dockerd
+        usr/bin/fuse-overlayfs
+        usr/bin/git
+        usr/bin/jq
+        usr/bin/newgidmap
+        usr/bin/newuidmap
+        usr/bin/slirp4netns
+        usr/bin/unzip
+        usr/bin/xz
+        usr/bin/zip
+        usr/sbin/nft
+        usr/sbin/qemu-ga
+        usr/bin/gpg
+        usr/bin/op
+      )
+
       missing=()
       for package in "${required_packages[@]}"; do
         dpkg-query -W -f='${db:Status-Status}\n' "${package}" 2>/dev/null | grep -qx installed || missing+=("${package}")
       done
-      (( ${#missing[@]} == 0 )) || {
-        printf 'offline image is missing required packages: %s\n' "${missing[*]}" >&2
-        exit 1
-      }
-      manifest=/etc/ken-actions-image-manifest.sha256
-      [[ -f "${manifest}" && ! -L "${manifest}" ]] || {
-        echo 'offline image checksum manifest is missing' >&2
-        exit 1
-      }
-      (cd / && sha256sum -c "${manifest}")
+      (( ${#missing[@]} == 0 )) || fail_bootstrap "offline image is missing required packages: ${missing[*]}"
+
+      manifest="${image_root%/}/etc/ken-actions-image-manifest.sha256"
+      [[ -f "${manifest}" && ! -L "${manifest}" && -s "${manifest}" ]] || fail_bootstrap "checksum manifest is missing, empty, symlinked, or non-regular"
+
+      manifest_uid="$(stat -c %u -- "${manifest}")"
+      [[ "${manifest_uid}" == 0 ]] || fail_bootstrap "checksum manifest is not owned by root"
+      manifest_mode="$(stat -c %a -- "${manifest}")"
+      [[ "${manifest_mode}" =~ ^[0-7]{3,4}$ ]] || fail_bootstrap "checksum manifest mode is invalid"
+      manifest_mode_value=$((8#${manifest_mode}))
+      (( (manifest_mode_value & 8#022) == 0 )) || fail_bootstrap "checksum manifest is group- or world-writable"
+
+      manifest_index=0
+      while IFS= read -r manifest_line || [[ -n "${manifest_line}" ]]; do
+        (( manifest_index < ${#required_manifest_paths[@]} )) || fail_bootstrap "checksum manifest contains extra or duplicate entries"
+        checksum="${manifest_line%%  *}"
+        manifest_path="${manifest_line#*  }"
+        [[ "${manifest_line}" == "${checksum}  ${manifest_path}" ]] || fail_bootstrap "checksum manifest line is malformed"
+        [[ "${checksum}" =~ ^[0-9a-f]{64}$ ]] || fail_bootstrap "checksum manifest digest is malformed"
+        [[ "${manifest_path}" =~ ^[A-Za-z0-9._+/-]+$ ]] || fail_bootstrap "checksum manifest path is malformed"
+        [[ "${manifest_path}" == "${required_manifest_paths[manifest_index]}" ]] || fail_bootstrap "checksum manifest entries are not the exact reviewed set"
+
+        manifest_target="${image_root%/}/${manifest_path}"
+        [[ -f "${manifest_target}" && ! -L "${manifest_target}" ]] || fail_bootstrap "reviewed manifest target is missing, symlinked, or non-regular: ${manifest_path}"
+        manifest_target_real="$(realpath -- "${manifest_target}")"
+        case "${manifest_target_real}" in
+          "${image_root%/}/"*) ;;
+          *) fail_bootstrap "reviewed manifest target resolves outside the image root: ${manifest_path}" ;;
+        esac
+        manifest_index=$((manifest_index + 1))
+      done <"${manifest}"
+      (( manifest_index == ${#required_manifest_paths[@]} )) || fail_bootstrap "checksum manifest is missing reviewed entries"
+      (cd "${image_root}" && sha256sum -c "${manifest}")
+
+      command -v op >/dev/null 2>&1 || fail_bootstrap "1Password CLI must be seeded into the verified offline image"
+
+      systemctl disable --now docker.service docker.socket || true
+      loginctl enable-linger ken-deploy-runner
+      systemctl enable --now qemu-guest-agent nftables
   - path: /etc/nftables.conf
     owner: root:root
     permissions: "0644"
@@ -68,22 +127,7 @@ write_files:
           type filter hook output priority 0; policy accept;
         }
       }
-  - path: /usr/local/sbin/verify-1password-cli
-    owner: root:root
-    permissions: "0755"
-    content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-      command -v op >/dev/null 2>&1 || {
-        echo '1Password CLI must be seeded into the verified offline image' >&2
-        exit 1
-      }
-
 runcmd:
-  - /usr/local/sbin/verify-offline-image
-  - systemctl disable --now docker.service docker.socket || true
-  - /usr/local/sbin/verify-1password-cli
-  - loginctl enable-linger ken-deploy-runner
-  - systemctl enable --now qemu-guest-agent nftables
+  - /usr/local/sbin/bootstrap-ken-actions-guest
 
 final_message: Ken deployment guest bootstrap complete
