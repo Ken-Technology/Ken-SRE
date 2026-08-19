@@ -463,6 +463,49 @@ def _secret_names(payload: Any) -> list[str]:
     return sorted(set(names))
 
 
+COLLECT_DIR_INPUT_KEYS = (
+    "org",
+    "repos_index",
+    "runners",
+    "runner_groups",
+    "org_secret_names",
+    "org_variable_names",
+    "budgets",
+    "billing",
+    "hosts",
+    "grok_runners",
+    "worldstream_runners",
+    "onepassword_vaults",
+    "collection_meta",
+    "repositories",
+)
+
+
+def collect_dir_files_read_by_generate() -> tuple[str, ...]:
+    return (
+        "org.json",
+        "repos.json",
+        "runners.json",
+        "runner-groups.json",
+        "org-secrets.json",
+        "org-variables.json",
+        "budgets.json",
+        "blacksmith-billing.json",
+        "hosts.json",
+        "grok-runners.json",
+        "worldstream-runners.json",
+        "onepassword-vaults.json",
+        "collection-meta.json",
+        "repos/*/meta.json",
+        "repos/*/secrets.json",
+        "repos/*/variables.json",
+        "repos/*/tree.json",
+        "repos/*/workflows/*",
+        "repos/*/environments/*.json",
+        "repos/*/environment-secrets/*.json",
+    )
+
+
 def collect_input_snapshot(collect_dir: Path) -> dict[str, Any]:
     repos_index = load_json(collect_dir / "repos.json", [])
     repo_snapshots: list[dict[str, Any]] = []
@@ -536,6 +579,7 @@ def collect_input_snapshot(collect_dir: Path) -> dict[str, Any]:
         "hosts": load_json(collect_dir / "hosts.json", {}),
         "grok_runners": load_json(collect_dir / "grok-runners.json", {}),
         "worldstream_runners": load_json(collect_dir / "worldstream-runners.json", {}),
+        "onepassword_vaults": load_json(collect_dir / "onepassword-vaults.json", []),
         "collection_meta": load_json(collect_dir / "collection-meta.json", {}),
         "repositories": repo_snapshots,
     }
@@ -568,6 +612,7 @@ def build_input_manifest(collect_dir: Path, repositories: list[dict[str, Any]], 
             "host_evidence",
             "grok_runners",
             "worldstream_runners",
+            "onepassword_vaults",
             "collection_meta",
         ],
         "repositories": repos_out,

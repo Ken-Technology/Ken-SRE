@@ -470,6 +470,39 @@ class RegenerationAndManifestTests(unittest.TestCase):
             hash_b = yaml.safe_load((out_b / "input-manifest.yaml").read_text())["input_hash"]
             self.assertNotEqual(hash_a, hash_b)
 
+    def test_onepassword_vaults_change_hash_and_secret_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            collect = Path(tmp) / "collect"
+            out_a = Path(tmp) / "a"
+            out_b = Path(tmp) / "b"
+            self._copy_fixture(collect)
+            aw.generate(collect, out_a)
+            (collect / "onepassword-vaults.json").write_text(json.dumps(["Development", "New Vault"]))
+            aw.generate(collect, out_b)
+            import yaml
+
+            hash_a = yaml.safe_load((out_a / "input-manifest.yaml").read_text())["input_hash"]
+            hash_b = yaml.safe_load((out_b / "input-manifest.yaml").read_text())["input_hash"]
+            self.assertNotEqual(hash_a, hash_b)
+            secrets_b = yaml.safe_load((out_b / "secrets.yaml").read_text())
+            self.assertEqual(secrets_b["onepassword_visible_vaults"], ["Development", "New Vault"])
+            secrets_a = yaml.safe_load((out_a / "secrets.yaml").read_text())
+            self.assertNotEqual(secrets_a["onepassword_visible_vaults"], secrets_b["onepassword_visible_vaults"])
+
+    def test_covered_inputs_include_every_generator_collect_source(self):
+        snapshot = aw.collect_input_snapshot(FIXTURE_DIR)
+        covered = set(aw.build_input_manifest(FIXTURE_DIR, [], "2026-08-19T16:00:00Z")["covered_inputs"])
+        for key in aw.COLLECT_DIR_INPUT_KEYS:
+            self.assertIn(key, snapshot, f"snapshot missing {key}")
+        self.assertIn("onepassword_vaults", snapshot)
+        self.assertIn("onepassword_vaults", covered)
+        for banned in ("repositories.yaml", "runners.yaml", "secrets.yaml", "input-manifest.yaml"):
+            self.assertNotIn(banned, snapshot)
+            self.assertNotIn(banned, covered)
+        for source in aw.collect_dir_files_read_by_generate():
+            self.assertTrue(source, "empty generator source")
+            self.assertFalse(str(source).endswith(".yaml") and "inventory/" in str(source))
+
     def test_no_stack_yet_is_not_a_deploy(self):
         result = classify(
             repo="ken-analytics",
