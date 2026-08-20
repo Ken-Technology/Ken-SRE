@@ -7,7 +7,7 @@ source_inventory:
   resolver: read-only gh api orgs/Ken-Technology/repos
 runner_distribution:
   version: 2.336.0
-  archive_url: https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-linux-x64-2.336.0.tar.gz
+  archive_path: /opt/ken-actions/payloads/actions-runner-linux-x64-2.336.0.tar.gz
   sha256: 04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
   release_id: 356901421
   asset_id: 483731096

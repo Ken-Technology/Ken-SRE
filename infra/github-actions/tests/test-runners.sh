@@ -88,13 +88,14 @@ check(platform.get("schema_version") == 2, "runner platform schema_version must 
 check(platform.get("organization") == "Ken-Technology", "organization must be Ken-Technology")
 check(platform.get("runner_distribution") == {
     "version": "2.336.0",
-    "archive_url": "https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-linux-x64-2.336.0.tar.gz",
+    "archive_path": "/opt/ken-actions/payloads/actions-runner-linux-x64-2.336.0.tar.gz",
     "sha256": "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d",
     "release_id": 356901421,
     "asset_id": 483731096,
     "provenance_url": "https://api.github.com/repos/actions/runner/releases/356901421",
     "provenance_retrieved_at": "2026-08-19T20:52:33Z",
 }, "exact pinned Actions runner distribution and provenance")
+check("archive_url" not in platform.get("runner_distribution", {}), "runner distribution has no network archive authority")
 runners = platform.get("runners") or []
 check([item.get("name") for item in runners] == expected_names, "exact ordered 14-identity reservation model")
 check(sum(item.get("enabled") is True for item in runners) == 12, "exactly twelve identities enabled")
@@ -227,6 +228,14 @@ for forbidden in ("LoadCredential", "OP_SERVICE_ACCOUNT_TOKEN", "credential_prof
     check(forbidden not in combined, f"runner contract forbids {forbidden}")
 check(not re.search(r"(?:^|[ =/])sudo(?:[ =/]|$)", combined, re.M), "runner contract has no sudo")
 check(not re.search(r"(?:SupplementaryGroups|groups?).*docker", combined, re.I), "runner account has no Docker group")
+
+runner_implementation = "\n".join(
+    (root / relative).read_text(errors="replace")
+    for relative in ("scripts/register-runners.sh", "scripts/verify-platform.sh", "inventory/runner-platform.yaml")
+)
+for forbidden_network_authority in ("archive_url", "urllib.request", "urlopen("):
+    check(forbidden_network_authority not in runner_implementation, f"runner install has no {forbidden_network_authority} network fallback")
+check("tarfile.open(fileobj=archive_handle" in runner_implementation, "runner extraction consumes the validated local archive descriptor")
 
 if failures:
     print("\n".join(f"RUNNER_CONTRACT_FAIL {failure}" for failure in failures))
@@ -429,6 +438,143 @@ def write_runtime_evidence(base):
         "cleanup_verified": True,
         "host_resources_healthy": True,
     })
+
+
+def embedded_program(path, variable):
+    text = path.read_text()
+    marker = f"{variable} = r'''"
+    if marker not in text:
+        raise AssertionError(f"missing embedded program: {variable}")
+    return text.split(marker, 1)[1].split("\n'''", 1)[0]
+
+
+def archive_request(path, digest, test_root, *, expected_uid=None, expected_gid=None):
+    return {
+        "name": "ken-ci-standard-01",
+        "runner_distribution": {
+            "version": "2.336.0",
+            "archive_path": str(path),
+            "sha256": digest,
+            "release_id": 356901421,
+            "asset_id": 483731096,
+            "provenance_url": "https://api.github.com/repos/actions/runner/releases/356901421",
+            "provenance_retrieved_at": "2026-08-19T20:52:33Z",
+        },
+        "test_archive_root": str(test_root),
+        "test_expected_uid": os.getuid() if expected_uid is None else expected_uid,
+        "test_expected_gid": os.getgid() if expected_gid is None else expected_gid,
+    }
+
+
+def run_archive_preflight(program, request):
+    return call([sys.executable, "-c", program, "test-archive-preflight"], env={
+        "KEN_RUNNER_EMBEDDED_ARCHIVE_TEST": json.dumps(request, sort_keys=True, separators=(",", ":")),
+    })
+
+
+runner_remote = embedded_program(register, "REMOTE_RUNNER_PROGRAM")
+verifier_remote = embedded_program(verify, "REMOTE_VERIFY_PROGRAM")
+for label, program in (("registrar", runner_remote), ("verifier", verifier_remote)):
+    with tempfile.TemporaryDirectory() as temporary:
+        archive_root = Path(temporary)
+        archive_root.chmod(0o755)
+        payload_root = archive_root / "payloads"
+        payload_root.mkdir(mode=0o755)
+        archive_path = payload_root / "actions-runner-linux-x64-2.336.0.tar.gz"
+        archive_path.write_bytes(b"offline-actions-runner-fixture")
+        archive_path.chmod(0o444)
+        digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+        canonical = archive_request(archive_path, digest, archive_root)
+        accepted = run_archive_preflight(program, canonical)
+        check(accepted.returncode == 0 and "ARCHIVE_PREFLIGHT_OK" in accepted.stdout, f"{label} accepts exact local archive bytes", accepted)
+
+        archive_path.chmod(0o644)
+        writable = run_archive_preflight(program, canonical)
+        check(writable.returncode != 0 and "mode 0444" in writable.stderr.lower(), f"{label} rejects writable archive", writable)
+        archive_path.chmod(0o444)
+
+        hardlink_path = payload_root / "runner-hardlink.tar.gz"
+        os.link(archive_path, hardlink_path)
+        hardlinked = run_archive_preflight(program, canonical)
+        check(hardlinked.returncode != 0 and "hardlink" in hardlinked.stderr.lower(), f"{label} rejects hardlinked archive", hardlinked)
+        hardlink_path.unlink()
+
+        symlink_path = payload_root / "runner-symlink.tar.gz"
+        symlink_path.symlink_to(archive_path)
+        symlinked = run_archive_preflight(program, archive_request(symlink_path, digest, archive_root))
+        check(symlinked.returncode != 0 and "symlink" in symlinked.stderr.lower(), f"{label} rejects symlinked archive", symlinked)
+
+        directory = payload_root / "runner-directory.tar.gz"
+        directory.mkdir(mode=0o755)
+        nonregular = run_archive_preflight(program, archive_request(directory, digest, archive_root))
+        check(nonregular.returncode != 0 and "regular file" in nonregular.stderr.lower(), f"{label} rejects nonregular archive", nonregular)
+
+        wrong_owner = run_archive_preflight(program, archive_request(archive_path, digest, archive_root, expected_uid=os.getuid() + 1))
+        check(wrong_owner.returncode != 0 and "owner" in wrong_owner.stderr.lower(), f"{label} rejects wrong archive owner", wrong_owner)
+
+        wrong_hash = run_archive_preflight(program, archive_request(archive_path, "f" * 64, archive_root))
+        check(wrong_hash.returncode != 0 and "checksum" in wrong_hash.stderr.lower(), f"{label} rejects wrong archive digest", wrong_hash)
+
+        traversal_path = payload_root / ".." / "payloads" / archive_path.name
+        traversal = run_archive_preflight(program, archive_request(traversal_path, digest, archive_root))
+        check(traversal.returncode != 0 and "canonical" in traversal.stderr.lower(), f"{label} rejects traversal archive path", traversal)
+
+        network_path = copy.deepcopy(canonical)
+        network_path["runner_distribution"]["archive_path"] = "https://github.com/actions/runner/releases/download/v2.336.0/runner.tar.gz"
+        network = run_archive_preflight(program, network_path)
+        check(network.returncode != 0 and "absolute" in network.stderr.lower(), f"{label} rejects network archive path", network)
+
+        wrong_type = copy.deepcopy(canonical)
+        wrong_type["runner_distribution"]["archive_path"] = True
+        typed = run_archive_preflight(program, wrong_type)
+        check(typed.returncode != 0 and "schema" in typed.stderr.lower(), f"{label} rejects non-string archive path", typed)
+
+        unsafe_parent = payload_root
+        unsafe_parent.chmod(0o777)
+        unsafe = run_archive_preflight(program, canonical)
+        check(unsafe.returncode != 0 and "parent" in unsafe.stderr.lower(), f"{label} rejects writable archive parent", unsafe)
+        unsafe_parent.chmod(0o755)
+
+
+with tempfile.TemporaryDirectory() as temporary:
+    mutation_root = Path(temporary)
+    transport_log = mutation_root / "transport.log"
+    transport_stub = mutation_root / "transport"
+    transport_stub.write_text("#!/bin/sh\nprintf '%s\\n' invoked >> \"$KEN_MUTATION_TRANSPORT_LOG\"\nexit 97\n")
+    transport_stub.chmod(0o700)
+    canonical_platform = yaml.safe_load(platform_path.read_text())
+    canonical_platform["runner_distribution"].pop("archive_url", None)
+    canonical_platform["runner_distribution"]["archive_path"] = "/opt/ken-actions/payloads/actions-runner-linux-x64-2.336.0.tar.gz"
+    mutations = {
+        "archive-url-replacement": lambda value: (value["runner_distribution"].pop("archive_path"), value["runner_distribution"].__setitem__("archive_url", "https://github.com/actions/runner/releases/download/v2.336.0/runner.tar.gz")),
+        "extra-archive-url": lambda value: value["runner_distribution"].__setitem__("archive_url", "https://github.com/actions/runner/releases/download/v2.336.0/runner.tar.gz"),
+        "relative-path": lambda value: value["runner_distribution"].__setitem__("archive_path", "runner.tar.gz"),
+        "traversal-path": lambda value: value["runner_distribution"].__setitem__("archive_path", "/opt/ken-actions/payloads/../payloads/actions-runner-linux-x64-2.336.0.tar.gz"),
+        "wrong-path": lambda value: value["runner_distribution"].__setitem__("archive_path", "/var/cache/ken-actions/actions-runner-linux-x64-2.336.0.tar.gz"),
+        "path-type": lambda value: value["runner_distribution"].__setitem__("archive_path", True),
+        "hash-value": lambda value: value["runner_distribution"].__setitem__("sha256", "f" * 64),
+        "hash-type": lambda value: value["runner_distribution"].__setitem__("sha256", 1),
+        "extra-key": lambda value: value["runner_distribution"].__setitem__("download", "forbidden"),
+    }
+    for label, mutate in mutations.items():
+        candidate = copy.deepcopy(canonical_platform)
+        mutate(candidate)
+        candidate_path = mutation_root / f"{label}.yaml"
+        candidate_path.write_text(yaml.safe_dump(candidate, sort_keys=False))
+        env = {
+            "KEN_RUNNER_PLATFORM_FILE": str(candidate_path),
+            "KEN_RUNNER_COMMAND_TEST": "1",
+            "KEN_RUNNER_GH_BIN": str(transport_stub),
+            "KEN_RUNNER_SSH_BIN": str(transport_stub),
+            "KEN_MUTATION_TRANSPORT_LOG": str(transport_log),
+        }
+        for command_name, command in (
+            ("register", ["bash", str(register), "--org", "Ken-Technology", "--all"]),
+            ("verify", ["bash", str(verify), "runners"]),
+        ):
+            result = call(command, env=env)
+            check(result.returncode != 0 and "runner distribution" in result.stderr.lower(), f"{label} {command_name} rejects malformed archive authority", result)
+            check(not transport_log.exists(), f"{label} {command_name} rejects before gh/SSH/systemctl transport", result)
 
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -839,7 +985,17 @@ safe = {key:value for key,value in payload.items() if key not in {"registration_
 with log_path.open("a") as handle: handle.write(json.dumps({"tool":"ssh","mode":mode,"payload":safe})+"\n")
 state = json.loads(state_path.read_text())
 name = payload.get("name")
-if mode == "probe":
+if mode == "archive-preflight":
+    distribution = payload.get("runner_distribution", {})
+    if distribution.get("archive_path") != "/opt/ken-actions/payloads/actions-runner-linux-x64-2.336.0.tar.gz" or "archive_url" in distribution:
+        raise SystemExit(70)
+    guest_targets = [arg.removeprefix("root@") for arg in args if arg.startswith("root@")]
+    guest = guest_targets[-1] if guest_targets else ""
+    if os.environ.get("KEN_FAKE_SSH_ARCHIVE_FAILURE_GUEST") in {"all", guest}:
+        print("runner archive checksum mismatch", file=sys.stderr)
+        raise SystemExit(71)
+    print(json.dumps({"status":"exact","archive_sha256":distribution["sha256"]}))
+elif mode == "probe":
     print(json.dumps(state["guests"].get(name, {"status":"absent","name":name})))
 elif mode == "apply":
     if payload.get("registration_token") != "short-lived-registration-token": raise SystemExit(65)
@@ -890,6 +1046,25 @@ raise SystemExit(99)
         "KEN_RUNNER_JOURNAL_DIR": str(live_root / "journals"),
     }
     approved_command = ["bash", str(register), "--org", "Ken-Technology", "--all", "--approval-evidence", str(approval_path)]
+
+    for command_name, command in (
+        ("register", approved_command),
+        ("verify", ["bash", str(verify), "runners", "--approval-evidence", str(approval_path)]),
+    ):
+        archive_failure_log = live_root / f"archive-failure-{command_name}.jsonl"
+        archive_failure = call(command, env={
+            **live_env,
+            "KEN_FAKE_COMMAND_LOG": str(archive_failure_log),
+            "KEN_FAKE_SSH_ARCHIVE_FAILURE_GUEST": "ken-ci",
+        })
+        archive_failure_records = [json.loads(line) for line in archive_failure_log.read_text().splitlines()] if archive_failure_log.exists() else []
+        check(
+            archive_failure.returncode != 0
+            and archive_failure_records
+            and all(record.get("tool") == "ssh" and record.get("mode") == "archive-preflight" for record in archive_failure_records),
+            f"{command_name} rejects unsafe guest archive before GitHub or systemctl transport",
+            archive_failure,
+        )
 
     canonical_evidence = json.loads(approval_path.read_text())
     manifest_path = live_root / "authority/guest-image-manifest.yaml"
@@ -981,6 +1156,23 @@ raise SystemExit(99)
     live_second = call(approved_command, env=live_env)
     check(live_second.returncode == 0 and "NO_CHANGES=1" in live_second.stdout, "approved guarded live rerun is exact no-op", live_second)
     log_records = [json.loads(line) for line in command_log.read_text().splitlines()[live_log_start:]]
+    first_gh_index = next((index for index, record in enumerate(log_records) if record.get("tool") == "gh"), None)
+    archive_preflight_indices = [index for index, record in enumerate(log_records) if record.get("tool") == "ssh" and record.get("mode") == "archive-preflight"]
+    check(
+        first_gh_index is not None
+        and len(archive_preflight_indices) >= 2
+        and max(archive_preflight_indices[:2]) < first_gh_index,
+        "both guest archives pass read-only SSH preflight before the first GitHub call",
+    )
+    check(
+        all(
+            record.get("payload", {}).get("runner_distribution", {}).get("archive_path") == "/opt/ken-actions/payloads/actions-runner-linux-x64-2.336.0.tar.gz"
+            and "archive_url" not in record.get("payload", {}).get("runner_distribution", {})
+            for record in log_records
+            if record.get("tool") == "ssh" and record.get("mode") in {"archive-preflight", "apply", "verify"}
+        ),
+        "all guest transports carry only the exact local archive authority",
+    )
     check(any(record.get("tool") == "gh" and "registration-token" in " ".join(record.get("args", [])) for record in log_records), "live path requests short-lived GitHub registration tokens")
     check(not any("--replace" in " ".join(record.get("args", [])) for record in log_records), "live path never uses --replace")
     check(not any("short-lived-registration-token" in json.dumps(record) for record in log_records), "live command journal never records registration token")

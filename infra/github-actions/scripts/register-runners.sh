@@ -328,7 +328,7 @@ def load_contract(platform_path, ga_root):
         raise ContractError("runner platform schema or organization is invalid")
     if platform.get("runner_distribution") != {
         "version": "2.336.0",
-        "archive_url": "https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-linux-x64-2.336.0.tar.gz",
+        "archive_path": "/opt/ken-actions/payloads/actions-runner-linux-x64-2.336.0.tar.gz",
         "sha256": "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d",
         "release_id": 356901421,
         "asset_id": 483731096,
@@ -527,6 +527,7 @@ def local_runner_state(platform, runner):
         "runner_root": runner["runner_root"],
         "work_root": runner["work_root"],
         "version": platform["runner_distribution"]["version"],
+        "archive_path": platform["runner_distribution"]["archive_path"],
         "archive_sha256": platform["runner_distribution"]["sha256"],
         "disable_update": True,
         "binary_owner": "root",
@@ -788,19 +789,140 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
-import tempfile
-import urllib.request
 from pathlib import Path
 
 mode = sys.argv[1]
-request = json.load(sys.stdin)
+if mode == "test-archive-preflight":
+    if "KEN_RUNNER_EMBEDDED_ARCHIVE_TEST" not in os.environ:
+        raise SystemExit("embedded archive test request is missing")
+    request = json.loads(os.environ.pop("KEN_RUNNER_EMBEDDED_ARCHIVE_TEST"))
+else:
+    request = json.load(sys.stdin)
 name = request.get("name", "")
 if not re.fullmatch(r"ken-(?:ci-standard-0[1-8]|ci-heavy-0[12]|deploy-(?:nonproduction|production)-01)", name):
     raise SystemExit("invalid runner identity")
 marker = Path("/etc/ken-runners") / f"{name}.desired.json"
+
+RUNNER_DISTRIBUTION = {
+    "version": "2.336.0",
+    "archive_path": "/opt/ken-actions/payloads/actions-runner-linux-x64-2.336.0.tar.gz",
+    "sha256": "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d",
+    "release_id": 356901421,
+    "asset_id": 483731096,
+    "provenance_url": "https://api.github.com/repos/actions/runner/releases/356901421",
+    "provenance_retrieved_at": "2026-08-19T20:52:33Z",
+}
+
+def archive_error(message):
+    raise SystemExit(f"runner archive {message}")
+
+def open_validated_runner_archive(distribution, *, test_root=None, expected_uid=0, expected_gid=0):
+    if not isinstance(distribution, dict) or set(distribution) != set(RUNNER_DISTRIBUTION):
+        archive_error("schema mismatch")
+    if test_root is None:
+        if distribution != RUNNER_DISTRIBUTION:
+            archive_error("authority mismatch")
+    else:
+        if any(distribution.get(key) != RUNNER_DISTRIBUTION[key] for key in RUNNER_DISTRIBUTION if key not in {"archive_path", "sha256"}):
+            archive_error("schema mismatch")
+        digest = distribution.get("sha256")
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            archive_error("schema mismatch")
+
+    raw_path = distribution.get("archive_path")
+    if not isinstance(raw_path, str):
+        archive_error("schema mismatch: archive_path must be a string")
+    if not raw_path.startswith("/"):
+        archive_error("path must be absolute")
+    if os.path.normpath(raw_path) != raw_path:
+        archive_error("path must be canonical")
+    archive_path = Path(raw_path)
+    root = Path("/") if test_root is None else Path(test_root)
+    if not root.is_absolute() or os.path.normpath(str(root)) != str(root):
+        archive_error("test root must be absolute and canonical")
+    try:
+        archive_path.relative_to(root)
+    except ValueError:
+        archive_error("path is outside its authority root")
+
+    parent = archive_path.parent
+    parent_chain = []
+    while True:
+        parent_chain.append(parent)
+        if parent == root:
+            break
+        if parent == parent.parent:
+            archive_error("parent chain does not reach its authority root")
+        parent = parent.parent
+    for directory in reversed(parent_chain):
+        try:
+            metadata = directory.lstat()
+        except OSError:
+            archive_error(f"parent is missing or unsafe: {directory}")
+        if stat.S_ISLNK(metadata.st_mode):
+            archive_error(f"parent is symlinked: {directory}")
+        if not stat.S_ISDIR(metadata.st_mode):
+            archive_error(f"parent is not a directory: {directory}")
+        if metadata.st_uid != expected_uid or metadata.st_gid != expected_gid or stat.S_IMODE(metadata.st_mode) & 0o022:
+            archive_error(f"parent ownership or mode is unsafe: {directory}")
+
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(archive_path, flags)
+    except OSError:
+        if archive_path.is_symlink():
+            archive_error("is symlinked")
+        archive_error("is missing or unsafe")
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            archive_error("is not a regular file")
+        if before.st_uid != expected_uid or before.st_gid != expected_gid:
+            archive_error("owner must be exact")
+        if stat.S_IMODE(before.st_mode) != 0o444:
+            archive_error("must be exact mode 0444")
+        if before.st_nlink != 1:
+            archive_error("must not have hardlinks")
+        hasher = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            hasher.update(chunk)
+        after = os.fstat(descriptor)
+        stable_fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(before, field) != getattr(after, field) for field in stable_fields):
+            archive_error("changed during validation")
+        if hasher.hexdigest() != distribution["sha256"]:
+            archive_error("checksum mismatch")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        handle = os.fdopen(descriptor, "rb")
+        descriptor = -1
+        return handle
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+if mode == "test-archive-preflight":
+    with open_validated_runner_archive(
+        request.get("runner_distribution"),
+        test_root=request.get("test_archive_root"),
+        expected_uid=request.get("test_expected_uid"),
+        expected_gid=request.get("test_expected_gid"),
+    ):
+        pass
+    print("ARCHIVE_PREFLIGHT_OK")
+    raise SystemExit
+
+if mode == "archive-preflight":
+    with open_validated_runner_archive(request.get("runner_distribution")):
+        pass
+    print(json.dumps({"status": "exact", "archive_sha256": RUNNER_DISTRIBUTION["sha256"]}, sort_keys=True, separators=(",", ":")))
+    raise SystemExit
 
 def atomic_write(path, content, file_mode=0o600):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -899,6 +1021,7 @@ if mode == "probe":
     raise SystemExit
 
 if mode == "apply":
+    archive_handle = open_validated_runner_archive(request.get("runner_distribution"))
     if probe().get("status") != "absent":
         raise SystemExit("refusing non-absent runner state")
     expected = request["expected_probe"]
@@ -972,21 +1095,9 @@ if mode == "apply":
         runtime = Path(expected["docker_runtime_root"])
         runtime.mkdir(mode=0o700, parents=True, exist_ok=False)
         os.chown(runtime, uid, gid)
-    archive = request["runner_distribution"]
-    with tempfile.NamedTemporaryFile(prefix="ken-runner-", suffix=".tar.gz", delete=False) as handle:
-        archive_path = Path(handle.name)
-        with urllib.request.urlopen(archive["archive_url"], timeout=120) as response:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk: break
-                handle.write(chunk)
-    try:
-        if hashlib.sha256(archive_path.read_bytes()).hexdigest() != archive["sha256"]:
-            raise SystemExit("runner archive checksum mismatch")
-        with tarfile.open(archive_path, "r:gz") as bundle:
+    with archive_handle:
+        with tarfile.open(fileobj=archive_handle, mode="r:gz") as bundle:
             bundle.extractall(expected["runner_root"], filter="data")
-    finally:
-        archive_path.unlink(missing_ok=True)
     for unit_name, content in request["units"].items():
         unit_path = Path("/etc/systemd/system") / unit_name
         if unit_path.exists() or unit_path.is_symlink():
@@ -1300,6 +1411,7 @@ def expected_live_probe(ga_root, platform, runner):
         "runner_group": platform["groups"][runner["runner_group"]]["name"],
         "labels": runner["labels"],
         "version": platform["runner_distribution"]["version"],
+        "archive_path": platform["runner_distribution"]["archive_path"],
         "archive_sha256": platform["runner_distribution"]["sha256"],
         "unit_sha256": unit_sha256(units),
         "helper_sha256": unit_sha256(helpers),
@@ -1342,6 +1454,13 @@ def run_live(platform, ga_root, args):
     load_live_approval(args.approval_evidence, ga_root)
     gh_bin = command_path("gh", "KEN_RUNNER_GH_BIN")
     ssh_bin = command_path("ssh", "KEN_RUNNER_SSH_BIN")
+    for guest, representative in (("ken-ci", "ken-ci-standard-01"), ("ken-deploy", "ken-deploy-nonproduction-01")):
+        preflight = ssh_runner(ssh_bin, args.host, guest, "archive-preflight", {
+            "name": representative,
+            "runner_distribution": platform["runner_distribution"],
+        })
+        if preflight != {"status": "exact", "archive_sha256": platform["runner_distribution"]["sha256"]}:
+            raise ContractError(f"runner archive preflight mismatch: {guest}")
     identity = subprocess.run([gh_bin, "api", "user", "--jq", ".login"], text=True, capture_output=True)
     if identity.returncode != 0 or identity.stdout.strip() != "cristian-frunze":
         raise ContractError("GitHub controller identity must be cristian-frunze")
