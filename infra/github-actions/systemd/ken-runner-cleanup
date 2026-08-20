@@ -83,7 +83,7 @@ case "${mode}" in
   cleanup|recover|assert-clean|mark-dirty) ;;
   *) die 'cleanup mode must be cleanup, recover, assert-clean, or mark-dirty' ;;
 esac
-[[ "${runner_name}" =~ ^ken-(ci-(standard|heavy)-[0-9]{2}|deploy-(nonproduction|production)-01)$ ]] || die 'invalid runner name'
+[[ "${runner_name}" =~ ^ken-(ci-standard-0[1-8]|ci-heavy-0[12]|deploy-(nonproduction|production)-01)$ ]] || die 'invalid runner name'
 [[ "${runner_uid}" =~ ^[0-9]+$ ]] || die 'runner UID must be numeric'
 
 test_mode=0
@@ -136,12 +136,20 @@ root_device="$(stat_device "${runner_root}")"
 expected_device="${KEN_RUNNER_EXPECTED_DEVICE:-${root_device}}"
 [[ "${root_device}" == "${expected_device}" ]] || die 'runner root device mismatch'
 
-for child in home runner work docker; do
+children=(home runner work)
+if [[ "${runner_name}" == ken-ci-* ]]; then
+  children+=(docker)
+fi
+for child in "${children[@]}"; do
   path="${runner_root}/${child}"
   [[ -d "${path}" && ! -L "${path}" ]] || die "runner ${child} path is a symlink or not a directory"
   canonical="$(canonical_path "${path}")" || die "runner ${child} path is missing"
   [[ "${canonical}" == "${runner_canonical}/${child}" ]] || die "runner ${child} path resolves outside the runner root"
-  [[ "$(stat_uid "${path}")" == "${runner_uid}" ]] || die "runner ${child} owner mismatch"
+  expected_child_owner="${runner_uid}"
+  if [[ "${child}" == runner ]]; then
+    expected_child_owner="${state_owner}"
+  fi
+  [[ "$(stat_uid "${path}")" == "${expected_child_owner}" ]] || die "runner ${child} owner mismatch"
   [[ "$(stat_device "${path}")" == "${expected_device}" ]] || die "runner ${child} device mismatch"
 done
 

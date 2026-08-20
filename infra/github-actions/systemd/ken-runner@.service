@@ -8,7 +8,6 @@ ConditionPathExists=/etc/ken-runners/%i.ready
 Type=simple
 User=nobody
 Group=nogroup
-Slice=ken-runner-%i.slice
 WorkingDirectory=/var/lib/ken-runners/%i/runner
 Environment=HOME=/var/lib/ken-runners/%i/home
 Environment=RUNNER_TOOL_CACHE=/var/lib/ken-runners/%i/runner/_tool

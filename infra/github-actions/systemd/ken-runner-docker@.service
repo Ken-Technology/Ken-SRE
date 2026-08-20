@@ -9,7 +9,6 @@ Type=notify
 NotifyAccess=all
 User=nobody
 Group=nogroup
-Slice=ken-runner-%i.slice
 Environment=HOME=/var/lib/ken-runners/%i/home
 Environment=XDG_RUNTIME_DIR=/run/ken-rootless-docker/%i
 Environment=DOCKER_HOST=unix:///run/ken-rootless-docker/%i/docker.sock

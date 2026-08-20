@@ -1,0 +1,11 @@
+[Unit]
+Description=Resource boundary for ken-ci-standard-01 listener and rootless Docker
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+TasksAccounting=true
+CPUQuota=200%
+MemoryMax=8G
+MemorySwapMax=0
+TasksMax=4096

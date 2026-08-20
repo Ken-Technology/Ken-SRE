@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 organization: Ken-Technology
 source_inventory:
   path: inventory/repositories.yaml
@@ -42,7 +42,22 @@ groups:
 classes:
   standard: {cpu_quota: 200%, memory_max: 8G, memory_swap_max: 0, tasks_max: 4096}
   heavy: {cpu_quota: 400%, memory_max: 16G, memory_swap_max: 0, tasks_max: 8192}
-  deploy: {cpu_quota: 200%, memory_max: 5G, memory_swap_max: 0, tasks_max: 4096}
+deploy_resources:
+  parent_slice: ken-actions-deploy.slice
+  ordinary_leases: 2
+  exclusive_action: ken-frontend-production-release
+  writer_preference: true
+  ordinary_peak: {memory_mib: 8448, cpu_quota: 300%}
+  builder_peak: {memory_mib: 9472, cpu_quota: 350%}
+  guest_headroom: {memory_gib: 2, cpu_quota: 50%, minimum_mem_available_gib: 1.5, swap_allowed: false}
+  slice_assignments:
+    listeners: ken-actions-deploy-listeners.slice
+    brokers: ken-actions-deploy-brokers.slice
+    transaction_1: ken-actions-deploy-transaction-1.slice
+    transaction_2: ken-actions-deploy-transaction-2.slice
+    builder: ken-actions-deploy-builder.slice
+    uploader: ken-actions-deploy-uploader.slice
+    executor: ken-actions-deploy-executor.slice
 runners:
   - name: ken-ci-standard-01
     enabled: true
@@ -61,9 +76,7 @@ runners:
     subgid_start: 1000000
     subid_count: 65536
     systemd_instance: ken-ci-standard-01
-    slice: ken-runner-ken-ci-standard-01.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-standard-01.slice
   - name: ken-ci-standard-02
     enabled: true
     vm: ken-ci
@@ -81,9 +94,7 @@ runners:
     subgid_start: 1065536
     subid_count: 65536
     systemd_instance: ken-ci-standard-02
-    slice: ken-runner-ken-ci-standard-02.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-standard-02.slice
   - name: ken-ci-standard-03
     enabled: true
     vm: ken-ci
@@ -101,9 +112,7 @@ runners:
     subgid_start: 1131072
     subid_count: 65536
     systemd_instance: ken-ci-standard-03
-    slice: ken-runner-ken-ci-standard-03.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-standard-03.slice
   - name: ken-ci-standard-04
     enabled: true
     vm: ken-ci
@@ -121,9 +130,7 @@ runners:
     subgid_start: 1196608
     subid_count: 65536
     systemd_instance: ken-ci-standard-04
-    slice: ken-runner-ken-ci-standard-04.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-standard-04.slice
   - name: ken-ci-standard-05
     enabled: true
     vm: ken-ci
@@ -141,9 +148,7 @@ runners:
     subgid_start: 1262144
     subid_count: 65536
     systemd_instance: ken-ci-standard-05
-    slice: ken-runner-ken-ci-standard-05.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-standard-05.slice
   - name: ken-ci-standard-06
     enabled: true
     vm: ken-ci
@@ -161,9 +166,7 @@ runners:
     subgid_start: 1327680
     subid_count: 65536
     systemd_instance: ken-ci-standard-06
-    slice: ken-runner-ken-ci-standard-06.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-standard-06.slice
   - name: ken-ci-standard-07
     enabled: true
     vm: ken-ci
@@ -181,9 +184,7 @@ runners:
     subgid_start: 1393216
     subid_count: 65536
     systemd_instance: ken-ci-standard-07
-    slice: ken-runner-ken-ci-standard-07.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-standard-07.slice
   - name: ken-ci-standard-08
     enabled: true
     vm: ken-ci
@@ -201,9 +202,7 @@ runners:
     subgid_start: 1458752
     subid_count: 65536
     systemd_instance: ken-ci-standard-08
-    slice: ken-runner-ken-ci-standard-08.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-standard-08.slice
   - name: ken-ci-standard-09
     enabled: false
     vm: ken-ci
@@ -221,9 +220,7 @@ runners:
     subgid_start: 1524288
     subid_count: 65536
     systemd_instance: ken-ci-standard-09
-    slice: ken-runner-ken-ci-standard-09.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: null
   - name: ken-ci-standard-10
     enabled: false
     vm: ken-ci
@@ -241,9 +238,7 @@ runners:
     subgid_start: 1589824
     subid_count: 65536
     systemd_instance: ken-ci-standard-10
-    slice: ken-runner-ken-ci-standard-10.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: null
   - name: ken-ci-heavy-01
     enabled: true
     vm: ken-ci
@@ -261,9 +256,7 @@ runners:
     subgid_start: 1655360
     subid_count: 65536
     systemd_instance: ken-ci-heavy-01
-    slice: ken-runner-ken-ci-heavy-01.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-heavy-01.slice
   - name: ken-ci-heavy-02
     enabled: true
     vm: ken-ci
@@ -281,13 +274,11 @@ runners:
     subgid_start: 1720896
     subid_count: 65536
     systemd_instance: ken-ci-heavy-02
-    slice: ken-runner-ken-ci-heavy-02.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-ci-runner-heavy-02.slice
   - name: ken-deploy-nonproduction-01
     enabled: true
     vm: ken-deploy
-    class: deploy
+    class: nonproduction
     runner_group: deploy
     labels: [self-hosted, linux, x64, ken-deploy, nonproduction]
     user: ghr-deploy-np01
@@ -301,13 +292,11 @@ runners:
     subgid_start: 1786432
     subid_count: 65536
     systemd_instance: ken-deploy-nonproduction-01
-    slice: ken-runner-ken-deploy-nonproduction-01.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-actions-deploy-listeners.slice
   - name: ken-deploy-production-01
     enabled: true
     vm: ken-deploy
-    class: deploy
+    class: production
     runner_group: deploy
     labels: [self-hosted, linux, x64, ken-deploy, production]
     user: ghr-deploy-p01
@@ -321,6 +310,4 @@ runners:
     subgid_start: 1851968
     subid_count: 65536
     systemd_instance: ken-deploy-production-01
-    slice: ken-runner-ken-deploy-production-01.slice
-    credential_profile: none
-    credential_delivery: broker-only-pending-task-6
+    slice: ken-actions-deploy-listeners.slice
