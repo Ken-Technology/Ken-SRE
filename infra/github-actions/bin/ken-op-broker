@@ -47,13 +47,13 @@ MAX_PACKET = 65536
 MAX_OIDC = 16384
 MAX_GITHUB_TOKEN = 4096
 PLAN_SHA256 = "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658"
-TASK7_REVIEWED_COMMIT_SHA = "f672e261e4d11cf0c46b5133145676190341aab8"
+TASK7_REVIEWED_COMMIT_SHA = "a06da36014e6b08a7478f5306c137c52c436c3ef"
 TRANSPORT_PATH = Path("/usr/local/libexec/ken-actions/ken-actions-deploy-transaction")
 TRANSPORT_STATE_ROOT = Path("/run/ken-actions-deploy")
 TRANSPORT_POLICY_PATH = Path("/etc/ken-op-broker/op-broker-policy.yaml")
 TRANSPORT_STARTUP_RECOVERY_TIMEOUT_SECONDS = 700
 TASK7_ARTIFACT_SHA256 = {
-    "/usr/local/libexec/ken-actions/ken-actions-deploy-transaction": "7ed2f64598f396db94bb137df31bdca65d786daec23270f90188bbead9c50075",
+    "/usr/local/libexec/ken-actions/ken-actions-deploy-transaction": "f4cbe9c5222d3dafe9899b539c0bcdbd3b734f8b39d6c1c444f7ae8e42e54fd2",
     "/etc/systemd/system/ken-actions-deploy-transaction-1.service": "8934f845a0ea882a26f3b6699f6a865662febbb736ec5816897504186b9faa24",
     "/etc/systemd/system/ken-actions-deploy-transaction-2.service": "d137931523ec039b51f1b2428bf9e0c485b2ce688e5efca06b8678ba55f91ba1",
     "/etc/systemd/system/ken-frontend-production-builder@.service": "434e76ae73a386c290bb16f3f45df48cfc892b738d8fec2c32ed1bcda3cc3c3e",
@@ -61,10 +61,10 @@ TASK7_ARTIFACT_SHA256 = {
     "/etc/systemd/system/ken-frontend-deploy-executor@.service": "dac86637f7f99ec71087585052250fbc4e32fc73cc585ac3370998c96fde78fd",
 }
 TASK7_BINDING_SHA256 = {
-    "ordinary_systemd_transaction_transport_sha256": "8ca19b81c31edcc47a0676f3c5ded567894ec0ea3ea5b7870ca7f4adf4d82f9d",
-    "frontend_operation_binding_sha256": "7c488ccd4a4e91c053c5b36f0ced8b8629d56cc5fb86883a805c9f3619b9a2b7",
-    "frontend_phase_transport_sha256": "796a76abeb0b1c22bf151e57963960cc0ed96c62fe14e57ea82ef907056098ea",
-    "frontend_deploy_contract_sha256": "96d676de15919d38b622ef7f12cf1493f570764db1dda84700f5f1524fb1f974",
+    "ordinary_systemd_transaction_transport_sha256": "5e1641f88d90bd43ad1fb56cef41574c3cda29497d3c139aa1c040e0634500f2",
+    "frontend_operation_binding_sha256": "ab05e6593ce625be91fad528f7adcdd7c2696f1664d8ba113a0f58a5a363b12e",
+    "frontend_phase_transport_sha256": "f4784b92e104c27530e0b9dd86b98d4205faf83098aae616e9ecf392bef12fda",
+    "frontend_deploy_contract_sha256": "47ebf14dcd3341c1dd7b843d45b102e996190d6f954d8b1bb4d003e6484cc564",
     "trusted_generation_dependency_acquisition_sha256": "dcd386771149140e68e19a2c44989ea3e268c7171afd32fa38db166541ae6933",
     "trusted_generation_generated_paths_manifest_sha256": "08720cf30192a6daf13056fd150cece9c4308ff13adad1861b9f2db6deea3ec9",
     "trusted_generation_commit_input_contract_sha256": "d2d81004d9076702ddc01e37cb0d8f189008f033cd7b03871eacf1d8d4e484df",

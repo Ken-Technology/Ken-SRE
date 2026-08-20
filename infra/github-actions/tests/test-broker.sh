@@ -158,7 +158,7 @@ for text in (lock_text, policy_text):
 lock = yaml.load(lock_text, Loader=StrictLoader)
 policy = yaml.load(policy_text, Loader=StrictLoader)
 assert lock["schema_version"] == 1
-assert lock["lock_version"] == "2026-08-20.4+task7-f672e261e4d11cf0c46b5133145676190341aab8"
+assert lock["lock_version"] == "2026-08-20.4+task7-a06da36014e6b08a7478f5306c137c52c436c3ef"
 assert lock["plan_sha256"] == "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658"
 required = {"1password-cli", "python", "pyyaml", "pyjwt", "cryptography", "ca-certificates", "git", "systemd", "buildkit", "node", "pnpm", "zip-safety"}
 components = {x["id"]: x for x in lock["components"]}
@@ -195,11 +195,29 @@ assert lock["compatibility"]["installation_readiness"] == "verification-required
 assert lock["compatibility"]["blocking_conditions"] == []
 assert lock["compatibility"]["live_verification"] == "task4-owned-runtime-verify-receipt"
 assert lock["verification"]["known_answer_status"] == "required-by-task4-runtime-verify"
-bindings = yaml.load((root / "action-transport.lock.yaml").read_text(), Loader=StrictLoader)["task6_bindings"]
-artifacts = yaml.load((root / "action-transport.lock.yaml").read_text(), Loader=StrictLoader)["artifacts"]
+task7_manifest_path = root / "action-transport.lock.yaml"
+task7_manifest_bytes = task7_manifest_path.read_bytes()
+task7_manifest = yaml.load(task7_manifest_bytes, Loader=StrictLoader)
+bindings = task7_manifest["task6_bindings"]
+artifacts = task7_manifest["artifacts"]
+assert artifacts["coordinator"]["sha256"] == "f4cbe9c5222d3dafe9899b539c0bcdbd3b734f8b39d6c1c444f7ae8e42e54fd2"
+assert bindings == {
+    "ordinary_systemd_transaction_transport_sha256": "5e1641f88d90bd43ad1fb56cef41574c3cda29497d3c139aa1c040e0634500f2",
+    "frontend_operation_binding_sha256": "ab05e6593ce625be91fad528f7adcdd7c2696f1664d8ba113a0f58a5a363b12e",
+    "frontend_phase_transport_sha256": "f4784b92e104c27530e0b9dd86b98d4205faf83098aae616e9ecf392bef12fda",
+    "frontend_deploy_contract_sha256": "47ebf14dcd3341c1dd7b843d45b102e996190d6f954d8b1bb4d003e6484cc564",
+    "trusted_generation_dependency_acquisition_sha256": "dcd386771149140e68e19a2c44989ea3e268c7171afd32fa38db166541ae6933",
+    "trusted_generation_generated_paths_manifest_sha256": "08720cf30192a6daf13056fd150cece9c4308ff13adad1861b9f2db6deea3ec9",
+    "trusted_generation_commit_input_contract_sha256": "d2d81004d9076702ddc01e37cb0d8f189008f033cd7b03871eacf1d8d4e484df",
+    "trusted_generation_cgroup_contract_sha256": "9c01ecb1ada3ae65f0f157698accf56cc56cbafadd078589bf3df7d4893cf854",
+    "trusted_generation_phase_transport_sha256": "6e0945130af419de14091f5afc06d404a919319f7dc2bcee7cf40489561ec12b",
+}
+task7_manifest_sha256 = hashlib.sha256(task7_manifest_bytes).hexdigest()
+for task6_runtime_path in (root.parent / "bin/ken-op-broker", root / "broker-runtime.lock.yaml", root / "op-broker-policy.yaml"):
+    assert task7_manifest_sha256.encode() not in task6_runtime_path.read_bytes(), task6_runtime_path
 assert contract["execution_transport"] == {
     "status": "bound-reviewed-task7",
-    "reviewed_commit_sha": "f672e261e4d11cf0c46b5133145676190341aab8",
+    "reviewed_commit_sha": "a06da36014e6b08a7478f5306c137c52c436c3ef",
     "coordinator": "/usr/local/libexec/ken-actions/ken-actions-deploy-transaction",
     "coordinator_sha256": artifacts["coordinator"]["sha256"],
     "transaction_slices": ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"],
@@ -230,6 +248,12 @@ for item in installed.values():
     if item["source"].startswith("repo:") or item["source"].startswith("repo-hard-copy:"):
         relative = item["source"].split(":", 1)[1]
         assert __import__("hashlib").sha256((root.parent / relative).read_bytes()).hexdigest() == item["sha256"], item["path"]
+for artifact in artifacts.values():
+    source_path = root.parent / artifact["path"]
+    assert source_path.is_file() and not source_path.is_symlink(), source_path
+    assert __import__("hashlib").sha256(source_path.read_bytes()).hexdigest() == artifact["sha256"], source_path
+    expected_mode = 0o755 if artifact["path"].startswith("bin/") else 0o644
+    assert __import__("stat").S_IMODE(source_path.stat().st_mode) == expected_mode, source_path
 assert policy["schema_version"] == 1
 assert policy["policy_version"]
 assert policy["issuer"] == "https://token.actions.githubusercontent.com"
@@ -574,6 +598,13 @@ class ProtocolTests(unittest.TestCase):
                 value = copy.deepcopy(raw); value["schema_version"] = schema_version
                 target.write_text(yaml.safe_dump(value, sort_keys=False))
                 with self.subTest(schema_version=schema_version), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
+            for action_index in range(len(raw["actions"])):
+                value = copy.deepcopy(raw)
+                value["actions"][action_index]["enabled"] = True
+                value["actions"][action_index]["blocked_reason_code"] = "none"
+                target.write_text(yaml.safe_dump(value, sort_keys=False))
+                with self.subTest(false_ready_action=action_index), self.assertRaises(broker.Reject):
+                    broker.load_policy(target, allow_nonroot=True)
             scalar_mutations = {
                 "runner_uid_bool": lambda value: value["actions"][0]["runner"].__setitem__("uid", True),
                 "executor_timeout_bool": lambda value: value["actions"][0]["executor"].__setitem__("timeout_seconds", True),
