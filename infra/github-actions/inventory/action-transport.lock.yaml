@@ -1,5 +1,5 @@
 schema_version: 1
-transport_version: 2026-08-20.1
+transport_version: 2026-08-20.2
 status: reviewed-transport-awaiting-task6-final-bindings
 enabled: false
 installation_authorized: false
@@ -15,6 +15,26 @@ task6_core:
   broker_sha256: 8d1c7859a1d4108e507d2f9a32acee8a1e26a10c212186fc751ab39e1c47d22e
   policy_sha256: b1e15a9b74e3330c32eb63143d65f51fd1ec595c8eeb3a36cfb46abcc27cc89b
   runtime_lock_sha256: 2aae227ff90d932c0d80ef71a23993e2819e911b83c7a9ed492647bae67d465f
+task6_receipts:
+  reviewed_source_commit_sha: 45c55b6fc0cd2752d2869c4517475c86004a1e91
+  reviewed_source_tree_sha: e8da0e42c2593ff4bb284d7bc52320cefb1ba517
+  helper_blob_sha: ad56d39488c749a29486d2a842d713bbd838fa7d
+  helper_path: bin/ken-frontend-production-release
+  helper_sha256: 8a611e251c69ee0af1f66043d508695461decf271cc32b76dbe224833a17f183
+  contract_sha256: d5ebeb58afb5f5e24bc1b6a6e74934ee3a22ae337b103a085d2df9a5776db63c
+  phases: [source, build, scan, upload, registry, token-destroy, digest, deploy-health, cleanup]
+  actor_uids: {source: 22003, build: 22201, scan: 0, upload: 22202, registry: 22003, token-destroy: 22003, digest: 0, deploy-health: 22203, cleanup: 0}
+  firewall_phases:
+    source: []
+    build: [node-base-read, package-read, build-offline]
+    scan: []
+    upload: [posthog-upload]
+    registry: [ghcr-write]
+    token-destroy: []
+    digest: []
+    deploy-health: [frontend-deploy, frontend-public-health]
+    cleanup: []
+  task4_deploy_target_authority: deferred-until-single-stop-readback
 task6_final:
   status: unavailable
   commit_sha: null
@@ -30,7 +50,7 @@ leases:
 artifacts:
   coordinator:
     path: bin/ken-actions-deploy-transaction
-    sha256: 5b309be70de0bf4455f24d8e8f9deeebfad57cc4dc82b228f37aaabcee024aca
+    sha256: 7ed2f64598f396db94bb137df31bdca65d786daec23270f90188bbead9c50075
   ordinary_slot_1:
     path: systemd/ken-actions-deploy-transaction-1.service
     sha256: 8934f845a0ea882a26f3b6699f6a865662febbb736ec5816897504186b9faa24
@@ -47,10 +67,10 @@ artifacts:
     path: systemd/ken-frontend-deploy-executor@.service
     sha256: dac86637f7f99ec71087585052250fbc4e32fc73cc585ac3370998c96fde78fd
 task6_bindings:
-  ordinary_systemd_transaction_transport_sha256: d8746421176465a3c83d4b361516dc98cd4e77b256f3dd41669f4e477fcd54a1
-  frontend_operation_binding_sha256: c2ebf1603f52fdb1a17c8c5910ae5c2f7f8ff18717f27369f294f5ee540367d8
-  frontend_phase_transport_sha256: 25c2eeefe364d2dfdc39e48a9b92a04482bc52805d15130bcc6f4e504a458322
-  frontend_deploy_contract_sha256: 01b26e5cb494f4658fe670b6b3e43fe7b7cd9e2d59e12fa287a98871eb99b4b3
+  ordinary_systemd_transaction_transport_sha256: 8ca19b81c31edcc47a0676f3c5ded567894ec0ea3ea5b7870ca7f4adf4d82f9d
+  frontend_operation_binding_sha256: 7c488ccd4a4e91c053c5b36f0ced8b8629d56cc5fb86883a805c9f3619b9a2b7
+  frontend_phase_transport_sha256: 796a76abeb0b1c22bf151e57963960cc0ed96c62fe14e57ea82ef907056098ea
+  frontend_deploy_contract_sha256: 96d676de15919d38b622ef7f12cf1493f570764db1dda84700f5f1524fb1f974
   trusted_generation_dependency_acquisition_sha256: dcd386771149140e68e19a2c44989ea3e268c7171afd32fa38db166541ae6933
   trusted_generation_generated_paths_manifest_sha256: 08720cf30192a6daf13056fd150cece9c4308ff13adad1861b9f2db6deea3ec9
   trusted_generation_commit_input_contract_sha256: d2d81004d9076702ddc01e37cb0d8f189008f033cd7b03871eacf1d8d4e484df

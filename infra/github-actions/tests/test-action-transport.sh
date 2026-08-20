@@ -85,7 +85,7 @@ manifest_path = root / "inventory/action-transport.lock.yaml"
 manifest = yaml.load(manifest_path.read_text(), Loader=StrictLoader)
 
 assert type(manifest["schema_version"]) is int and manifest["schema_version"] == 1
-assert manifest["transport_version"] == "2026-08-20.1"
+assert manifest["transport_version"] == "2026-08-20.2"
 assert manifest["status"] == "reviewed-transport-awaiting-task6-final-bindings"
 assert manifest["enabled"] is False
 assert manifest["installation_authorized"] is False
@@ -102,6 +102,23 @@ assert manifest["task6_core"] == {
     "broker_sha256": "8d1c7859a1d4108e507d2f9a32acee8a1e26a10c212186fc751ab39e1c47d22e",
     "policy_sha256": "b1e15a9b74e3330c32eb63143d65f51fd1ec595c8eeb3a36cfb46abcc27cc89b",
     "runtime_lock_sha256": "2aae227ff90d932c0d80ef71a23993e2819e911b83c7a9ed492647bae67d465f",
+}
+assert manifest["task6_receipts"] == {
+    "reviewed_source_commit_sha": "45c55b6fc0cd2752d2869c4517475c86004a1e91",
+    "reviewed_source_tree_sha": "e8da0e42c2593ff4bb284d7bc52320cefb1ba517",
+    "helper_blob_sha": "ad56d39488c749a29486d2a842d713bbd838fa7d",
+    "helper_path": "bin/ken-frontend-production-release",
+    "helper_sha256": "8a611e251c69ee0af1f66043d508695461decf271cc32b76dbe224833a17f183",
+    "contract_sha256": "d5ebeb58afb5f5e24bc1b6a6e74934ee3a22ae337b103a085d2df9a5776db63c",
+    "phases": ["source", "build", "scan", "upload", "registry", "token-destroy", "digest", "deploy-health", "cleanup"],
+    "actor_uids": {"source":22003,"build":22201,"scan":0,"upload":22202,"registry":22003,"token-destroy":22003,"digest":0,"deploy-health":22203,"cleanup":0},
+    "firewall_phases": {
+        "source": [], "build": ["node-base-read", "package-read", "build-offline"],
+        "scan": [], "upload": ["posthog-upload"], "registry": ["ghcr-write"],
+        "token-destroy": [], "digest": [],
+        "deploy-health": ["frontend-deploy", "frontend-public-health"], "cleanup": [],
+    },
+    "task4_deploy_target_authority": "deferred-until-single-stop-readback",
 }
 assert manifest["task6_final"] == {
     "status": "unavailable",
@@ -260,8 +277,11 @@ run_check 'real coordinator enforces leases descriptors phases cgroups and recov
   python3 - "${TRANSPORT}" <<'PY'
 from __future__ import annotations
 
+import contextlib
+import copy
 import hashlib
 import importlib.machinery
+import io
 import json
 import os
 import tempfile
@@ -460,6 +480,26 @@ class TransportTests(unittest.TestCase):
             transport.finish_transaction(scheduler, runtime, lease)
             self.assertEqual(runtime.calls, ["reap", "cleanup"])
             self.assertEqual(scheduler.active_leases(), ())
+
+    def test_zero_prefix_production_recovery_completes_in_one_pass_without_receipt_root(self):
+        request_id = "6" * 64
+        parsed = transport.TransportRequest(1, request_id, "ken-frontend-production-release", "b" * 64, "c" * 40, ())
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            request = state / "requests" / request_id
+            request.mkdir(parents=True, mode=0o700)
+            runtime = transport.LiveRecoveryRuntime(state)
+            lease = transport.LeaseHandle(request_id, (1, 2), "production_build")
+            with mock.patch.object(transport, "_request_directory", return_value=request), mock.patch.object(
+                transport, "_recover_firewall", return_value=True
+            ), mock.patch.object(transport, "_load_request", return_value=(request, parsed)), mock.patch.object(
+                transport, "_load_policy", return_value={}
+            ), mock.patch.object(transport, "_action", return_value={}), mock.patch.object(
+                transport, "require_frontend_receipt_transport", return_value=object()
+            ):
+                self.assertTrue(runtime.cleanup_request(lease))
+            self.assertFalse(request.exists())
+            self.assertFalse((state / "frontend-receipts" / request_id).exists())
 
     def test_cgroup_contract_rejects_wrong_parent_or_phase(self):
         transport.validate_cgroup(
@@ -739,6 +779,25 @@ class TransportTests(unittest.TestCase):
             with self.assertRaises(transport.TransportReject):
                 transport.execute_action_mode(bad, slot=1, ordinary=ordinary, trusted_runtime=None)
 
+    def test_ordinary_slot_defers_terminal_status_to_dispatcher(self):
+        request_id = "5" * 64
+        request = transport.TransportRequest(1, request_id, "ken-vexa-mcp-auth-production-deploy", "b" * 64, "c" * 40, ("artifact", "rendered"))
+        lease = transport.LeaseHandle(request_id, (1,), "ordinary")
+        scheduler = object()
+        action = {"enabled": True, "input_mode": "artifact"}
+        with mock.patch.object(transport.os, "geteuid", return_value=0), mock.patch.object(
+            transport, "_current_control_group", return_value="/ken.slice/ken-actions.slice/ken-actions-deploy.slice/ken-actions-deploy-transaction.slice/ken-actions-deploy-transaction-1.slice/ken-actions-deploy-transaction-1.service"
+        ), mock.patch.object(transport, "LeaseScheduler", return_value=scheduler), mock.patch.object(
+            transport, "_lease_for_slot", return_value=lease
+        ), mock.patch.object(transport, "_load_request", return_value=(Path("/request"), request)), mock.patch.object(
+            transport, "_load_policy", return_value={}
+        ), mock.patch.object(transport, "_action", return_value=action), mock.patch.object(
+            transport, "_execute_ordinary"
+        ) as execute, mock.patch.object(transport, "_status_write") as status:
+            transport.run_ordinary_slot(1, Path("/state"), Path("/policy"))
+        execute.assert_called_once()
+        status.assert_not_called()
+
     def test_frontend_state_machine_never_overlaps_builder_uploader_or_deploy(self):
         state = transport.FrontendPhaseState()
         expected = ["source-ready", "dependencies-ready", "secret-build", "builder-reaped", "scan-passed", "uploader", "uploader-reaped", "registry-readback", "token-destroyed", "deploy", "deploy-reaped", "cleaned"]
@@ -787,11 +846,294 @@ class TransportTests(unittest.TestCase):
             encoded = json.dumps(contract, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
             self.assertEqual(transport.contract_sha256(contract), hashlib.sha256(encoded).hexdigest(), name)
 
-    def test_frontend_stays_unavailable_without_exact_receipt_transport(self):
-        for action in ({}, {"production_build": {"phase_transport_sha256": "a" * 64, "deploy_contract_sha256": "b" * 64}}):
-            with self.assertRaises(transport.TransportReject) as caught:
+    def _bound_frontend_action(self):
+        import yaml
+        root = Path(path).parent.parent
+        policy = yaml.safe_load((root / "inventory/op-broker-policy.yaml").read_text())
+        action = copy.deepcopy(next(row for row in policy["actions"] if row["action_id"] == "ken-frontend-production-release"))
+        action["enabled"] = True
+        digests = transport.binding_digests()
+        action["production_build"]["phase_transport_sha256"] = digests["frontend_phase_transport_sha256"]
+        action["production_build"]["deploy_contract_sha256"] = digests["frontend_deploy_contract_sha256"]
+        action["executor"]["operation_binding_sha256"] = digests["frontend_operation_binding_sha256"]
+        action["executor"]["systemd_transaction_transport_sha256"] = digests["ordinary_systemd_transaction_transport_sha256"]
+        return action
+
+    def test_frontend_receipt_transport_binds_exact_task6_helper_action_and_firewall(self):
+        for action in ({}, {"action_id": "ken-frontend-production-release", "input_mode": "source_commit"}):
+            with self.assertRaises(transport.TransportReject):
                 transport.require_frontend_receipt_transport(action)
-            self.assertEqual(caught.exception.code, "frontend_receipt_transport_unavailable")
+        action = self._bound_frontend_action()
+        helper = transport.require_frontend_receipt_transport(action)
+        self.assertEqual(helper.RECEIPT_CONTRACT_SHA256, transport.TASK6_RECEIPT_CONTRACT_SHA256)
+        self.assertEqual(tuple(helper.RECEIPT_PHASES), transport.FRONTEND_RECEIPT_PHASES)
+        self.assertEqual(dict(helper.RECEIPT_ACTOR_UIDS), transport.FRONTEND_RECEIPT_ACTOR_UIDS)
+        self.assertEqual({key: tuple(value) for key, value in helper.RECEIPT_FIREWALL_PHASES.items()}, transport.FRONTEND_RECEIPT_FIREWALL_PHASES)
+        self.assertEqual(dict(transport.FRONTEND_FIREWALL_PHASES), {
+            name: row["uid"] for name, row in helper.FRONTEND_FIREWALL_PHASES.items()
+        })
+        drifted = copy.deepcopy(action)
+        drifted["production_build"]["receipt_contract"]["contract_sha256"] = "f" * 64
+        with self.assertRaises(transport.TransportReject):
+            transport.require_frontend_receipt_transport(drifted)
+        with mock.patch.object(transport, "TASK6_RECEIPT_HELPER_SHA256", "f" * 64), self.assertRaises(transport.TransportReject):
+            transport.require_frontend_receipt_transport(action)
+        with mock.patch("importlib.machinery.SourceFileLoader", side_effect=AssertionError("verified path reopened")):
+            helper = transport.load_frontend_receipt_helper()
+        self.assertEqual(helper.RECEIPT_CONTRACT_SHA256, transport.TASK6_RECEIPT_CONTRACT_SHA256)
+        self.assertEqual(transport.TASK6_RECEIPT_SOURCE_TREE_SHA, "e8da0e42c2593ff4bb284d7bc52320cefb1ba517")
+        self.assertEqual(transport.TASK6_RECEIPT_HELPER_BLOB_SHA, "ad56d39488c749a29486d2a842d713bbd838fa7d")
+        self.assertEqual(len({transport.TASK6_RECEIPT_SOURCE_COMMIT_SHA, transport.TASK6_RECEIPT_SOURCE_TREE_SHA, transport.TASK6_RECEIPT_HELPER_BLOB_SHA}), 3)
+
+    def _frontend_evidence(self, helper, phase, source_sha):
+        tree = "c" * 40
+        tree_manifest, variables, oci, maps = "1" * 64, "2" * 64, "3" * 64, "4" * 64
+        provenance, image = "7" * 64, "sha256:" + "e" * 64
+        common = {"source_sha": source_sha, "tree_sha": tree, "image_digest": image, "provenance_sha256": provenance}
+        rows = {
+            "source": {
+                "repository_id": 1141163204, "commit_sha": source_sha, "tree_sha": tree,
+                "tree_manifest_sha256": tree_manifest, **helper.SOURCE_BLOB_SHAS,
+                "variables_manifest_sha256": variables,
+            },
+            "build": {
+                "source_sha": source_sha, "tree_sha": tree, "tree_manifest_sha256": tree_manifest,
+                **helper.SOURCE_BLOB_SHAS, "variables_manifest_sha256": variables,
+                "oci_layout_sha256": oci, "oci_manifest_digest": image,
+                "source_maps_sha256": maps, "build_log_sha256": "5" * 64,
+                "cache_metadata_sha256": "6" * 64, "build_plan_sha256": helper.BUILD_PLAN_SHA256,
+                "provenance_sha256": provenance, "provenance_subject_digest": image,
+                "buildkit_version": "0.24.0", "buildctl_version": "0.24.0",
+                "node_version": "22.20.0", "pnpm_version": "10.28.2",
+                "base_image_digest": helper.BASE_IMAGE_DIGEST, "platform": "linux/amd64",
+            },
+            "scan": {
+                "source_sha": source_sha, "tree_sha": tree, "oci_layout_sha256": oci,
+                "oci_manifest_digest": image, "provenance_sha256": provenance,
+                "provenance_subject_digest": image, "scan_evidence_sha256": "8" * 64,
+                "leakage_encodings": ["raw", "canonical-base64", "lowercase-hex"],
+            },
+            "upload": {"source_maps_sha256": maps, "posthog_upload_sha256": "9" * 64},
+            "registry": {
+                "registry": "ghcr.io/ken-technology/ken-frontend", "image_digest": image,
+                "manifest_digest": image, "platform": "linux/amd64", "source_sha": source_sha,
+                "tree_sha": tree, "oci_layout_sha256": oci, "provenance_sha256": provenance,
+                "provenance_subject_digest": image,
+                "media_type": "application/vnd.oci.image.manifest.v1+json", "readback_verified": True,
+            },
+            "token-destroy": {
+                **common, "token_descriptor_closed": True, "token_buffer_zeroed": True,
+                "token_destroyed_monotonic_ns": 64000,
+            },
+            "digest": {
+                **common, "digest_state_sha256": "a" * 64, "state_key_sha256": "b" * 64,
+                "fsynced": True, "durable_state_published_monotonic_ns": 73000,
+                "durable_state_readback_monotonic_ns": 74000,
+            },
+            "deploy-health": {
+                **common, "deploy_receipt_sha256": "c" * 64, "health_receipt_sha256": "d" * 64,
+                "deploy_completed_monotonic_ns": 80150, "health_started_monotonic_ns": 80300,
+                "health_completed_monotonic_ns": 84000,
+            },
+            "cleanup": {
+                **common, "request_state_removed": True, "source_removed": True,
+                "buildkit_removed": True, "oci_removed": True, "source_maps_removed": True,
+                "secret_mount_removed": True, "descriptors_closed": True,
+                "firewall_inactive": True, "cgroups_empty": True,
+                "cleanup_completed_monotonic_ns": 94000,
+            },
+        }
+        return rows[phase]
+
+    def _frontend_finished_observation(self, helper, phase, request_id):
+        ordinal = helper.RECEIPT_PHASES.index(phase)
+        base = (ordinal + 1) * 10000
+        unit, slice_name, control_group, dedicated = helper._expected_runtime(phase, request_id)
+        transitions = [{
+            "phase": name, "uid": helper.FRONTEND_FIREWALL_PHASES[name]["uid"],
+            "targets": list(helper.FRONTEND_FIREWALL_PHASES[name]["targets"]),
+            "activate_readback_sha256": "f" * 64,
+            "activated_observed_monotonic_ns": base + ((index + 1) * 100),
+            "deactivated": True,
+        } for index, name in enumerate(helper.RECEIPT_FIREWALL_PHASES[phase])]
+        return {
+            "unit": unit, "slice": slice_name, "control_group": control_group,
+            "observed_actor_uid": helper.RECEIPT_ACTOR_UIDS[phase], "actor_pid": 4242,
+            "boot_id": "12345678-1234-1234-1234-123456789abc", "actor_start_ticks": 100,
+            "systemd_exec_start_monotonic_usec": 100,
+            "systemd_exec_exit_monotonic_usec": 200 if dedicated else 0,
+            "started_observed_monotonic_ns": base + 100,
+            "completed_observed_monotonic_ns": base + 9000,
+            "process_reaped": True, "descriptor_snapshots_sha256": "3" * 64,
+            "descriptors_closed": True, "network_authority": helper._network_authority(phase),
+            "firewall_transitions": transitions, "firewall_inactive_after": True,
+            "cgroup_empty_after": dedicated,
+        }
+
+    def test_frontend_receipt_store_seals_verifies_and_recovers_fail_closed(self):
+        helper = transport.require_frontend_receipt_transport(self._bound_frontend_action())
+        request_id, source_sha = "e" * 64, "b" * 40
+        current_uid, current_gid = os.geteuid(), os.getegid()
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            helper, "RECEIPT_OWNER_UID", current_uid
+        ), mock.patch.object(helper, "RECEIPT_OWNER_GID", current_gid), mock.patch.dict(
+            helper.RECEIPT_ACTOR_UIDS, {phase: current_uid for phase in helper.RECEIPT_PHASES}, clear=True
+        ), mock.patch.object(helper, "_parse_start_observation", return_value={}), mock.patch.object(
+            helper, "_finish_root_observation",
+            side_effect=lambda records, request_id, phase: self._frontend_finished_observation(helper, phase, request_id),
+        ):
+            root = Path(directory)
+            state = root / "state"; state.mkdir(mode=0o700)
+            request = state / "requests" / request_id; request.mkdir(parents=True, mode=0o700)
+            policy = root / "policy.yaml"
+            policy.write_bytes((Path(path).parent.parent / "inventory/op-broker-policy.yaml").read_bytes())
+            policy.chmod(0o644)
+            store = transport.FrontendReceiptStore(state, request_id, source_sha, policy, helper)
+            store.initialize()
+            self.assertEqual(store.root, state / "frontend-receipts" / request_id)
+            self.assertNotIn(request, store.root.parents)
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                for phase in helper.RECEIPT_PHASES:
+                    evidence = self._frontend_evidence(helper, phase, source_sha)
+                    data = store.phase_data_path(phase)
+                    data.write_bytes(helper.canonical_phase_data(request_id, source_sha, phase, evidence))
+                    data.chmod(0o600)
+                    for observation in store.observation_paths(phase):
+                        observation.write_text("{}")
+                        observation.chmod(0o600)
+                    observed = (helper.RECEIPT_PHASES.index(phase) + 1) * 10000 + 5000
+                    store.seal(phase, evidence, observed)
+                store.verify_complete()
+            self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
+            self.assertEqual(store.recovery_ordinal(), 9)
+
+            authority = store.authority_path("scan")
+            original = authority.read_bytes()
+            authority.write_bytes(b"{}")
+            with self.assertRaises(transport.TransportReject):
+                store.recovery_ordinal()
+            authority.write_bytes(original); authority.chmod(0o600)
+            self.assertEqual(store.recovery_ordinal(), 9)
+
+            bad_source = self._frontend_evidence(helper, "source", source_sha)
+            bad_source["tree_sha"] = source_sha
+            with self.assertRaises(helper.ReleaseError):
+                helper.canonical_phase_data(request_id, source_sha, "source", bad_source)
+
+            partial = transport.FrontendReceiptStore(state, "f" * 64, source_sha, policy, helper)
+            partial.initialize()
+            evidence = self._frontend_evidence(helper, "source", source_sha)
+            partial.phase_data_path("source").write_bytes(helper.canonical_phase_data("f" * 64, source_sha, "source", evidence))
+            partial.phase_data_path("source").chmod(0o600)
+            partial.observation_paths("source")[0].write_text("{}")
+            partial.observation_paths("source")[0].chmod(0o600)
+            partial.seal("source", evidence, 15000)
+            self.assertEqual(partial.recovery_ordinal(), 1)
+            partial._write_state(0)  # receipt fsync won, process died before state advance
+            self.assertEqual(partial.recovery_ordinal(), 1)
+            self.assertEqual(partial._read_state(), 1)
+            build_evidence = self._frontend_evidence(helper, "build", source_sha)
+            partial.phase_data_path("build").write_bytes(helper.canonical_phase_data("f" * 64, source_sha, "build", build_evidence))
+            partial.phase_data_path("build").chmod(0o600)
+            for observation in partial.observation_paths("build"):
+                observation.write_text("{}"); observation.chmod(0o600)
+            partial.authority_path("build").write_bytes(helper.canonical_phase_authority(
+                "f" * 64, source_sha, "build", build_evidence, 25000,
+            ))
+            partial.authority_path("build").chmod(0o600)
+            self.assertEqual(partial.recover_pending_phase("build"), (build_evidence, 25000))
+            (partial.receipts / "unexpected").write_text("x")
+            with self.assertRaises(transport.TransportReject):
+                partial.recovery_ordinal()
+
+    def test_production_dispatch_orchestrates_then_cleans_releases_and_succeeds(self):
+        request_id = "a" * 64
+        request = transport.TransportRequest(1, request_id, "ken-frontend-production-release", "b" * 64, "c" * 40, ())
+        action = self._bound_frontend_action()
+        lease = transport.LeaseHandle(request_id, (1, 2), "production_build")
+        class Scheduler:
+            def __init__(self, root): pass
+            def wait_for_exclusive(self, value):
+                self.assertEqual(value, request_id) if hasattr(self, "assertEqual") else None
+                return lease
+        events = []
+        class Store:
+            def __init__(self, *args): events.append("store")
+        class Runtime:
+            def __init__(self, *args): events.append("runtime")
+        statuses = []
+        with mock.patch.object(transport.os, "geteuid", return_value=0), mock.patch.object(
+            transport, "_load_request", return_value=(Path("/unused"), request)), mock.patch.object(
+            transport, "_load_policy", return_value={}
+        ), mock.patch.object(transport, "_action", return_value=action), mock.patch.object(
+            transport, "require_frontend_receipt_transport", return_value=object()
+        ), mock.patch.object(transport, "LeaseScheduler", Scheduler), mock.patch.object(
+            transport, "FrontendReceiptStore", Store
+        ), mock.patch.object(transport, "LiveFrontendProductionRuntime", Runtime, create=True), mock.patch.object(
+            transport, "orchestrate_frontend_receipts", side_effect=lambda *args: events.append("orchestrated"), create=True
+        ), mock.patch.object(
+            transport, "finalize_frontend_transaction", side_effect=lambda *args: events.append("finalized"), create=True
+        ), mock.patch.object(
+            transport, "_status_write", side_effect=lambda *args: (events.append("status"), statuses.append(args))
+        ):
+            transport.dispatch(request_id, Path("/state"), Path("/policy"))
+        self.assertEqual(events[-3:], ["orchestrated", "finalized", "status"])
+        self.assertEqual(statuses[-1][2:], ("succeeded", "transport_succeeded"))
+
+        events.clear(); statuses.clear()
+        with mock.patch.object(transport.os, "geteuid", return_value=0), mock.patch.object(
+            transport, "_load_request", return_value=(Path("/unused"), request)), mock.patch.object(
+            transport, "_load_policy", return_value={}
+        ), mock.patch.object(transport, "_action", return_value=action), mock.patch.object(
+            transport, "require_frontend_receipt_transport", return_value=object()
+        ), mock.patch.object(transport, "LeaseScheduler", Scheduler), mock.patch.object(
+            transport, "FrontendReceiptStore", Store
+        ), mock.patch.object(transport, "LiveFrontendProductionRuntime", Runtime, create=True), mock.patch.object(
+            transport, "orchestrate_frontend_receipts", side_effect=lambda *args: events.append("orchestrated"), create=True
+        ), mock.patch.object(
+            transport, "finalize_frontend_transaction", side_effect=transport.TransportReject("cleanup_unverified"), create=True
+        ), mock.patch.object(transport, "finish_transaction", side_effect=transport.TransportReject("cleanup_unverified")), mock.patch.object(
+            transport, "_status_write", side_effect=lambda *args: statuses.append(args)
+        ), self.assertRaises(transport.TransportReject):
+            transport.dispatch(request_id, Path("/state"), Path("/policy"))
+        self.assertNotIn(("succeeded", "transport_succeeded"), [row[2:] for row in statuses])
+
+    def test_frontend_root_orchestration_resumes_and_cleanup_commits_last(self):
+        events = []
+        class Store:
+            def initialize_or_recover(self): events.append("recover:2"); return 2
+            def recover_pending_phase(self, phase): return None
+            def seal(self, phase, evidence, observed): events.append(f"seal:{phase}")
+            def recovery_ordinal(self): return 8
+            def verify_complete(self): events.append("verify:9")
+        class Runtime:
+            def execute_phase(self, phase, store): events.append(f"execute:{phase}"); return {"phase": phase}, 100
+            def stop_and_reap(self, lease): events.append("reap"); return True
+            def remove_request(self, lease): events.append("remove-request"); return True
+            def execute_cleanup(self, store):
+                events.append("execute:cleanup")
+                return {"request_state_removed": True}, 200
+        class Scheduler:
+            def release(self, lease, *, cleanup_verified):
+                self_cleanup = cleanup_verified
+                events.append(f"release:{self_cleanup}")
+        store = Store(); runtime = Runtime(); scheduler = Scheduler()
+        lease = transport.LeaseHandle("a" * 64, (1, 2), "production_build")
+        transport.orchestrate_frontend_receipts(store, runtime)
+        transport.finalize_frontend_transaction(scheduler, runtime, lease, store)
+        expected = []
+        for phase in transport.FRONTEND_RECEIPT_PHASES[2:8]:
+            expected += [f"execute:{phase}", f"seal:{phase}"]
+        self.assertEqual(events, ["recover:2", *expected, "reap", "remove-request", "execute:cleanup", "seal:cleanup", "verify:9", "release:True"])
+        for failed_step in ("reap", "remove"):
+            events.clear()
+            class FailedRuntime(Runtime):
+                def stop_and_reap(self, lease): events.append("reap"); return failed_step != "reap"
+                def remove_request(self, lease): events.append("remove-request"); return failed_step != "remove"
+            with self.assertRaises(transport.TransportReject):
+                transport.finalize_frontend_transaction(scheduler, FailedRuntime(), lease, store)
+            self.assertFalse(any(item.startswith("release:") for item in events))
 
     def test_manifest_runtime_schema_is_exact_and_complete(self):
         import yaml
@@ -801,6 +1143,10 @@ class TransportTests(unittest.TestCase):
         mutations.append({**manifest, "unreviewed": {}})
         missing = dict(manifest); missing["artifacts"] = {"coordinator": manifest["artifacts"]["coordinator"]}; mutations.append(missing)
         wrong = dict(manifest); wrong["task6_core"] = {**manifest["task6_core"], "policy_sha256": "f" * 64}; mutations.append(wrong)
+        for key in ("reviewed_source_commit_sha", "reviewed_source_tree_sha", "helper_blob_sha"):
+            wrong = dict(manifest)
+            wrong["task6_receipts"] = {**manifest["task6_receipts"], key: "f" * 40}
+            mutations.append(wrong)
         for mutation in mutations:
             with self.assertRaises(transport.TransportReject):
                 transport.validate_manifest_schema(mutation)
