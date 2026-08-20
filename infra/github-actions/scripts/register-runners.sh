@@ -161,7 +161,10 @@ def validate_artifact_authority(evidence, ga_root, *, fake_root=None):
         manifest = yaml.load(manifest_bytes, Loader=UniqueLoader)
     except yaml.YAMLError as error:
         raise ContractError(f"Task 4 guest image manifest is malformed: {error}") from error
-    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+    if not isinstance(manifest, dict):
+        raise ContractError("Task 4 guest image manifest schema mismatch")
+    schema_version = manifest.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
         raise ContractError("Task 4 guest image manifest schema mismatch")
 
     authority = manifest.get("authority")
@@ -197,7 +200,8 @@ def validate_artifact_authority(evidence, ga_root, *, fake_root=None):
         receipt = receipts.get(key)
         require_exact_keys(image, {"path", "sha256", "virtual_size_gib", "receipt_sha256"}, f"Task 4 {guest} derived image")
         require_exact_keys(receipt, {"path", "sha256"}, f"Task 4 {guest} result receipt")
-        if image.get("path") != expected_path or image.get("virtual_size_gib") != expected_size:
+        virtual_size_gib = image.get("virtual_size_gib")
+        if image.get("path") != expected_path or type(virtual_size_gib) is not int or virtual_size_gib != expected_size:
             raise ContractError(f"Task 4 {guest} derived image contract mismatch")
         derived_sha256[guest] = require_sha256(image.get("sha256"), f"Task 4 {guest} derived image digest")
         receipt_sha256 = require_sha256(receipt.get("sha256"), f"Task 4 {guest} result receipt digest")
@@ -236,7 +240,8 @@ def validate_task4_evidence(evidence, ga_root, *, fake_root=None):
         },
         "Task 4 evidence",
     )
-    if evidence.get("schema_version") != 1:
+    schema_version = evidence.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
         raise ContractError("Task 4 evidence schema mismatch")
     if evidence.get("approval_phrase") != "Task 4/6 approved and 1Password ready" or evidence.get("combined_approval_verified") is not True:
         raise ContractError("combined Task 4/6 approval evidence is missing")
@@ -254,7 +259,8 @@ def validate_task4_evidence(evidence, ga_root, *, fake_root=None):
         require_exact_keys(vm, {"healthy", "isolation_verified", "memory_gib", "memory_health_verified"}, f"Task 4 VM evidence {name}")
         if vm.get("healthy") is not True or vm.get("isolation_verified") is not True:
             raise ContractError(f"Task 4 VM evidence mismatch: {name}")
-        if vm.get("memory_gib") != expected_memory or vm.get("memory_health_verified") is not True:
+        memory_gib = vm.get("memory_gib")
+        if type(memory_gib) is not int or memory_gib != expected_memory or vm.get("memory_health_verified") is not True:
             raise ContractError(f"Task 4 guest memory evidence is incomplete: {name}")
     validate_artifact_authority(evidence, ga_root, fake_root=fake_root)
     return evidence

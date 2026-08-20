@@ -756,7 +756,7 @@ import json, os, sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 state_path = Path(os.environ["KEN_FAKE_LIVE_STATE"])
-log_path = Path(os.environ["KEN_FAKE_COMMAND_LOG"])
+log_path = Path(os.environ.get("KEN_FAKE_GH_LOG", os.environ["KEN_FAKE_COMMAND_LOG"]))
 args = sys.argv[1:]
 with log_path.open("a") as handle: handle.write(json.dumps({"tool":"gh","args":args})+"\n")
 state = json.loads(state_path.read_text())
@@ -831,7 +831,7 @@ else:
 import json, os, sys
 from pathlib import Path
 state_path = Path(os.environ["KEN_FAKE_LIVE_STATE"])
-log_path = Path(os.environ["KEN_FAKE_COMMAND_LOG"])
+log_path = Path(os.environ.get("KEN_FAKE_SSH_LOG", os.environ["KEN_FAKE_COMMAND_LOG"]))
 args = sys.argv[1:]
 mode = args[-1]
 payload = json.load(sys.stdin)
@@ -869,6 +869,15 @@ else:
     raise SystemExit(64)
 ''')
     fake_ssh.chmod(0o700)
+    fake_systemctl = live_root / "systemctl"
+    fake_systemctl.write_text(r'''#!/usr/bin/env python3
+import os, sys
+from pathlib import Path
+path = Path(os.environ["KEN_FAKE_SYSTEMCTL_LOG"])
+with path.open("a") as handle: handle.write(" ".join(sys.argv[1:]) + "\n")
+raise SystemExit(99)
+''')
+    fake_systemctl.chmod(0o700)
     live_env = {
         "KEN_RUNNER_COMMAND_TEST": "1",
         "KEN_RUNNER_RUNTIME_LOCK_FILE": str(live_root / "authority/broker-runtime.lock.yaml"),
@@ -881,6 +890,75 @@ else:
         "KEN_RUNNER_JOURNAL_DIR": str(live_root / "journals"),
     }
     approved_command = ["bash", str(register), "--org", "Ken-Technology", "--all", "--approval-evidence", str(approval_path)]
+
+    canonical_evidence = json.loads(approval_path.read_text())
+    manifest_path = live_root / "authority/guest-image-manifest.yaml"
+    canonical_manifest = yaml.safe_load(manifest_path.read_text())
+
+    def assert_pretransport_rejected(label, expected_message, mutate_evidence=None, mutate_manifest=None):
+        evidence = copy.deepcopy(canonical_evidence)
+        manifest = copy.deepcopy(canonical_manifest)
+        if mutate_evidence is not None:
+            mutate_evidence(evidence)
+        if mutate_manifest is not None:
+            mutate_manifest(manifest)
+        manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+        manifest_path.chmod(0o600)
+        evidence["artifact_authority"]["guest_image_manifest_sha256"] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        write_json(approval_path, evidence)
+        approval_path.chmod(0o600)
+        for command_name, command in (
+            ("register", approved_command),
+            ("verify", ["bash", str(verify), "runners", "--approval-evidence", str(approval_path)]),
+        ):
+            gh_log = live_root / f"{label}-{command_name}-gh.jsonl"
+            ssh_log = live_root / f"{label}-{command_name}-ssh.jsonl"
+            systemctl_log = live_root / f"{label}-{command_name}-systemctl.log"
+            result = call(command, env={
+                **live_env,
+                "PATH": str(live_root) + os.pathsep + os.environ["PATH"],
+                "KEN_FAKE_GH_LOG": str(gh_log),
+                "KEN_FAKE_SSH_LOG": str(ssh_log),
+                "KEN_FAKE_SYSTEMCTL_LOG": str(systemctl_log),
+            })
+            check(
+                result.returncode != 0 and expected_message in result.stderr.lower(),
+                f"{label} {command_name} rejects before transport",
+                result,
+            )
+            check(
+                not gh_log.exists() and not ssh_log.exists() and not systemctl_log.exists(),
+                f"{label} {command_name} leaves fake gh/ssh/systemctl logs unchanged",
+                result,
+            )
+        manifest_path.write_text(yaml.safe_dump(canonical_manifest, sort_keys=False))
+        manifest_path.chmod(0o600)
+        write_json(approval_path, canonical_evidence)
+        approval_path.chmod(0o600)
+
+    for version, name in ((True, "bool"), (1.0, "float")):
+        assert_pretransport_rejected(
+            f"receipt-schema-{name}",
+            "evidence schema",
+            mutate_evidence=lambda value, version=version: value.__setitem__("schema_version", version),
+        )
+        assert_pretransport_rejected(
+            f"manifest-schema-{name}",
+            "manifest schema",
+            mutate_manifest=lambda value, version=version: value.__setitem__("schema_version", version),
+        )
+
+    assert_pretransport_rejected(
+        "ci-virtual-size-float",
+        "derived image contract",
+        mutate_manifest=lambda value: value["derived_images"]["ci"].__setitem__("virtual_size_gib", 750.0),
+    )
+    assert_pretransport_rejected(
+        "ci-memory-float",
+        "guest memory evidence",
+        mutate_evidence=lambda value: value["vms"]["ken-ci"].__setitem__("memory_gib", 112.0),
+    )
+
     stale_repository_name = platform["groups"]["ci"]["repositories"][0]["name"]
     stale_log_start = len(command_log.read_text().splitlines()) if command_log.exists() else 0
     stale_repository = call(approved_command, env={**live_env, "KEN_FAKE_GH_STALE_REPOSITORY": stale_repository_name})
