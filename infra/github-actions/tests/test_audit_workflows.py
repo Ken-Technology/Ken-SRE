@@ -14,6 +14,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[3]
 LIB = ROOT / "infra/github-actions/scripts/lib"
 FIXTURE_DIR = ROOT / "infra/github-actions/tests/fixtures/offline-org"
+LIVE_COLLECT_DIR = Path("/private/tmp/ken-actions-fix5-collect")
 sys.path.insert(0, str(LIB))
 
 import audit_workflows as aw  # noqa: E402
@@ -563,18 +564,44 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
             current = current[segment]
         current[path[-1]] = value
 
-    def _assert_full_generation_rejects(self, evidence, message):
+    def _assert_full_generation_rejects(self, evidence, message, collect_dir=None):
+        import os
         import shutil
 
+        source = collect_dir or FIXTURE_DIR
         with tempfile.TemporaryDirectory() as temp:
             collect = Path(temp) / "collect"
             output = Path(temp) / "output"
-            shutil.copytree(FIXTURE_DIR, collect)
-            (collect / "authority-evidence.json").write_text(
-                json.dumps(evidence), encoding="utf-8"
-            )
+            shutil.copytree(source, collect, copy_function=os.link)
+            evidence_path = collect / "authority-evidence.json"
+            evidence_path.unlink()
+            evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, message):
                 aw.generate(collect, output)
+
+    def _assert_live_full_generation_rejects(self, evidence, message):
+        if not LIVE_COLLECT_DIR.is_dir():
+            self.fail(f"missing live collection at {LIVE_COLLECT_DIR}")
+        self._assert_full_generation_rejects(
+            evidence, message, collect_dir=LIVE_COLLECT_DIR
+        )
+
+    def _apply_unrelated_frontend_annotation(self, evidence):
+        annotation = self._unrelated_frontend_annotation(evidence)
+        entry = aw.apply_secret_consumer(
+            aw.secret_authority(
+                annotation["github_secret_name"],
+                annotation["repository"],
+                {"org": [], "repo": [], "environment": []},
+                ".github/workflows/deploy.yml",
+            ),
+            {
+                "secret_class": "deploy-production",
+                "production_impact": True,
+                "target_runner_class": "ken-deploy-production",
+            },
+        )
+        return aw.apply_unresolved_annotation(entry, evidence)
 
     def test_duplicate_json_keys_fail_before_inventory_hashing(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -986,7 +1013,11 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
             "POSTHOG_PERSONAL_API_KEY-production-build-boundary",
             "POSTHOG_PERSONAL_API_KEY-encryption-phase",
             "POSTHOG_PROJECT_ID-missing-identity",
+            "POSTHOG_PROJECT_ID-wrong-identity",
+            "POSTHOG_PROJECT_ID-missing-boundary",
+            "POSTHOG_PROJECT_ID-wrong-boundary",
             "POSTHOG_PROJECT_ID-production-build-boundary",
+            "POSTHOG_PROJECT_ID-encryption-phase",
             "unrelated-frontend-boundary",
             "cross-phase-identities",
         }
@@ -998,6 +1029,181 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
                     evidence,
                     "frontend broker semantic mismatch",
                 )
+
+    def test_unrelated_frontend_privileged_metadata_presence_fails_closed(self):
+        import build_task6_authority_evidence as builder
+
+        privileged_keys = (
+            "required_runtime_identity",
+            "execution_boundary",
+            "broker_action_id",
+            "action_phase",
+        )
+        reject = "frontend broker semantic mismatch|wrong authority evidence type"
+        mutations = []
+
+        empty_identity = copy.deepcopy(builder.build_evidence())
+        self._unrelated_frontend_annotation(empty_identity)[
+            "required_runtime_identity"
+        ] = ""
+        mutations.append(("unrelated-empty-identity", empty_identity))
+
+        null_identity = copy.deepcopy(builder.build_evidence())
+        self._unrelated_frontend_annotation(null_identity)[
+            "required_runtime_identity"
+        ] = None
+        mutations.append(("unrelated-null-identity", null_identity))
+
+        made_up_phase = copy.deepcopy(builder.build_evidence())
+        self._unrelated_frontend_annotation(made_up_phase)[
+            "action_phase"
+        ] = "made-up-phase"
+        mutations.append(("unrelated-made-up-phase", made_up_phase))
+
+        empty_phase = copy.deepcopy(builder.build_evidence())
+        self._unrelated_frontend_annotation(empty_phase)["action_phase"] = ""
+        mutations.append(("unrelated-empty-phase", empty_phase))
+
+        null_phase = copy.deepcopy(builder.build_evidence())
+        self._unrelated_frontend_annotation(null_phase)["action_phase"] = None
+        mutations.append(("unrelated-null-phase", null_phase))
+
+        privileged_action = copy.deepcopy(builder.build_evidence())
+        self._unrelated_frontend_annotation(privileged_action)[
+            "broker_action_id"
+        ] = "ken-frontend-production-release"
+        mutations.append(("unrelated-privileged-action", privileged_action))
+
+        arbitrary_action = copy.deepcopy(builder.build_evidence())
+        self._unrelated_frontend_annotation(arbitrary_action)[
+            "broker_action_id"
+        ] = "ken-website-production-deploy"
+        mutations.append(("unrelated-arbitrary-action", arbitrary_action))
+
+        empty_action = copy.deepcopy(builder.build_evidence())
+        self._unrelated_frontend_annotation(empty_action)["broker_action_id"] = ""
+        mutations.append(("unrelated-empty-action", empty_action))
+
+        null_action = copy.deepcopy(builder.build_evidence())
+        self._unrelated_frontend_annotation(null_action)["broker_action_id"] = None
+        mutations.append(("unrelated-null-action", null_action))
+
+        empty_identity_phase = copy.deepcopy(builder.build_evidence())
+        extra = self._unrelated_frontend_annotation(empty_identity_phase)
+        extra["required_runtime_identity"] = ""
+        extra["action_phase"] = "made-up-phase"
+        mutations.append(("unrelated-empty-identity-made-up-phase", empty_identity_phase))
+
+        null_identity_action = copy.deepcopy(builder.build_evidence())
+        extra = self._unrelated_frontend_annotation(null_identity_action)
+        extra["required_runtime_identity"] = None
+        extra["broker_action_id"] = "ken-website-production-deploy"
+        mutations.append(
+            ("unrelated-null-identity-arbitrary-action", null_identity_action)
+        )
+
+        phase_and_action = copy.deepcopy(builder.build_evidence())
+        extra = self._unrelated_frontend_annotation(phase_and_action)
+        extra["action_phase"] = "made-up-phase"
+        extra["broker_action_id"] = "ken-website-production-deploy"
+        mutations.append(("unrelated-made-up-phase-arbitrary-action", phase_and_action))
+
+        empty_identity_null_phase = copy.deepcopy(builder.build_evidence())
+        extra = self._unrelated_frontend_annotation(empty_identity_null_phase)
+        extra["required_runtime_identity"] = ""
+        extra["action_phase"] = None
+        mutations.append(
+            ("unrelated-empty-identity-null-phase", empty_identity_null_phase)
+        )
+
+        all_privileged = copy.deepcopy(builder.build_evidence())
+        extra = self._unrelated_frontend_annotation(all_privileged)
+        extra["required_runtime_identity"] = "ken-deploy-production"
+        extra["execution_boundary"] = dict(self.FRONTEND_PRODUCTION_BUILD_BOUNDARY)
+        extra["broker_action_id"] = "ken-frontend-production-release"
+        extra["action_phase"] = "made-up-phase"
+        mutations.append(("unrelated-all-privileged-keys", all_privileged))
+
+        for name, evidence in mutations:
+            with self.subTest(name=name, path="validate"):
+                with self.assertRaisesRegex(ValueError, reject):
+                    aw.validate_authority_evidence(evidence)
+            with self.subTest(name=name, path="apply"):
+                with self.assertRaisesRegex(ValueError, reject):
+                    self._apply_unrelated_frontend_annotation(evidence)
+            with self.subTest(name=name, path="generate"):
+                self._assert_live_full_generation_rejects(evidence, reject)
+
+        hermes_empty = copy.deepcopy(builder.build_evidence())
+        next(
+            row
+            for row in hermes_empty["unresolved_annotations"]
+            if row["repository"] == "ken-hermes-clickup"
+            and row["github_secret_name"] == "DEPLOY_HOST"
+        )["required_runtime_identity"] = ""
+        with self.subTest(name="hermes-empty-identity"):
+            with self.assertRaisesRegex(ValueError, "wrong authority evidence type"):
+                aw.validate_authority_evidence(hermes_empty)
+
+        hermes_null = copy.deepcopy(builder.build_evidence())
+        next(
+            row
+            for row in hermes_null["unresolved_annotations"]
+            if row["repository"] == "ken-hermes-clickup"
+            and row["github_secret_name"] == "DEPLOY_HOST"
+        )["required_runtime_identity"] = None
+        with self.subTest(name="hermes-null-identity"):
+            with self.assertRaisesRegex(ValueError, "wrong authority evidence type"):
+                aw.validate_authority_evidence(hermes_null)
+
+        coverage_evidence = {
+            "mappings": [],
+            "unresolved_annotations": [
+                {
+                    "annotation_id": "unrelated-frontend",
+                    "repository": "ken-frontend",
+                    "github_secret_name": "CLICKUP_WEBHOOK_URL",
+                }
+            ],
+            "secretless_migrations": [],
+            "workflow_variable_migrations": [],
+            "direct_onepassword_mappings": [],
+            "broker_actions": [],
+        }
+        coverage_cases = (
+            ("coverage-empty-identity", {"required_runtime_identity": ""}),
+            ("coverage-null-identity", {"required_runtime_identity": None}),
+            ("coverage-made-up-phase", {"action_phase": "made-up-phase"}),
+            ("coverage-arbitrary-action", {
+                "broker_action_id": "ken-website-production-deploy"
+            }),
+            ("coverage-privileged-action", {
+                "broker_action_id": "ken-frontend-production-release"
+            }),
+            ("coverage-empty-phase-and-action", {
+                "action_phase": "",
+                "broker_action_id": "ken-frontend-production-release",
+            }),
+        )
+        for name, extra_fields in coverage_cases:
+            entry = {
+                "authority_annotation_id": "unrelated-frontend",
+                "repository": "ken-frontend",
+                "github_secret_name": "CLICKUP_WEBHOOK_URL",
+                **extra_fields,
+            }
+            with self.subTest(name=name, path="coverage"):
+                with self.assertRaisesRegex(ValueError, reject):
+                    aw.validate_authority_mapping_coverage(coverage_evidence, [entry])
+
+        clean = copy.deepcopy(builder.build_evidence())
+        annotation = self._unrelated_frontend_annotation(clean)
+        for key in privileged_keys:
+            self.assertNotIn(key, annotation)
+        aw.validate_authority_evidence(clean)
+        applied = self._apply_unrelated_frontend_annotation(clean)
+        for key in privileged_keys:
+            self.assertNotIn(key, applied)
 
 
 class ConnectionMetadataTests(unittest.TestCase):

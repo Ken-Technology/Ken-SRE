@@ -72,6 +72,12 @@ FRONTEND_POST_BUILD_BOUNDARY = {
     "ci_validation_only": True,
     "forbid_ken_ci_production_artifact": True,
 }
+FRONTEND_BROKER_METADATA_KEYS = (
+    "required_runtime_identity",
+    "execution_boundary",
+    "broker_action_id",
+    "action_phase",
+)
 FRONTEND_ANNOTATION_CONTRACTS = {
     "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": {
         "required_runtime_identity": FRONTEND_PRODUCTION_DEPLOY_IDENTITY,
@@ -857,6 +863,11 @@ def _authority_type(value: Any, expected: type | tuple[type, ...]) -> None:
         raise ValueError("wrong authority evidence type")
 
 
+def _authority_nonempty_string(value: Any) -> None:
+    if type(value) is not str or not value.strip():
+        raise ValueError("wrong authority evidence type")
+
+
 def _authority_string_list(value: Any, *, allow_empty: bool = False) -> None:
     if not isinstance(value, list) or (not allow_empty and not value):
         raise ValueError("wrong authority evidence type")
@@ -1276,6 +1287,19 @@ def _frontend_annotation_contract(
     return FRONTEND_ANNOTATION_CONTRACTS[str(name)]
 
 
+def _frontend_broker_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: row.get(key) for key in FRONTEND_BROKER_METADATA_KEYS}
+
+
+def _reject_noncontract_frontend_broker_metadata(row: dict[str, Any]) -> None:
+    if (
+        row.get("repository") == "ken-frontend"
+        and row.get("github_secret_name") not in FRONTEND_ANNOTATION_CONTRACTS
+        and any(key in row for key in FRONTEND_BROKER_METADATA_KEYS)
+    ):
+        raise ValueError("frontend broker semantic mismatch")
+
+
 def _validate_frontend_broker_semantics(
     evidence: dict[str, Any], action_by_id: dict[str, dict[str, Any]]
 ) -> None:
@@ -1306,21 +1330,10 @@ def _validate_frontend_broker_semantics(
         raise ValueError("frontend broker semantic mismatch")
     for name, contract in FRONTEND_ANNOTATION_CONTRACTS.items():
         annotation = annotations_by_name[name][0]
-        if (
-            annotation.get("broker_action_id") != contract["broker_action_id"]
-            or annotation.get("action_phase") != contract["action_phase"]
-            or annotation.get("required_runtime_identity")
-            != contract["required_runtime_identity"]
-            or annotation.get("execution_boundary") != contract["execution_boundary"]
-        ):
+        if _frontend_broker_metadata(annotation) != contract:
             raise ValueError("frontend broker semantic mismatch")
     for row in evidence["unresolved_annotations"]:
-        if row.get("repository") != "ken-frontend":
-            continue
-        if row.get("github_secret_name") in FRONTEND_ANNOTATION_CONTRACTS:
-            continue
-        if row.get("required_runtime_identity") or row.get("execution_boundary"):
-            raise ValueError("frontend broker semantic mismatch")
+        _reject_noncontract_frontend_broker_metadata(row)
     expected_names_by_phase = {
         "offline-buildkit-secret-phase": {
             "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
@@ -1448,8 +1461,10 @@ def validate_authority_evidence(evidence: Any) -> None:
                 )
                 for boundary_key, boundary_value in boundary.items():
                     _authority_type(boundary_value, bool if boundary_key in {"broker_only", "ci_validation_only", "forbid_ken_ci_production_artifact"} else str)
-            elif key in {"workflow", "required_runtime_identity", "broker_action_id", "action_phase"} and value is None:
+            elif key == "workflow" and value is None:
                 continue
+            elif key in {"required_runtime_identity", "broker_action_id", "action_phase"}:
+                _authority_nonempty_string(value)
             elif key == "target_vault" and value is None:
                 continue
             else:
@@ -1955,36 +1970,29 @@ def apply_unresolved_annotation(
         entry.get("repository"), entry.get("github_secret_name")
     )
     if contract is not None:
-        if (
-            annotation.get("required_runtime_identity")
-            != contract["required_runtime_identity"]
-            or annotation.get("execution_boundary") != contract["execution_boundary"]
-            or annotation.get("broker_action_id") != contract["broker_action_id"]
-            or annotation.get("action_phase") != contract["action_phase"]
-        ):
+        if _frontend_broker_metadata(annotation) != contract:
             raise ValueError("frontend broker semantic mismatch")
         entry["required_runtime_identity"] = contract["required_runtime_identity"]
         entry["execution_boundary"] = dict(contract["execution_boundary"])
         entry["broker_action_id"] = contract["broker_action_id"]
         entry["action_phase"] = contract["action_phase"]
     else:
-        if entry.get("repository") == "ken-frontend" and (
-            annotation.get("required_runtime_identity")
-            or annotation.get("execution_boundary")
-        ):
-            raise ValueError("frontend broker semantic mismatch")
-        if annotation.get("required_runtime_identity"):
+        _reject_noncontract_frontend_broker_metadata(annotation)
+        if "required_runtime_identity" in annotation:
+            _authority_nonempty_string(annotation["required_runtime_identity"])
             entry["required_runtime_identity"] = annotation[
                 "required_runtime_identity"
             ]
-        if annotation.get("execution_boundary"):
+        if "execution_boundary" in annotation:
             boundary = annotation["execution_boundary"]
             if boundary != FRONTEND_PRODUCTION_BUILD_BOUNDARY:
                 raise ValueError("invalid fixed production build execution boundary")
             entry["execution_boundary"] = dict(boundary)
-        if annotation.get("broker_action_id"):
+        if "broker_action_id" in annotation:
+            _authority_nonempty_string(annotation["broker_action_id"])
             entry["broker_action_id"] = annotation["broker_action_id"]
-        if annotation.get("action_phase"):
+        if "action_phase" in annotation:
+            _authority_nonempty_string(annotation["action_phase"])
             entry["action_phase"] = annotation["action_phase"]
     if annotation.get("data_classification"):
         entry["data_classification"] = annotation["data_classification"]
@@ -2141,6 +2149,14 @@ def validate_authority_mapping_coverage(
         ):
             raise ValueError("fixed broker action required fields mismatch")
     for entry in entries:
+        contract = _frontend_annotation_contract(
+            entry.get("repository"), entry.get("github_secret_name")
+        )
+        if contract is not None:
+            if _frontend_broker_metadata(entry) != contract:
+                raise ValueError("frontend broker semantic mismatch")
+        else:
+            _reject_noncontract_frontend_broker_metadata(entry)
         action_id = entry.get("broker_action_id")
         if not action_id:
             continue
@@ -2152,19 +2168,7 @@ def validate_authority_mapping_coverage(
             or action.get("runner_class") != entry.get("consumer")
         ):
             raise ValueError("secret broker action trust boundary mismatch")
-        contract = _frontend_annotation_contract(
-            entry.get("repository"), entry.get("github_secret_name")
-        )
-        if contract is not None:
-            if (
-                entry.get("required_runtime_identity")
-                != contract["required_runtime_identity"]
-                or entry.get("execution_boundary") != contract["execution_boundary"]
-                or entry.get("action_phase") != contract["action_phase"]
-                or entry.get("broker_action_id") != contract["broker_action_id"]
-            ):
-                raise ValueError("frontend broker semantic mismatch")
-        else:
+        if contract is None:
             boundary = entry.get("execution_boundary")
             if boundary and (
                 boundary.get("action_id") != action.get("action_id")
