@@ -72,10 +72,12 @@ TEMPLATE_CONTENT = {
         "SERVER_PORT=op://Ken%20Deploy%20Production/ken-vexa-mcp-auth/SERVER_PORT\n"
         "SERVER_SSH_KEY=op://Ken%20Deploy%20Production/ken-vexa-mcp-auth/SERVER_SSH_KEY\n"
     ),
-    "ken-website-beehiiv-production-sync": (
-        "DEPLOY_SSH_KEY=op://Ken%20Deploy%20Production/ken-website/DEPLOY_SSH_KEY\n"
+    "ken-website-beehiiv-production-sync.generate": (
         "BEEHIIV_API_KEY=op://Ken%20Deploy%20Production/ken-website/BEEHIIV_API_KEY\n"
         "BEEHIIV_PUBLICATION_ID=op://Ken%20Deploy%20Production/ken-website/BEEHIIV_PUBLICATION_ID\n"
+    ),
+    "ken-website-beehiiv-production-sync.push": (
+        "DEPLOY_SSH_KEY=op://Ken%20Deploy%20Production/ken-website/DEPLOY_SSH_KEY\n"
     ),
     "ken-website-production-deploy": (
         "WEBSITE_HOST=op://Ken%20Deploy%20Production/ken-website/WEBSITE_HOST\n"
@@ -83,7 +85,11 @@ TEMPLATE_CONTENT = {
         "WEBSITE_SSH_KEY=op://Ken%20Deploy%20Production/ken-website/WEBSITE_SSH_KEY\n"
     ),
 }
-DIRECT_WRAPPER_ACTIONS = frozenset(TEMPLATE_CONTENT)
+DIRECT_WRAPPER_ACTIONS = frozenset({
+    "ken-vexa-mcp-auth-production-deploy",
+    "ken-website-beehiiv-production-sync",
+    "ken-website-production-deploy",
+})
 OPERATION_BINDINGS = {
     "ken-vexa-mcp-auth-production-deploy": {
         "input": "deploy.tar.gz", "user": "ken-vexa-mcp-auth-deploy",
@@ -245,16 +251,28 @@ def _security_binding_missing(action: Mapping[str, Any]) -> list[str]:
     for field in ("id", "group_id", "listener_generation"):
         if type(runner.get(field)) is not int or runner[field] <= 0:
             missing.append(f"runner.{field}")
-    for scope in ("template", "executor"):
-        item = action.get(scope)
-        if item and not SHA256.fullmatch(str(item.get("sha256") if scope == "template" else item.get("wrapper_sha256"))):
-            missing.append(f"{scope}.{'sha256' if scope == 'template' else 'wrapper_sha256'}")
-    if not SHA256.fullmatch(str(action["executor"].get("operation_binding_sha256") or "")):
-        missing.append("executor.operation_binding_sha256")
-    if not SHA256.fullmatch(str(action["executor"].get("systemd_transaction_transport_sha256") or "")):
-        missing.append("executor.systemd_transaction_transport_sha256")
-    if "known_hosts_sha256" in action["executor"] and not SHA256.fullmatch(str(action["executor"].get("known_hosts_sha256") or "")):
-        missing.append("executor.known_hosts_sha256")
+    if action["input_mode"] == "trusted_generation":
+        transport = (action.get("trusted_generation") or {}).get("transport") or {}
+        for field in ("dependency_acquisition_sha256", "generated_paths_manifest_sha256", "commit_input_contract_sha256", "cgroup_contract_sha256", "phase_transport_sha256"):
+            binding = f"trusted_generation.transport.{field}"
+            value = transport.get(field)
+            if binding in deferred:
+                if value is not None:
+                    raise Reject("policy_deferred_binding_value_invalid")
+                missing.append(binding)
+            elif type(value) is not str or not SHA256.fullmatch(value):
+                raise Reject("policy_bound_binding_value_invalid")
+    else:
+        for scope in ("template", "executor"):
+            item = action.get(scope)
+            if item and not SHA256.fullmatch(str(item.get("sha256") if scope == "template" else item.get("wrapper_sha256"))):
+                missing.append(f"{scope}.{'sha256' if scope == 'template' else 'wrapper_sha256'}")
+        if not SHA256.fullmatch(str(action["executor"].get("operation_binding_sha256") or "")):
+            missing.append("executor.operation_binding_sha256")
+        if not SHA256.fullmatch(str(action["executor"].get("systemd_transaction_transport_sha256") or "")):
+            missing.append("executor.systemd_transaction_transport_sha256")
+        if "known_hosts_sha256" in action["executor"] and not SHA256.fullmatch(str(action["executor"].get("known_hosts_sha256") or "")):
+            missing.append("executor.known_hosts_sha256")
     if action["input_mode"] == "production_build":
         build = action.get("production_build") or {}
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(build.get("base_image_digest") or "")):
@@ -268,6 +286,97 @@ def _security_binding_missing(action: Mapping[str, Any]) -> list[str]:
     if set(missing) != deferred:
         raise Reject("policy_deferred_binding_mismatch")
     return missing
+
+
+def _validate_template_shape(template: Mapping[str, Any], template_id: str, path: str, fields: list[str]) -> None:
+    _require_exact_keys(template, {"path", "sha256", "vault", "item", "fields"}, set(), "policy_template_schema_invalid")
+    content = TEMPLATE_CONTENT.get(template_id)
+    if (template != {
+            "path": path,
+            "sha256": hashlib.sha256((content or "").encode()).hexdigest(),
+            "vault": "Ken Deploy Production",
+            "item": "ken-website" if template_id.startswith("ken-website-") else "ken-vexa-mcp-auth",
+            "fields": fields,
+        } or content is None):
+        raise Reject("policy_template_invalid")
+
+
+def _validate_trusted_generation(raw: Mapping[str, Any], record: Mapping[str, Any]) -> None:
+    generation = record.get("trusted_generation")
+    _require_exact_keys(generation, {
+        "authenticated_source", "dependency_acquisition", "phase_order", "phase_overlap",
+        "verified_commit_input", "transaction_slices", "transport", "phases",
+    }, set(), "policy_trusted_generation_schema_invalid")
+    if (generation["authenticated_source"] != "protected-main-before-credentials"
+            or generation["dependency_acquisition"] != "before-credentials"
+            or generation["phase_order"] != ["generate", "push"]
+            or generation["phase_overlap"] != "forbidden"
+            or generation["verified_commit_input"] != "root-coordinator-sealed-read-only"
+            or generation["transaction_slices"] != ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"]):
+        raise Reject("policy_trusted_generation_boundary_invalid")
+    transport = generation["transport"]
+    _require_exact_keys(transport, {
+        "wrapper", "wrapper_sha256", "dependency_acquisition_sha256", "generated_paths_manifest_sha256",
+        "commit_input_contract_sha256", "cgroup_contract_sha256", "phase_transport_sha256",
+    }, set(), "policy_trusted_generation_transport_invalid")
+    if (transport["wrapper"] != "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync"
+            or not SHA256.fullmatch(str(transport["wrapper_sha256"]))):
+        raise Reject("policy_trusted_generation_transport_invalid")
+    phases = generation["phases"]
+    _require_exact_keys(phases, {"generate", "push"}, set(), "policy_trusted_generation_phase_invalid")
+    expected = {
+        "generate": {
+            "identity": {"name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102},
+            "request_subdirectory": "generate",
+            "cgroup_template": "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-generate.scope",
+            "descriptor_set": ["authenticated-source-tree", "BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"],
+            "template_id": "ken-website-beehiiv-production-sync.generate",
+            "template_path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.generate.env.op",
+            "fields": ["BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"],
+            "network_profile": "beehiiv-api-fixed-target",
+            "executes_repository_code": True,
+            "operation": "pinned-dependency-install-and-beehiiv-generation",
+        },
+        "push": {
+            "identity": {"name": "ken-beehiiv-push", "uid": 22104, "gid": 22104},
+            "request_subdirectory": "push",
+            "cgroup_template": "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-push.scope",
+            "descriptor_set": ["root-verified-commit-input", "DEPLOY_SSH_KEY"],
+            "template_id": "ken-website-beehiiv-production-sync.push",
+            "template_path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.push.env.op",
+            "fields": ["DEPLOY_SSH_KEY"],
+            "network_profile": "github-ssh-ken-website-fixed-target",
+            "executes_repository_code": False,
+            "operation": "fixed-verified-commit-git-ssh-push",
+        },
+    }
+    for phase_name, phase_expected in expected.items():
+        phase = phases[phase_name]
+        _require_exact_keys(phase, {
+            "identity", "request_subdirectory", "cgroup_template", "descriptor_set", "template", "network_profile",
+            "executes_repository_code", "operation",
+        }, set(), "policy_trusted_generation_phase_invalid")
+        _require_exact_keys(phase["identity"], {"name", "uid", "gid"}, set(), "policy_trusted_generation_identity_invalid")
+        _require_exact_int_fields(phase["identity"], ("uid", "gid"), "policy_trusted_generation_identity_invalid", minimum=1)
+        if (phase["identity"] != phase_expected["identity"]
+                or phase["request_subdirectory"] != phase_expected["request_subdirectory"]
+                or phase["cgroup_template"] != phase_expected["cgroup_template"]
+                or phase["descriptor_set"] != phase_expected["descriptor_set"]
+                or phase["network_profile"] != phase_expected["network_profile"]
+                or phase["network_profile"] not in raw["firewall_phase_interface"]["profiles"]
+                or phase["executes_repository_code"] is not phase_expected["executes_repository_code"]
+                or phase["operation"] != phase_expected["operation"]):
+            raise Reject("policy_trusted_generation_phase_invalid")
+        _validate_template_shape(phase["template"], phase_expected["template_id"], phase_expected["template_path"], phase_expected["fields"])
+    generate, push = phases["generate"], phases["push"]
+    if (generate["identity"]["uid"] == push["identity"]["uid"]
+            or generate["identity"]["gid"] == push["identity"]["gid"]
+            or generate["request_subdirectory"] == push["request_subdirectory"]
+            or generate["cgroup_template"] == push["cgroup_template"]
+            or not set(generate["descriptor_set"]).isdisjoint(push["descriptor_set"])
+            or not set(generate["template"]["fields"]).isdisjoint(push["template"]["fields"])
+            or generate["network_profile"] == push["network_profile"]):
+        raise Reject("policy_trusted_generation_phase_overlap")
 
 
 def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -> None:
@@ -293,8 +402,17 @@ def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -
             or firewall["target_authority"] != "policy-only" or firewall["activation"] != "root-created-request-id"
             or firewall["teardown"] != "mandatory-on-exit"):
         raise Reject("policy_firewall_interface_invalid")
-    required_profiles = {"github-control-ci", "github-control-nonproduction", "github-control-production", "vexa-production-fixed-target", "website-production-fixed-target", "beehiiv-and-github-fixed-targets", "frontend-production-digest-deploy"}
-    if set(firewall["profiles"]) != required_profiles or any(not isinstance(phases, list) or not phases or len(phases) != len(set(phases)) for phases in firewall["profiles"].values()):
+    expected_profiles = {
+        "github-control-ci": ["oidc-discovery", "oidc-jwks", "github-api", "github-smart-https"],
+        "github-control-nonproduction": ["oidc-discovery", "oidc-jwks", "github-api", "github-smart-https"],
+        "github-control-production": ["oidc-discovery", "oidc-jwks", "github-api", "github-smart-https"],
+        "vexa-production-fixed-target": ["vexa-ssh", "vexa-public-health"],
+        "website-production-fixed-target": ["website-ssh", "ken-so-public-health", "getken-ai-separation"],
+        "beehiiv-api-fixed-target": ["beehiiv-api"],
+        "github-ssh-ken-website-fixed-target": ["github-ssh"],
+        "frontend-production-digest-deploy": ["github-read", "node-base-read", "package-read", "posthog-upload", "ghcr-write", "frontend-deploy", "frontend-public-health"],
+    }
+    if firewall["profiles"] != expected_profiles:
         raise Reject("policy_firewall_profiles_invalid")
     for class_name, class_record in raw["classes"].items():
         _require_exact_keys(class_record, {"audience", "broker_network_uid", "broker_network_gid", "vault", "active_connections_max"}, set(), "policy_class_schema_invalid")
@@ -310,14 +428,17 @@ def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -
         raise Reject("policy_repository_schema_invalid")
     _require_exact_int_fields(record["runner"], ("uid", "gid"), "policy_runner_schema_invalid", minimum=1)
     _require_exact_int_fields(record["runner"], ("id", "group_id", "listener_generation"), "policy_runner_schema_invalid", minimum=0)
-    if record.get("template"):
-        _require_exact_keys(record["template"], {"path", "sha256", "vault", "item", "fields"}, set(), "policy_template_schema_invalid")
-    _require_exact_keys(record["executor"], {"name", "uid", "gid", "wrapper", "wrapper_sha256", "operation_binding_sha256", "systemd_transaction_transport_sha256", "timeout_seconds", "network_profile"}, {"target_profile", "known_hosts_path", "known_hosts_sha256"}, "policy_executor_schema_invalid")
-    _require_exact_int_fields(record["executor"], ("uid", "gid", "timeout_seconds"), "policy_executor_schema_invalid", minimum=1)
-    if record["executor"]["network_profile"] not in raw["firewall_phase_interface"]["profiles"]:
-        raise Reject("policy_executor_network_profile_invalid")
-    if ("known_hosts_path" in record["executor"]) != ("known_hosts_sha256" in record["executor"]):
-        raise Reject("policy_executor_known_hosts_invalid")
+    if record["input_mode"] == "trusted_generation":
+        _validate_trusted_generation(raw, record)
+    else:
+        if record.get("template"):
+            _require_exact_keys(record["template"], {"path", "sha256", "vault", "item", "fields"}, set(), "policy_template_schema_invalid")
+        _require_exact_keys(record["executor"], {"name", "uid", "gid", "wrapper", "wrapper_sha256", "operation_binding_sha256", "systemd_transaction_transport_sha256", "timeout_seconds", "network_profile"}, {"target_profile", "known_hosts_path", "known_hosts_sha256"}, "policy_executor_schema_invalid")
+        _require_exact_int_fields(record["executor"], ("uid", "gid", "timeout_seconds"), "policy_executor_schema_invalid", minimum=1)
+        if record["executor"]["network_profile"] not in raw["firewall_phase_interface"]["profiles"]:
+            raise Reject("policy_executor_network_profile_invalid")
+        if ("known_hosts_path" in record["executor"]) != ("known_hosts_sha256" in record["executor"]):
+            raise Reject("policy_executor_known_hosts_invalid")
     if record.get("limits"):
         _require_exact_keys(record["limits"], {"fetch_seconds", "pack_bytes", "objects", "files", "blob_bytes", "materialized_bytes"}, set(), "policy_limits_schema_invalid")
         _require_exact_int_fields(record["limits"], ("fetch_seconds", "pack_bytes", "objects", "files", "blob_bytes", "materialized_bytes"), "policy_limits_schema_invalid", minimum=1)
@@ -370,8 +491,12 @@ def load_policy(path: str | Path, *, allow_nonroot: bool = False) -> Policy:
     }
     action_map: dict[str, Action] = {}
     for record in raw["actions"]:
-        required = {"action_id", "enabled", "blocked_reason_code", "deferred_bindings", "trust_class", "input_mode", "result_contract", "repository", "oidc", "job", "runner", "executor"}
-        optional = {"source_is_deployable", "executes_repository_code", "template", "limits", "artifact_input", "production_build"}
+        common = {"action_id", "enabled", "blocked_reason_code", "deferred_bindings", "trust_class", "input_mode", "result_contract", "repository", "oidc", "job", "runner"}
+        trusted_generation = isinstance(record, dict) and record.get("input_mode") == "trusted_generation"
+        required = common | ({"trusted_generation"} if trusted_generation else {"executor"})
+        optional = {"source_is_deployable", "template", "limits", "artifact_input", "production_build"}
+        if not trusted_generation:
+            optional.add("executes_repository_code")
         _require_exact_keys(record, required, optional, "policy_action_schema_invalid")
         _validate_policy_shapes(raw, record)
         action_id = record["action_id"]
@@ -379,12 +504,16 @@ def load_policy(path: str | Path, *, allow_nonroot: bool = False) -> Policy:
             raise Reject("policy_action_id_invalid")
         if record["trust_class"] not in raw["classes"] or record["result_contract"] != "stable-code-only":
             raise Reject("policy_action_boundary_invalid")
-        if record["input_mode"] not in {"artifact", "source_commit", "registry", "production_build"}:
+        if record["input_mode"] not in {"artifact", "source_commit", "registry", "production_build", "trusted_generation"}:
             raise Reject("policy_input_mode_invalid")
         if record["input_mode"] == "production_build" and action_id != "ken-frontend-production-release":
             raise Reject("policy_production_build_invalid")
+        if record["input_mode"] == "trusted_generation" and action_id != "ken-website-beehiiv-production-sync":
+            raise Reject("policy_trusted_generation_invalid")
         if record["input_mode"] == "source_commit" and record.get("source_is_deployable") is not True:
             raise Reject("policy_source_not_deployable")
+        if record["input_mode"] != "source_commit" and "source_is_deployable" in record:
+            raise Reject("policy_source_marker_invalid")
         if (record["input_mode"] == "artifact") != ("artifact_input" in record):
             raise Reject("policy_artifact_invalid")
         if type(record["enabled"]) is not bool or not isinstance(record["deferred_bindings"], list) or len(record["deferred_bindings"]) != len(set(record["deferred_bindings"])):
@@ -408,10 +537,11 @@ def load_policy(path: str | Path, *, allow_nonroot: bool = False) -> Policy:
                 raise Reject("policy_template_hash_invalid")
             if template["path"] != f"/etc/ken-op-broker/templates/{action_id}.env.op":
                 raise Reject("policy_template_path_invalid")
-        operation_hash = record["executor"]["operation_binding_sha256"]
-        expected_operation_hash = _operation_binding_sha256(action_id)
-        if operation_hash is not None and operation_hash != expected_operation_hash:
-            raise Reject("policy_operation_binding_invalid")
+        if not trusted_generation:
+            operation_hash = record["executor"]["operation_binding_sha256"]
+            expected_operation_hash = _operation_binding_sha256(action_id)
+            if operation_hash is not None and operation_hash != expected_operation_hash:
+                raise Reject("policy_operation_binding_invalid")
         runner_raw = record["runner"]
         runner = RunnerIdentity(
             name=runner_raw["name"], uid=runner_raw["uid"], gid=runner_raw["gid"],
@@ -437,7 +567,7 @@ def load_policy(path: str | Path, *, allow_nonroot: bool = False) -> Policy:
             action_id=action_id, enabled=record["enabled"], blocked_reason_code=record["blocked_reason_code"],
             trust_class=record["trust_class"], input_mode=record["input_mode"], result_contract=record["result_contract"],
             repository=_ns(repo), oidc=_ns(record["oidc"]), job=_ns(record["job"]), runner=runner,
-            executor=_ns(record["executor"]), raw=record,
+            executor=None if trusted_generation else _ns(record["executor"]), raw=record,
         )
     if set(action_map) != expected_ids:
         raise Reject("policy_action_set_invalid")
@@ -447,18 +577,26 @@ def load_policy(path: str | Path, *, allow_nonroot: bool = False) -> Policy:
 def verify_runtime_assets(policy: Policy) -> None:
     for action in policy.actions.values():
         record = action.raw
-        template = record.get("template")
-        if template:
+        if action.input_mode == "trusted_generation":
+            generation = record["trusted_generation"]
+            templates = [phase["template"] for phase in generation["phases"].values()]
+            transport = generation["transport"]
+            wrapper = Path(transport["wrapper"])
+            if wrapper.is_symlink() or not _file_is_root_owned_readonly(wrapper) or hashlib.sha256(wrapper.read_bytes()).hexdigest() != transport["wrapper_sha256"]:
+                raise Reject("wrapper_runtime_hash_invalid")
+        else:
+            templates = [record["template"]] if record.get("template") else []
+            wrapper = Path(record["executor"]["wrapper"])
+            if wrapper.is_symlink() or not _file_is_root_owned_readonly(wrapper) or hashlib.sha256(wrapper.read_bytes()).hexdigest() != record["executor"]["wrapper_sha256"]:
+                raise Reject("wrapper_runtime_hash_invalid")
+            if record["executor"].get("known_hosts_sha256"):
+                known_hosts = Path(record["executor"]["known_hosts_path"])
+                if known_hosts.is_symlink() or not _file_is_root_owned_readonly(known_hosts) or hashlib.sha256(known_hosts.read_bytes()).hexdigest() != record["executor"]["known_hosts_sha256"]:
+                    raise Reject("known_hosts_runtime_hash_invalid")
+        for template in templates:
             path = Path(template["path"])
             if path.is_symlink() or not _file_is_root_owned_readonly(path) or hashlib.sha256(path.read_bytes()).hexdigest() != template["sha256"]:
                 raise Reject("template_runtime_hash_invalid")
-        wrapper = Path(record["executor"]["wrapper"])
-        if wrapper.is_symlink() or not _file_is_root_owned_readonly(wrapper) or hashlib.sha256(wrapper.read_bytes()).hexdigest() != record["executor"]["wrapper_sha256"]:
-            raise Reject("wrapper_runtime_hash_invalid")
-        if record["executor"].get("known_hosts_sha256"):
-            known_hosts = Path(record["executor"]["known_hosts_path"])
-            if known_hosts.is_symlink() or not _file_is_root_owned_readonly(known_hosts) or hashlib.sha256(known_hosts.read_bytes()).hexdigest() != record["executor"]["known_hosts_sha256"]:
-                raise Reject("known_hosts_runtime_hash_invalid")
 
 
 def open_credential_source(directory: Path) -> int:
@@ -481,7 +619,7 @@ def parse_request(packet: bytes) -> dict[str, Any]:
     if not isinstance(request, dict) or set(request) - ALLOWED_REQUEST_KEYS:
         raise Reject("request_schema_invalid")
     required = {"version", "action_id", "oidc_jwt", "github_token"}
-    if required - set(request) or request["version"] != 1:
+    if required - set(request) or type(request["version"]) is not int or request["version"] != 1:
         raise Reject("request_schema_invalid")
     if not isinstance(request["action_id"], str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,79}", request["action_id"]):
         raise Reject("request_action_invalid")
@@ -1023,6 +1161,8 @@ def materialize_source_commit_live(token: str, claims: Mapping[str, Any], action
 def execute_fixed_action_live(action: Action, request_dir: Path, input_path: Path, claims: Mapping[str, Any], credential_fd: int, network_identity: tuple[int, int]) -> str:
     if action.input_mode == "production_build":
         raise Reject("production_build_transport_unavailable")
+    if action.input_mode == "trusted_generation":
+        raise Reject("trusted_generation_transport_unavailable")
     template = action.raw.get("template")
     if template is None:
         raise Reject("action_template_unavailable")
@@ -1153,8 +1293,9 @@ def _fixed_health_request(url: str, *, method: str = "GET", body: bytes | None =
 def fixed_wrapper_main(action_id: str, argv: Sequence[str]) -> int:
     """Root-owned multicall wrapper for the two fully specified SSH actions.
 
-    Beehiiv deliberately has no operation binding: its current workflow builds
-    generated content and conflicts with the reviewed source_commit contract.
+    Beehiiv deliberately remains an action-specific, always-fail entry point;
+    its split trusted-generation transaction is owned by the deferred Task 7
+    transport and cannot execute through this direct wrapper.
     """
     try:
         parser = argparse.ArgumentParser(add_help=False)
@@ -1557,7 +1698,7 @@ def verify_runtime_lock(path: Path) -> None:
     if (set(raw) != {"schema_version", "lock_version", "plan_sha256", "target", "compatibility", "runtime_contract", "components", "provenance_payloads", "installed_files", "verification"}
             or type(raw["schema_version"]) is not int or raw["schema_version"] != 1):
         raise Reject("runtime_lock_schema_invalid")
-    if raw["plan_sha256"] != "fa04630e96b13acc47419f790631acd8d595850affe937d665ff3216ed193b51":
+    if raw["plan_sha256"] != "00e93ef99f75e4101028a4838156c730f4d6bb306f20e5340bf4812128171d0f":
         raise Reject("runtime_lock_plan_invalid")
     _require_exact_keys(raw["target"], {"os", "architecture"}, set(), "runtime_lock_target_invalid")
     if raw["target"] != {"os": "ubuntu-24.04", "architecture": "amd64"} or not isinstance(raw["lock_version"], str):
@@ -1592,8 +1733,9 @@ def verify_runtime_lock(path: Path) -> None:
         ("ken-deploy", "ken-op-net-nonprod", 22002, 22002, "ken-actions-deploy-brokers.slice", "github-control-nonproduction"),
         ("ken-deploy", "ken-op-net-prod", 22003, 22003, "ken-actions-deploy-brokers.slice", "github-control-production"),
         ("ken-deploy", "ken-vexa-deploy", 22101, 22101, None, "vexa-production-fixed-target"),
-        ("ken-deploy", "ken-beehiiv-sync", 22102, 22102, None, "beehiiv-and-github-fixed-targets"),
+        ("ken-deploy", "ken-beehiiv-generate", 22102, 22102, None, "beehiiv-api-fixed-target"),
         ("ken-deploy", "ken-website-deploy", 22103, 22103, None, "website-production-fixed-target"),
+        ("ken-deploy", "ken-beehiiv-push", 22104, 22104, None, "github-ssh-ken-website-fixed-target"),
         ("ken-deploy", "ken-fe-builder", 22201, 22201, None, "frontend-production-digest-deploy"),
         ("ken-deploy", "ken-fe-uploader", 22202, 22202, None, "frontend-production-digest-deploy"),
         ("ken-deploy", "ken-fe-deploy", 22203, 22203, None, "frontend-production-digest-deploy"),
@@ -1620,12 +1762,19 @@ def verify_runtime_lock(path: Path) -> None:
     if firewall != {"command":["/usr/local/libexec/ken-actions-guest-firewall","phase"], "arguments":["--request-id","{request_id}","--profile","{network_profile}","--phase","{phase}","--state","{activate|deactivate}"], "profile_authority":"inventory/op-broker-policy.yaml", "caller_supplied_targets":"forbidden"}:
         raise Reject("runtime_lock_firewall_invalid")
     deferred_transport = contract["deferred_execution_transport"]
-    _require_exact_keys(deferred_transport, {"status", "binding", "transaction_slices", "frontend_bindings"}, set(), "runtime_lock_transport_invalid")
+    _require_exact_keys(deferred_transport, {"status", "binding", "transaction_slices", "frontend_bindings", "trusted_generation_bindings"}, set(), "runtime_lock_transport_invalid")
     if deferred_transport != {
         "status": "unavailable",
         "binding": "executor.systemd_transaction_transport_sha256",
         "transaction_slices": ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"],
         "frontend_bindings": ["production_build.phase_transport_sha256", "production_build.deploy_contract_sha256"],
+        "trusted_generation_bindings": [
+            "trusted_generation.transport.dependency_acquisition_sha256",
+            "trusted_generation.transport.generated_paths_manifest_sha256",
+            "trusted_generation.transport.commit_input_contract_sha256",
+            "trusted_generation.transport.cgroup_contract_sha256",
+            "trusted_generation.transport.phase_transport_sha256",
+        ],
     }:
         raise Reject("runtime_lock_transport_invalid")
     if not isinstance(raw["components"], list) or not isinstance(raw["installed_files"], list):

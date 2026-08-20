@@ -6425,6 +6425,7 @@ repositories:
         delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-website-beehiiv-production-sync
+        broker_action_phase: push
       - environment_name: BEEHIIV_API_KEY
         source_reference: op://ken-website/beehiiv/credential
         source_vault: ken-website
@@ -6439,6 +6440,7 @@ repositories:
         delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-website-beehiiv-production-sync
+        broker_action_phase: generate
       - environment_name: BEEHIIV_PUBLICATION_ID
         source_reference: op://ken-website/beehiiv/publication_id
         source_vault: ken-website
@@ -6453,6 +6455,7 @@ repositories:
         delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-website-beehiiv-production-sync
+        broker_action_phase: generate
       artifacts: []
       target_hints:
       - npm
@@ -6649,4 +6652,4 @@ repositories:
       - COMBINED_BUILD_AND_DEPLOY
       - SCHEDULED_LONG_LIVED_SECRET
       - OP_BOOTSTRAP_TOKEN
-input_hash: def6f53d8fd5b9c2b2f9bb1f08cbd9d6ba62cb216f78f62793c55bf10f62a7ad
+input_hash: e0dd452e5d16d270daf076486c4dbfbb2e64fbfe5de70b3924da0a8b3b58cc46

@@ -420,11 +420,38 @@ jobs:
                 "ken-website-production-deploy",
             },
         )
+        expected_beehiiv_phases = {
+            "DEPLOY_SSH_KEY": "push",
+            "BEEHIIV_API_KEY": "generate",
+            "BEEHIIV_PUBLICATION_ID": "generate",
+        }
+        for document_rows in (
+            secrets["direct_onepassword_entries"],
+            [
+                row
+                for row in handoff["rows"]
+                if row.get("reference_class") == "direct-onepassword"
+            ],
+            [
+                ref
+                for repo in repositories["repositories"]
+                for workflow in repo["workflows"]
+                for job in workflow["jobs"]
+                for ref in job.get("direct_onepassword_references") or []
+            ],
+        ):
+            phase_by_name = {
+                row["environment_name"]: row.get("broker_action_phase")
+                for row in document_rows
+                if row.get("broker_action_id")
+                == "ken-website-beehiiv-production-sync"
+            }
+            self.assertEqual(phase_by_name, expected_beehiiv_phases)
         self.assertEqual(
             secrets["broker_actions"], handoff["broker_actions"]
         )
         self.assertEqual(input_manifest["collected_at"], "2026-08-19T20:13:15Z")
-        self.assertEqual(input_manifest["input_hash"], "def6f53d8fd5b9c2b2f9bb1f08cbd9d6ba62cb216f78f62793c55bf10f62a7ad")
+        self.assertEqual(input_manifest["input_hash"], "e0dd452e5d16d270daf076486c4dbfbb2e64fbfe5de70b3924da0a8b3b58cc46")
         manifest_without_derived_hash = dict(input_manifest)
         manifest_without_derived_hash.pop("input_hash")
         self.assertEqual(
@@ -479,8 +506,15 @@ jobs:
                     "ken-website-beehiiv-production-sync",
                     "ken-website-production-deploy",
                 })
+                expected_phase = {
+                    "BEEHIIV_API_KEY": "generate",
+                    "BEEHIIV_PUBLICATION_ID": "generate",
+                    "DEPLOY_SSH_KEY": "push",
+                }.get(row["environment_name"])
+                self.assertEqual(row.get("broker_action_phase"), expected_phase)
             else:
                 self.assertNotIn("broker_action_id", row)
+                self.assertNotIn("broker_action_phase", row)
                 self.assertEqual(row["target_vault"], "not-applicable")
             self.assertIn(row["field_type"], {"concealed", "string"})
             self.assertTrue(row["source_to_target_steps"])
@@ -514,7 +548,7 @@ jobs:
             },
         )
 
-    def test_direct_rows_bind_to_three_fixed_output_free_broker_actions(self):
+    def test_direct_rows_bind_to_two_fixed_and_one_split_trusted_generation_action(self):
         import build_task6_authority_evidence as builder
 
         evidence = builder.build_evidence()
@@ -527,7 +561,6 @@ jobs:
             set(direct_actions),
             {
                 "ken-vexa-mcp-auth-production-deploy",
-                "ken-website-beehiiv-production-sync",
                 "ken-website-production-deploy",
             },
         )
@@ -545,6 +578,27 @@ jobs:
             self.assertFalse(action["client_receives_config"])
             self.assertFalse(action["client_receives_fd"])
             self.assertFalse(action["client_receives_output"])
+        beehiiv = next(row for row in evidence["broker_actions"] if row["action_id"] == "ken-website-beehiiv-production-sync")
+        self.assertEqual(beehiiv["mode"], "trusted_generation")
+        self.assertEqual(beehiiv["status"], "blocked-until-task7-transport-pins-pass")
+        self.assertEqual(beehiiv["phase_order"], ["generate", "push"])
+        self.assertEqual(beehiiv["phase_overlap"], "forbidden")
+        self.assertEqual(beehiiv["transaction_slices"], ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"])
+        generate, push = beehiiv["phases"]["generate"], beehiiv["phases"]["push"]
+        self.assertEqual(generate["identity"], {"name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102})
+        self.assertEqual(push["identity"], {"name": "ken-beehiiv-push", "uid": 22104, "gid": 22104})
+        self.assertEqual(generate["required_fields"], [
+            {"target_item": "ken-website", "target_field": "BEEHIIV_API_KEY", "field_type": "concealed"},
+            {"target_item": "ken-website", "target_field": "BEEHIIV_PUBLICATION_ID", "field_type": "string"},
+        ])
+        self.assertEqual(push["required_fields"], [
+            {"target_item": "ken-website", "target_field": "DEPLOY_SSH_KEY", "field_type": "concealed"},
+        ])
+        self.assertTrue(set(map(str, generate["descriptor_set"])).isdisjoint(map(str, push["descriptor_set"])))
+        self.assertNotEqual(generate["network_profile"], push["network_profile"])
+        self.assertNotEqual(generate["cgroup_template"], push["cgroup_template"])
+        self.assertTrue(generate["executes_repository_code"])
+        self.assertFalse(push["executes_repository_code"])
 
 
 class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
@@ -1043,7 +1097,6 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
 
         action_ids = {
             "ken-vexa-mcp-auth-production-deploy",
-            "ken-website-beehiiv-production-sync",
             "ken-website-production-deploy",
         }
         mutations = (
@@ -1081,6 +1134,73 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
                 with self.subTest(action=action_id, fields=field_mutation):
                     with self.assertRaisesRegex(ValueError, "fixed broker action contract"):
                         aw.validate_authority_evidence(evidence)
+
+    def test_trusted_generation_rejects_retired_flat_and_phase_boundary_mutations(self):
+        import build_task6_authority_evidence as builder
+
+        def action(evidence):
+            return next(row for row in evidence["broker_actions"] if row["action_id"] == "ken-website-beehiiv-production-sync")
+
+        mutations = {
+            "retired-mode": lambda row: row.__setitem__("mode", "fixed_secret_action"),
+            "retired-executor": lambda row: row.__setitem__("executor_uid", "ken-action-website-beehiiv"),
+            "flat-template": lambda row: row.__setitem__("template_path", "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.env.op"),
+            "combined-network": lambda row: row["phases"]["generate"].__setitem__("network_profile", "github-source-beehiiv-api-and-ken-website-push"),
+            "phase-crossover": lambda row: row["phases"]["generate"]["required_fields"].append(copy.deepcopy(row["phases"]["push"]["required_fields"][0])),
+            "shared-uid": lambda row: row["phases"]["push"]["identity"].__setitem__("uid", 22102),
+            "shared-cgroup": lambda row: row["phases"]["push"].__setitem__("cgroup_template", row["phases"]["generate"]["cgroup_template"]),
+            "shared-directory": lambda row: row["phases"]["push"].__setitem__("request_subdirectory", "generate"),
+            "shared-descriptor": lambda row: row["phases"]["push"]["descriptor_set"].append("BEEHIIV_API_KEY"),
+            "phase-overlap": lambda row: row.__setitem__("phase_overlap", "allowed"),
+            "unsealed-input": lambda row: row.__setitem__("verified_commit_input", "generator-output"),
+            "unvalidated-paths": lambda row: row["generated_path_validation"].__setitem__("authority", "generator"),
+            "transport-scalar": lambda row: row["transport"]["bindings"].__setitem__("phase_transport_sha256", False),
+        }
+        for name, mutate in mutations.items():
+            evidence = copy.deepcopy(builder.build_evidence())
+            mutate(action(evidence))
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "trusted generation contract"):
+                aw.validate_authority_evidence(evidence)
+            if name in {"phase-crossover", "shared-cgroup", "transport-scalar"}:
+                with self.subTest(name=name, path="generate"):
+                    self._assert_full_generation_rejects(
+                        evidence, "trusted generation contract"
+                    )
+
+        evidence = copy.deepcopy(builder.build_evidence())
+        copied_trusted_action = copy.deepcopy(action(evidence))
+        other = next(row for row in evidence["broker_actions"] if row["action_id"] == "ken-vexa-mcp-auth-production-deploy")
+        other.clear(); other.update(copied_trusted_action); other["action_id"] = "ken-vexa-mcp-auth-production-deploy"
+        with self.assertRaisesRegex(ValueError, "trusted generation contract"):
+            aw.validate_authority_evidence(evidence)
+
+    def test_trusted_generation_direct_mapping_phase_is_exact(self):
+        import build_task6_authority_evidence as builder
+
+        mutations = {
+            "missing": lambda row: row.pop("broker_action_phase"),
+            "wrong": lambda row: row.__setitem__("broker_action_phase", "push"),
+            "null": lambda row: row.__setitem__("broker_action_phase", None),
+            "boolean": lambda row: row.__setitem__("broker_action_phase", False),
+        }
+        for name, mutate in mutations.items():
+            evidence = copy.deepcopy(builder.build_evidence())
+            mapping = next(
+                row
+                for row in evidence["direct_onepassword_mappings"]
+                if row["environment_name"] == "BEEHIIV_API_KEY"
+            )
+            mutate(mapping)
+            with self.subTest(name=name), self.assertRaisesRegex(
+                ValueError, "broker action phase|wrong authority evidence type"
+            ):
+                aw.validate_authority_evidence(evidence)
+            if name in {"missing", "wrong"}:
+                with self.subTest(name=name, path="generate"):
+                    self._assert_full_generation_rejects(
+                        evidence,
+                        "broker action phase|wrong authority evidence type",
+                    )
 
     def test_fixed_action_fields_equal_assigned_direct_mappings(self):
         import build_task6_authority_evidence as builder

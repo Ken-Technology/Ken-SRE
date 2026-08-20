@@ -1,6 +1,6 @@
 schema_version: 1
-lock_version: 2026-08-20.2
-plan_sha256: fa04630e96b13acc47419f790631acd8d595850affe937d665ff3216ed193b51
+lock_version: 2026-08-20.3
+plan_sha256: 00e93ef99f75e4101028a4838156c730f4d6bb306f20e5340bf4812128171d0f
 target:
   os: ubuntu-24.04
   architecture: amd64
@@ -28,8 +28,9 @@ runtime_contract:
   - {guest: ken-deploy, name: ken-op-net-nonprod, uid: 22002, gid: 22002, slice: ken-actions-deploy-brokers.slice, network_profile: github-control-nonproduction}
   - {guest: ken-deploy, name: ken-op-net-prod, uid: 22003, gid: 22003, slice: ken-actions-deploy-brokers.slice, network_profile: github-control-production}
   - {guest: ken-deploy, name: ken-vexa-deploy, uid: 22101, gid: 22101, slice: null, network_profile: vexa-production-fixed-target}
-  - {guest: ken-deploy, name: ken-beehiiv-sync, uid: 22102, gid: 22102, slice: null, network_profile: beehiiv-and-github-fixed-targets}
+  - {guest: ken-deploy, name: ken-beehiiv-generate, uid: 22102, gid: 22102, slice: null, network_profile: beehiiv-api-fixed-target}
   - {guest: ken-deploy, name: ken-website-deploy, uid: 22103, gid: 22103, slice: null, network_profile: website-production-fixed-target}
+  - {guest: ken-deploy, name: ken-beehiiv-push, uid: 22104, gid: 22104, slice: null, network_profile: github-ssh-ken-website-fixed-target}
   - {guest: ken-deploy, name: ken-fe-builder, uid: 22201, gid: 22201, slice: null, network_profile: frontend-production-digest-deploy}
   - {guest: ken-deploy, name: ken-fe-uploader, uid: 22202, gid: 22202, slice: null, network_profile: frontend-production-digest-deploy}
   - {guest: ken-deploy, name: ken-fe-deploy, uid: 22203, gid: 22203, slice: null, network_profile: frontend-production-digest-deploy}
@@ -46,6 +47,7 @@ runtime_contract:
     binding: executor.systemd_transaction_transport_sha256
     transaction_slices: [ken-actions-deploy-transaction-1.slice, ken-actions-deploy-transaction-2.slice]
     frontend_bindings: [production_build.phase_transport_sha256, production_build.deploy_contract_sha256]
+    trusted_generation_bindings: [trusted_generation.transport.dependency_acquisition_sha256, trusted_generation.transport.generated_paths_manifest_sha256, trusted_generation.transport.commit_input_contract_sha256, trusted_generation.transport.cgroup_contract_sha256, trusted_generation.transport.phase_transport_sha256]
 components:
 - id: 1password-cli
   version: 2.39.0
@@ -584,7 +586,7 @@ installed_files:
   - ken-deploy
   source: repo:bin/ken-op-exec
 - path: /usr/local/bin/ken-op-broker
-  sha256: 699e33a3d078c4eaebcec2ab68fe0d9b5421dbffd20307df3f51787a74fa107e
+  sha256: 8d1c7859a1d4108e507d2f9a32acee8a1e26a10c212186fc751ab39e1c47d22e
   hosts:
   - ken-ci
   - ken-deploy
@@ -629,7 +631,7 @@ installed_files:
   hosts: [ken-ci, ken-deploy]
   source: repo:bin/runtime-known-answer.py
 - path: /etc/ken-op-broker/op-broker-policy.yaml
-  sha256: d111b36d43cfe1ff1a49eb07e166dc472c734e1d233b4d9e75faca5e5d2baff3
+  sha256: b1e15a9b74e3330c32eb63143d65f51fd1ec595c8eeb3a36cfb46abcc27cc89b
   hosts:
   - ken-ci
   - ken-deploy

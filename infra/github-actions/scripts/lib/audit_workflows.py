@@ -116,23 +116,6 @@ FIXED_BROKER_ACTION_POLICIES: dict[str, dict[str, Any]] = {
             }
         ),
     },
-    "ken-website-beehiiv-production-sync": {
-        "repository": "ken-website",
-        "workflow": ".github/workflows/beehiiv-sync.yml",
-        "job": "sync",
-        "executor_uid": "ken-action-website-beehiiv",
-        "template_path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.env.op",
-        "wrapper_path": "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync",
-        "target_profile": "ken-website-main-beehiiv-sync",
-        "network_profile": "github-source-beehiiv-api-and-ken-website-push",
-        "required_fields": frozenset(
-            {
-                ("ken-website", "DEPLOY_SSH_KEY", "concealed"),
-                ("ken-website", "BEEHIIV_API_KEY", "concealed"),
-                ("ken-website", "BEEHIIV_PUBLICATION_ID", "string"),
-            }
-        ),
-    },
     "ken-website-production-deploy": {
         "repository": "ken-website",
         "workflow": ".github/workflows/deploy.yml",
@@ -150,6 +133,135 @@ FIXED_BROKER_ACTION_POLICIES: dict[str, dict[str, Any]] = {
             }
         ),
     },
+}
+
+TRUSTED_GENERATION_ACTION_ID = "ken-website-beehiiv-production-sync"
+TRUSTED_GENERATION_PHASE_BY_FIELD = {
+    "BEEHIIV_API_KEY": "generate",
+    "BEEHIIV_PUBLICATION_ID": "generate",
+    "DEPLOY_SSH_KEY": "push",
+}
+TRUSTED_GENERATION_ACTION_CONTRACT: dict[str, Any] = {
+    "action_id": TRUSTED_GENERATION_ACTION_ID,
+    "mode": "trusted_generation",
+    "status": "blocked-until-task7-transport-pins-pass",
+    "trust_class": "production",
+    "repository": "ken-website",
+    "workflow": ".github/workflows/beehiiv-sync.yml",
+    "job": "sync",
+    "runner_class": "ken-deploy-production",
+    "target_vault": "Ken Deploy Production",
+    "request_allowed_keys": list(BROKER_REQUEST_KEYS),
+    "source_contract": {
+        "authenticated_source": "protected-main-before-credentials",
+        "dependency_acquisition": "before-credentials",
+    },
+    "phase_order": ["generate", "push"],
+    "phase_overlap": "forbidden",
+    "transaction_slices": [
+        "ken-actions-deploy-transaction-1.slice",
+        "ken-actions-deploy-transaction-2.slice",
+    ],
+    "generated_path_validation": {
+        "authority": "root-coordinator-exact-allowlist",
+        "input": "generator-stopped-and-reaped-diff",
+        "rejects": [
+            "unreviewed-path",
+            "wrong-mode",
+            "non-regular",
+            "symlink",
+            "size-limit",
+        ],
+    },
+    "verified_commit_input": "root-coordinator-sealed-read-only",
+    "transport": {
+        "wrapper_owner": "root",
+        "wrapper_path": "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync",
+        "bindings": {
+            "dependency_acquisition_sha256": None,
+            "generated_paths_manifest_sha256": None,
+            "commit_input_contract_sha256": None,
+            "cgroup_contract_sha256": None,
+            "phase_transport_sha256": None,
+        },
+    },
+    "phases": {
+        "generate": {
+            "identity": {
+                "name": "ken-beehiiv-generate",
+                "uid": 22102,
+                "gid": 22102,
+            },
+            "request_subdirectory": "generate",
+            "cgroup_template": "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-generate.scope",
+            "descriptor_set": [
+                "authenticated-source-tree",
+                "BEEHIIV_API_KEY",
+                "BEEHIIV_PUBLICATION_ID",
+            ],
+            "template": {
+                "owner": "root",
+                "path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.generate.env.op",
+            },
+            "required_fields": [
+                {
+                    "target_item": "ken-website",
+                    "target_field": "BEEHIIV_API_KEY",
+                    "field_type": "concealed",
+                },
+                {
+                    "target_item": "ken-website",
+                    "target_field": "BEEHIIV_PUBLICATION_ID",
+                    "field_type": "string",
+                },
+            ],
+            "network_profile": "beehiiv-api-fixed-target",
+            "operation": "pinned-dependency-install-and-beehiiv-generation",
+            "executes_repository_code": True,
+        },
+        "push": {
+            "identity": {"name": "ken-beehiiv-push", "uid": 22104, "gid": 22104},
+            "request_subdirectory": "push",
+            "cgroup_template": "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-push.scope",
+            "descriptor_set": ["root-verified-commit-input", "DEPLOY_SSH_KEY"],
+            "template": {
+                "owner": "root",
+                "path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.push.env.op",
+            },
+            "required_fields": [
+                {
+                    "target_item": "ken-website",
+                    "target_field": "DEPLOY_SSH_KEY",
+                    "field_type": "concealed",
+                }
+            ],
+            "network_profile": "github-ssh-ken-website-fixed-target",
+            "operation": "fixed-verified-commit-git-ssh-push",
+            "executes_repository_code": False,
+        },
+    },
+    "required_fields": [
+        {
+            "target_item": "ken-website",
+            "target_field": "DEPLOY_SSH_KEY",
+            "field_type": "concealed",
+        },
+        {
+            "target_item": "ken-website",
+            "target_field": "BEEHIIV_API_KEY",
+            "field_type": "concealed",
+        },
+        {
+            "target_item": "ken-website",
+            "target_field": "BEEHIIV_PUBLICATION_ID",
+            "field_type": "string",
+        },
+    ],
+    "result_contract": "stable-code-only",
+    "client_receives_field": False,
+    "client_receives_config": False,
+    "client_receives_fd": False,
+    "client_receives_output": False,
 }
 
 BUILD_HINTS = (
@@ -757,6 +869,7 @@ def apply_direct_onepassword_mapping(
     delivery = mapping.get("delivery")
     migration_action = mapping.get("migration_action")
     broker_action_id = str(mapping.get("broker_action_id") or "").strip()
+    broker_action_phase = mapping.get("broker_action_phase")
     if disposition == "broker-action":
         if delivery != "onepassword-broker" or migration_action != "copy-direct-onepassword-reference":
             raise ValueError("invalid direct 1Password broker disposition")
@@ -772,10 +885,22 @@ def apply_direct_onepassword_mapping(
             if isinstance(action, dict) and action.get("action_id") == broker_action_id
         ]
         if len(broker_actions) != 1:
-            raise ValueError("direct 1Password mapping requires one fixed broker action")
+            raise ValueError("direct 1Password mapping requires one broker action")
         broker_action = broker_actions[0]
-        if broker_action.get("mode") != "fixed_secret_action":
-            raise ValueError("direct 1Password reference requires fixed_secret_action mode")
+        action_mode = broker_action.get("mode")
+        expected_phase = (
+            TRUSTED_GENERATION_PHASE_BY_FIELD.get(mapping["environment_name"])
+            if broker_action_id == TRUSTED_GENERATION_ACTION_ID
+            else None
+        )
+        if action_mode not in {"fixed_secret_action", "trusted_generation"}:
+            raise ValueError("direct 1Password reference requires an approved broker action mode")
+        if (action_mode == "trusted_generation") is not (
+            broker_action_id == TRUSTED_GENERATION_ACTION_ID
+        ):
+            raise ValueError("direct 1Password broker action mode mismatch")
+        if broker_action_phase != expected_phase:
+            raise ValueError("direct 1Password broker action phase mismatch")
         for field in ("repository", "workflow", "job", "runner_class", "target_vault"):
             expected = {
                 "repository": repository,
@@ -793,6 +918,13 @@ def apply_direct_onepassword_mapping(
         }
         if exact_field not in (broker_action.get("required_fields") or []):
             raise ValueError("direct 1Password broker action is missing its exact field")
+        if expected_phase is not None and exact_field not in (
+            ((broker_action.get("phases") or {}).get(expected_phase) or {}).get(
+                "required_fields"
+            )
+            or []
+        ):
+            raise ValueError("direct 1Password broker action phase is missing its exact field")
     elif disposition == "github-variable":
         expected = {
             "repository": "ken-website",
@@ -807,7 +939,7 @@ def apply_direct_onepassword_mapping(
             "delivery": "github-actions-variable",
             "migration_action": "move-to-variable",
         }
-        if broker_action_id or any(mapping.get(key) != value for key, value in expected.items()):
+        if broker_action_id or broker_action_phase is not None or any(mapping.get(key) != value for key, value in expected.items()):
             raise ValueError("invalid direct GitHub variable disposition")
     elif disposition == "obsolete-unused":
         expected = {
@@ -823,7 +955,7 @@ def apply_direct_onepassword_mapping(
             "delivery": "none",
             "migration_action": "remove-unused-reference-after-rg-proof",
         }
-        if broker_action_id or any(mapping.get(key) != value for key, value in expected.items()):
+        if broker_action_id or broker_action_phase is not None or any(mapping.get(key) != value for key, value in expected.items()):
             raise ValueError("invalid obsolete direct reference disposition")
     else:
         raise ValueError("unsupported direct 1Password disposition")
@@ -856,6 +988,8 @@ def apply_direct_onepassword_mapping(
     }
     if broker_action_id:
         result["broker_action_id"] = broker_action_id
+    if broker_action_phase is not None:
+        result["broker_action_phase"] = broker_action_phase
     return result
 
 
@@ -913,6 +1047,22 @@ def _authority_string_list(value: Any, *, allow_empty: bool = False) -> None:
         raise ValueError("wrong authority evidence type")
     if not all(type(item) is str and item.strip() for item in value):
         raise ValueError("wrong authority evidence type")
+
+
+def _authority_exact(value: Any, expected: Any) -> bool:
+    """Compare a security contract without Python's bool/int type coercion."""
+    if type(value) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(value) == set(expected) and all(
+            _authority_exact(value[key], expected[key]) for key in expected
+        )
+    if isinstance(expected, list):
+        return len(value) == len(expected) and all(
+            _authority_exact(actual, wanted)
+            for actual, wanted in zip(value, expected, strict=True)
+        )
+    return value == expected
 
 
 def _validate_authority_source(source: Any) -> None:
@@ -1013,6 +1163,11 @@ def _validate_fixed_broker_action(action: dict[str, Any]) -> None:
         )
     ):
         raise ValueError("invalid fixed broker action contract")
+
+
+def _validate_trusted_generation_action(action: dict[str, Any]) -> None:
+    if not _authority_exact(action, TRUSTED_GENERATION_ACTION_CONTRACT):
+        raise ValueError("invalid trusted generation contract")
 
 
 def _validate_production_build_action(action: dict[str, Any]) -> None:
@@ -1562,7 +1717,7 @@ def validate_authority_evidence(evidence: Any) -> None:
         row = _authority_object(
             mapping,
             {"mapping_id", "repository", "workflow", "job", "environment_name", "source_reference", "source_vault", "source_item", "source_field", "target_vault", "target_item", "target_field", "field_type", "consumer", "disposition", "delivery", "migration_action", "source_to_target_steps", "broker_cutover_steps", "live_verification_steps", "retirement_steps"},
-            {"broker_action_id"},
+            {"broker_action_id", "broker_action_phase"},
         )
         for key, value in row.items():
             if key.endswith("_steps"): _authority_string_list(value)
@@ -1576,6 +1731,13 @@ def validate_authority_evidence(evidence: Any) -> None:
                 or (row["delivery"], row["migration_action"]) != disposition_contract[:2]
                 or ("broker_action_id" in row) is not disposition_contract[2]):
             raise ValueError("invalid direct 1Password disposition")
+        expected_phase = (
+            TRUSTED_GENERATION_PHASE_BY_FIELD.get(row["environment_name"])
+            if row.get("broker_action_id") == TRUSTED_GENERATION_ACTION_ID
+            else None
+        )
+        if row.get("broker_action_phase") != expected_phase:
+            raise ValueError("invalid direct 1Password broker action phase")
         if row["mapping_id"] in direct_ids:
             raise ValueError("duplicate direct 1Password mapping id")
         direct_ids.add(row["mapping_id"])
@@ -1610,8 +1772,12 @@ def validate_authority_evidence(evidence: Any) -> None:
     for action in root["broker_actions"]:
         if not isinstance(action, dict):
             raise ValueError("wrong authority evidence type")
-        if action.get("mode") == "fixed_secret_action":
+        if action.get("action_id") == TRUSTED_GENERATION_ACTION_ID:
+            _validate_trusted_generation_action(action)
+        elif action.get("mode") == "fixed_secret_action":
             _validate_fixed_broker_action(action)
+        elif action.get("mode") == "trusted_generation":
+            _validate_trusted_generation_action(action)
         elif action.get("mode") == "production_build":
             _validate_production_build_action(action)
         else:
@@ -2195,6 +2361,15 @@ def validate_authority_mapping_coverage(
         raise ValueError(
             f"unused direct 1Password mappings: {', '.join(unused_direct)}"
         )
+    direct_mapping_by_id = {
+        str(mapping["mapping_id"]): mapping for mapping in direct_mappings
+    }
+    for entry in direct_entries or []:
+        mapping = direct_mapping_by_id.get(str(entry.get("mapping_id") or ""))
+        if mapping is None or entry.get("broker_action_phase") != mapping.get(
+            "broker_action_phase"
+        ):
+            raise ValueError("direct 1Password generated action phase mismatch")
 
     action_ids = [str(action.get("action_id") or "") for action in broker_actions]
     if any(not action_id for action_id in action_ids):
@@ -2203,7 +2378,7 @@ def validate_authority_mapping_coverage(
         raise ValueError("duplicate broker action_id")
     action_by_id = {str(action["action_id"]): action for action in broker_actions}
     for action_id, action in action_by_id.items():
-        if action.get("mode") != "fixed_secret_action":
+        if action.get("mode") not in {"fixed_secret_action", "trusted_generation"}:
             continue
         action_fields = [
             (
@@ -2227,7 +2402,39 @@ def validate_authority_mapping_coverage(
             or len(mapping_fields) != len(set(mapping_fields))
             or set(action_fields) != set(mapping_fields)
         ):
-            raise ValueError("fixed broker action required fields mismatch")
+            raise ValueError(
+                "fixed broker action required fields mismatch"
+                if action.get("mode") == "fixed_secret_action"
+                else "trusted generation required fields mismatch"
+            )
+        if action.get("mode") == "trusted_generation":
+            phases = action.get("phases") or {}
+            phase_fields = {
+                phase: {
+                    (
+                        field.get("target_item"),
+                        field.get("target_field"),
+                        field.get("field_type"),
+                    )
+                    for field in (phases.get(phase) or {}).get("required_fields") or []
+                }
+                for phase in ("generate", "push")
+            }
+            if phase_fields["generate"] & phase_fields["push"] or (
+                phase_fields["generate"] | phase_fields["push"]
+            ) != set(action_fields):
+                raise ValueError("trusted generation phase required fields mismatch")
+            for mapping in direct_mappings:
+                if mapping.get("broker_action_id") != action_id:
+                    continue
+                phase = mapping.get("broker_action_phase")
+                coordinate = (
+                    mapping.get("target_item"),
+                    mapping.get("target_field"),
+                    mapping.get("field_type"),
+                )
+                if phase not in phase_fields or coordinate not in phase_fields[phase]:
+                    raise ValueError("trusted generation mapping phase mismatch")
     for entry in entries:
         contract = _frontend_annotation_contract(
             entry.get("repository"), entry.get("github_secret_name")
@@ -3494,6 +3701,8 @@ def build_secret_handoff(
         }
         if entry.get("broker_action_id"):
             row["broker_action_id"] = entry["broker_action_id"]
+        if entry.get("broker_action_phase"):
+            row["broker_action_phase"] = entry["broker_action_phase"]
         for field in (
             "source_to_target_steps",
             "broker_or_workflow_cutover_steps",
@@ -3853,6 +4062,10 @@ def generate_from_inputs(
                                 **(
                                     {"broker_action_id": entry["broker_action_id"]}
                                     if entry.get("broker_action_id") else {}
+                                ),
+                                **(
+                                    {"broker_action_phase": entry["broker_action_phase"]}
+                                    if entry.get("broker_action_phase") else {}
                                 ),
                             }
                             for entry in job_direct_entries

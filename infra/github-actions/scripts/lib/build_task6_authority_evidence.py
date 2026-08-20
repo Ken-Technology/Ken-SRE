@@ -279,6 +279,7 @@ def _direct_onepassword_mapping(
     field_type: str,
     broker_action_id: str | None = None,
     disposition: str = "broker-action",
+    broker_action_phase: str | None = None,
 ) -> dict[str, Any]:
     segment = r"[A-Za-z0-9][A-Za-z0-9._ -]*"
     match = re.fullmatch(
@@ -291,6 +292,13 @@ def _direct_onepassword_mapping(
     if disposition == "broker-action":
         if not broker_action_id:
             raise ValueError("direct 1Password mapping requires broker_action_id")
+        expected_phase = {
+            ("ken-website-beehiiv-production-sync", "BEEHIIV_API_KEY"): "generate",
+            ("ken-website-beehiiv-production-sync", "BEEHIIV_PUBLICATION_ID"): "generate",
+            ("ken-website-beehiiv-production-sync", "DEPLOY_SSH_KEY"): "push",
+        }.get((broker_action_id, environment_name))
+        if broker_action_phase != expected_phase:
+            raise ValueError("direct 1Password mapping requires exact broker action phase")
         target_vault = PRODUCTION_VAULT
         target_item = repository
         delivery = "onepassword-broker"
@@ -309,7 +317,7 @@ def _direct_onepassword_mapping(
             f"Only after live verification, remove the direct {source_reference} workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
         ]
     elif disposition == "github-variable":
-        if broker_action_id or (repository, workflow, job, environment_name) != (
+        if broker_action_id or broker_action_phase is not None or (repository, workflow, job, environment_name) != (
             "ken-website", ".github/workflows/deploy.yml", "deploy", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"
         ):
             raise ValueError("invalid direct GitHub variable disposition")
@@ -330,7 +338,7 @@ def _direct_onepassword_mapping(
             f"After the variable cutover is verified, remove the direct {source_reference} workflow reference; retain the source item only until its owner confirms no other consumer remains."
         ]
     elif disposition == "obsolete-unused":
-        if broker_action_id or (repository, workflow, job, environment_name) != (
+        if broker_action_id or broker_action_phase is not None or (repository, workflow, job, environment_name) != (
             "ken-website", ".github/workflows/deploy.yml", "deploy", "POSTHOG_PERSONAL_API_KEY"
         ):
             raise ValueError("invalid obsolete direct reference disposition")
@@ -377,6 +385,8 @@ def _direct_onepassword_mapping(
     }
     if broker_action_id:
         result["broker_action_id"] = broker_action_id
+    if broker_action_phase is not None:
+        result["broker_action_phase"] = broker_action_phase
     return result
 
 
@@ -408,6 +418,81 @@ def _fixed_secret_broker_action(
         "network_profile": network_profile,
         "required_fields": required_fields,
         "request_allowed_keys": ["version", "action_id", "oidc_jwt", "github_token"],
+        "result_contract": "stable-code-only",
+        "client_receives_field": False,
+        "client_receives_config": False,
+        "client_receives_fd": False,
+        "client_receives_output": False,
+    }
+
+
+def _trusted_generation_broker_action(required_fields: list[dict[str, str]]) -> dict[str, Any]:
+    by_name = {field["target_field"]: field for field in required_fields}
+    generate_fields = [by_name["BEEHIIV_API_KEY"], by_name["BEEHIIV_PUBLICATION_ID"]]
+    push_fields = [by_name["DEPLOY_SSH_KEY"]]
+    return {
+        "action_id": "ken-website-beehiiv-production-sync",
+        "mode": "trusted_generation",
+        "status": "blocked-until-task7-transport-pins-pass",
+        "trust_class": "production",
+        "repository": "ken-website",
+        "workflow": ".github/workflows/beehiiv-sync.yml",
+        "job": "sync",
+        "runner_class": "ken-deploy-production",
+        "target_vault": PRODUCTION_VAULT,
+        "request_allowed_keys": ["version", "action_id", "oidc_jwt", "github_token"],
+        "source_contract": {
+            "authenticated_source": "protected-main-before-credentials",
+            "dependency_acquisition": "before-credentials",
+        },
+        "phase_order": ["generate", "push"],
+        "phase_overlap": "forbidden",
+        "transaction_slices": [
+            "ken-actions-deploy-transaction-1.slice",
+            "ken-actions-deploy-transaction-2.slice",
+        ],
+        "generated_path_validation": {
+            "authority": "root-coordinator-exact-allowlist",
+            "input": "generator-stopped-and-reaped-diff",
+            "rejects": ["unreviewed-path", "wrong-mode", "non-regular", "symlink", "size-limit"],
+        },
+        "verified_commit_input": "root-coordinator-sealed-read-only",
+        "transport": {
+            "wrapper_owner": "root",
+            "wrapper_path": "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync",
+            "bindings": {
+                "dependency_acquisition_sha256": None,
+                "generated_paths_manifest_sha256": None,
+                "commit_input_contract_sha256": None,
+                "cgroup_contract_sha256": None,
+                "phase_transport_sha256": None,
+            },
+        },
+        "phases": {
+            "generate": {
+                "identity": {"name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102},
+                "request_subdirectory": "generate",
+                "cgroup_template": "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-generate.scope",
+                "descriptor_set": ["authenticated-source-tree", "BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"],
+                "template": {"owner": "root", "path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.generate.env.op"},
+                "required_fields": generate_fields,
+                "network_profile": "beehiiv-api-fixed-target",
+                "operation": "pinned-dependency-install-and-beehiiv-generation",
+                "executes_repository_code": True,
+            },
+            "push": {
+                "identity": {"name": "ken-beehiiv-push", "uid": 22104, "gid": 22104},
+                "request_subdirectory": "push",
+                "cgroup_template": "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-push.scope",
+                "descriptor_set": ["root-verified-commit-input", "DEPLOY_SSH_KEY"],
+                "template": {"owner": "root", "path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.push.env.op"},
+                "required_fields": push_fields,
+                "network_profile": "github-ssh-ken-website-fixed-target",
+                "operation": "fixed-verified-commit-git-ssh-push",
+                "executes_repository_code": False,
+            },
+        },
+        "required_fields": required_fields,
         "result_contract": "stable-code-only",
         "client_receives_field": False,
         "client_receives_config": False,
@@ -874,9 +959,9 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_HOST", "op://Development/vexa-mcp-auth-deploy-ssh/host", "string", "ken-vexa-mcp-auth-production-deploy"),
         ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_PORT", "op://Development/vexa-mcp-auth-deploy-ssh/port", "string", "ken-vexa-mcp-auth-production-deploy"),
         ("ken-vexa-mcp-auth", ".github/workflows/deploy.yml", "deploy", "SERVER_SSH_KEY", "op://Development/vexa-mcp-auth-deploy-ssh/private_key", "concealed", "ken-vexa-mcp-auth-production-deploy"),
-        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "DEPLOY_SSH_KEY", "op://ken-website/blog-sync-deploy/private_key", "concealed", "ken-website-beehiiv-production-sync"),
-        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_API_KEY", "op://ken-website/beehiiv/credential", "concealed", "ken-website-beehiiv-production-sync"),
-        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_PUBLICATION_ID", "op://ken-website/beehiiv/publication_id", "string", "ken-website-beehiiv-production-sync"),
+        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "DEPLOY_SSH_KEY", "op://ken-website/blog-sync-deploy/private_key", "concealed", "ken-website-beehiiv-production-sync", "broker-action", "push"),
+        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_API_KEY", "op://ken-website/beehiiv/credential", "concealed", "ken-website-beehiiv-production-sync", "broker-action", "generate"),
+        ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_PUBLICATION_ID", "op://ken-website/beehiiv/publication_id", "string", "ken-website-beehiiv-production-sync", "broker-action", "generate"),
         ("ken-website", ".github/workflows/deploy.yml", "deploy", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "op://ken-website/posthog/project_token", "string", None, "github-variable"),
         ("ken-website", ".github/workflows/deploy.yml", "deploy", "POSTHOG_PERSONAL_API_KEY", "op://ken-website/posthog/personal_api_key", "concealed", None, "obsolete-unused"),
         ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_HOST", "op://ken-website/deploy-ssh/host", "string", "ken-website-production-deploy"),
@@ -895,15 +980,6 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
             "ken-action-vexa-deploy",
             "vexa-mcp-auth-production-ssh-and-public-health",
             "github-source-vexa-production-ssh-mcp-recordings",
-        ),
-        (
-            "ken-website-beehiiv-production-sync",
-            "ken-website",
-            ".github/workflows/beehiiv-sync.yml",
-            "sync",
-            "ken-action-website-beehiiv",
-            "ken-website-main-beehiiv-sync",
-            "github-source-beehiiv-api-and-ken-website-push",
         ),
         (
             "ken-website-production-deploy",
@@ -936,6 +1012,16 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
                 required_fields,
             )
         )
+    beehiiv_fields = [
+        {
+            "target_item": row["target_item"],
+            "target_field": row["target_field"],
+            "field_type": row["field_type"],
+        }
+        for row in direct_onepassword_mappings
+        if row.get("broker_action_id") == "ken-website-beehiiv-production-sync"
+    ]
+    broker_actions.append(_trusted_generation_broker_action(beehiiv_fields))
     broker_actions.append(_production_build_broker_action())
 
     for public_name in (

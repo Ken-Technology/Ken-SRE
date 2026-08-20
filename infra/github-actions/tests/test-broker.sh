@@ -90,8 +90,8 @@ import yaml
 
 root = Path(sys.argv[1])
 expected = {
-    "secrets.yaml": "c6e9fc47524beac0d122772ac050d22cd581798367cab3fc43793a7805e81cad",
-    "secret-handoff.yaml": "d2606b99d58cf487915bac8928e1ab4e2e193511287a38d54fb311c0b09edb59",
+    "secrets.yaml": "cd4aaa861064260e0857768361e301246681593b1dcf0c35950993f416c8587f",
+    "secret-handoff.yaml": "71c386d3382c1db06b14332f6e86525debe625ec1dafc708c5f0298665b88834",
 }
 for name, digest in expected.items():
     actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
@@ -105,6 +105,16 @@ assert handoff["counts"]["rows"] == 308
 assert handoff["counts"]["github_field_rows"] == 297
 assert handoff["counts"]["direct_onepassword_rows"] == 11
 assert len(handoff["rows"]) == 308
+beehiiv = {
+    row["environment_name"]: row.get("broker_action_phase")
+    for row in secrets["direct_onepassword_entries"]
+    if row.get("broker_action_id") == "ken-website-beehiiv-production-sync"
+}
+assert beehiiv == {
+    "DEPLOY_SSH_KEY": "push",
+    "BEEHIIV_API_KEY": "generate",
+    "BEEHIIV_PUBLICATION_ID": "generate",
+}
 direct = {row["environment_name"]: row for row in secrets["direct_onepassword_entries"] if row["repository"] == "ken-website" and row["workflow"] == ".github/workflows/deploy.yml"}
 assert direct["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"]["disposition"] == "github-variable"
 assert direct["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"]["delivery"] == "github-actions-variable"
@@ -151,7 +161,7 @@ for text in (lock_text, policy_text):
 lock = yaml.load(lock_text, Loader=StrictLoader)
 policy = yaml.load(policy_text, Loader=StrictLoader)
 assert lock["schema_version"] == 1
-assert re.fullmatch(r"[0-9a-f]{64}", lock["plan_sha256"])
+assert lock["plan_sha256"] == "00e93ef99f75e4101028a4838156c730f4d6bb306f20e5340bf4812128171d0f"
 required = {"1password-cli", "python", "pyyaml", "pyjwt", "cryptography", "ca-certificates", "git", "systemd", "buildkit", "node", "pnpm", "zip-safety"}
 components = {x["id"]: x for x in lock["components"]}
 assert required <= components.keys()
@@ -177,7 +187,10 @@ manifest="".join(f"{payload_rows[name]}  {name}\n" for name in sorted(payload_ro
 assert hashlib.sha256(manifest).hexdigest() == lock["compatibility"]["payload_manifest_sha256"] == "43a8d166b82c08197de6a975f4d14485c8bdae2da524db19f6f1ed1c7da8225f"
 contract=lock["runtime_contract"]
 assert contract["op_path"] == "/usr/local/bin/op" and contract["guest_payload_count"] == 30
-assert contract["remote_build_inputs"] == ["node-build-base"] and len(contract["principals"]) == 9
+assert contract["remote_build_inputs"] == ["node-build-base"] and len(contract["principals"]) == 10
+principal_map = {principal["name"]: principal for principal in contract["principals"]}
+assert principal_map["ken-beehiiv-generate"] == {"guest": "ken-deploy", "name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102, "slice": None, "network_profile": "beehiiv-api-fixed-target"}
+assert principal_map["ken-beehiiv-push"] == {"guest": "ken-deploy", "name": "ken-beehiiv-push", "uid": 22104, "gid": 22104, "slice": None, "network_profile": "github-ssh-ken-website-fixed-target"}
 assert contract["subordinate_ids"] == [{"guest":"ken-deploy","name":"ken-fe-builder","uid":22201,"subuid_start":300000,"subuid_count":65536,"subgid_start":300000,"subgid_count":65536}]
 assert lock["compatibility"]["artifact_class"] == "immutable-guest-install-contract"
 assert lock["compatibility"]["installation_readiness"] == "verification-required-by-task4"
@@ -189,6 +202,13 @@ assert contract["deferred_execution_transport"] == {
     "binding": "executor.systemd_transaction_transport_sha256",
     "transaction_slices": ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"],
     "frontend_bindings": ["production_build.phase_transport_sha256", "production_build.deploy_contract_sha256"],
+    "trusted_generation_bindings": [
+        "trusted_generation.transport.dependency_acquisition_sha256",
+        "trusted_generation.transport.generated_paths_manifest_sha256",
+        "trusted_generation.transport.commit_input_contract_sha256",
+        "trusted_generation.transport.cgroup_contract_sha256",
+        "trusted_generation.transport.phase_transport_sha256",
+    ],
 }
 assert all(principal["slice"] is None for principal in contract["principals"][3:])
 installed = {item["path"]: item for item in lock["installed_files"]}
@@ -207,6 +227,8 @@ assert policy["schema_version"] == 1
 assert policy["policy_version"]
 assert policy["issuer"] == "https://token.actions.githubusercontent.com"
 assert policy["credentials"]["command"] == ["/usr/local/bin/op", "inject"]
+assert policy["firewall_phase_interface"]["profiles"]["beehiiv-api-fixed-target"] == ["beehiiv-api"]
+assert policy["firewall_phase_interface"]["profiles"]["github-ssh-ken-website-fixed-target"] == ["github-ssh"]
 actions = {x["action_id"]: x for x in policy["actions"]}
 assert set(actions) == {
     "ken-frontend-production-release",
@@ -215,17 +237,58 @@ assert set(actions) == {
     "ken-website-production-deploy",
 }
 assert actions["ken-frontend-production-release"]["input_mode"] == "production_build"
+beehiiv = actions["ken-website-beehiiv-production-sync"]
+assert beehiiv["input_mode"] == "trusted_generation"
+assert "source_is_deployable" not in beehiiv
+assert "executes_repository_code" not in beehiiv
+assert "template" not in beehiiv
+generation = beehiiv["trusted_generation"]
+assert set(generation) == {
+    "authenticated_source", "dependency_acquisition", "phase_order", "phase_overlap",
+    "verified_commit_input", "transaction_slices", "transport", "phases",
+}
+assert generation["authenticated_source"] == "protected-main-before-credentials"
+assert generation["dependency_acquisition"] == "before-credentials"
+assert generation["phase_order"] == ["generate", "push"] and generation["phase_overlap"] == "forbidden"
+assert generation["verified_commit_input"] == "root-coordinator-sealed-read-only"
+assert generation["transaction_slices"] == ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"]
+transport = generation["transport"]
+assert transport == {
+    "wrapper": "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync",
+    "wrapper_sha256": installed["/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync"]["sha256"],
+    "dependency_acquisition_sha256": None,
+    "generated_paths_manifest_sha256": None,
+    "commit_input_contract_sha256": None,
+    "cgroup_contract_sha256": None,
+    "phase_transport_sha256": None,
+}
+generate, push = generation["phases"]["generate"], generation["phases"]["push"]
+assert generate["identity"] == {"name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102}
+assert push["identity"] == {"name": "ken-beehiiv-push", "uid": 22104, "gid": 22104}
+assert generate["request_subdirectory"] == "generate" and push["request_subdirectory"] == "push"
+assert generate["cgroup_template"] == "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-generate.scope"
+assert push["cgroup_template"] == "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-push.scope"
+assert generate["descriptor_set"] == ["authenticated-source-tree", "BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"]
+assert push["descriptor_set"] == ["root-verified-commit-input", "DEPLOY_SSH_KEY"]
+assert generate["template"]["fields"] == ["BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"]
+assert push["template"]["fields"] == ["DEPLOY_SSH_KEY"]
+assert generate["network_profile"] == "beehiiv-api-fixed-target"
+assert push["network_profile"] == "github-ssh-ken-website-fixed-target"
+assert generate["executes_repository_code"] is True and push["executes_repository_code"] is False
+assert not set(generate["descriptor_set"]) & set(push["descriptor_set"])
+assert not set(generate["template"]["fields"]) & set(push["template"]["fields"])
 assert all(x["result_contract"] == "stable-code-only" for x in actions.values())
 assert all(x["enabled"] is False and x["deferred_bindings"] for x in actions.values())
-assert all("executor.systemd_transaction_transport_sha256" in x["deferred_bindings"] and x["executor"]["systemd_transaction_transport_sha256"] is None for x in actions.values())
+assert all("executor.systemd_transaction_transport_sha256" in x["deferred_bindings"] and x["executor"]["systemd_transaction_transport_sha256"] is None for x in actions.values() if x["input_mode"] != "trusted_generation")
 assert actions["ken-frontend-production-release"]["blocked_reason_code"] == "frontend_task7_pins_phase_transport_deploy_required"
 assert actions["ken-vexa-mcp-auth-production-deploy"]["blocked_reason_code"] == "vexa_host_key_runtime_identity_and_transaction_transport_required"
 assert actions["ken-website-beehiiv-production-sync"]["blocked_reason_code"] == "beehiiv_sync_generation_and_transaction_transport_required"
 assert actions["ken-website-production-deploy"]["blocked_reason_code"] == "website_host_key_runtime_identity_and_transaction_transport_required"
 assert actions["ken-website-production-deploy"]["template"]["fields"] == ["WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"]
 for action in actions.values():
-    wrapper = action["executor"]["wrapper"]
-    assert installed[wrapper]["sha256"] == action["executor"]["wrapper_sha256"]
+    execution = action["trusted_generation"]["transport"] if action["input_mode"] == "trusted_generation" else action["executor"]
+    wrapper = execution["wrapper"]
+    assert installed[wrapper]["sha256"] == execution["wrapper_sha256"]
 PY
 
 echo '== protocol, OIDC, replay, inputs, privilege and lease behavior =='
@@ -295,6 +358,33 @@ class ProtocolTests(unittest.TestCase):
             broker.parse_request(json.dumps({"version": 1, "action_id": "valid-action", "oidc_jwt": "a.b.c", "github_token": "token-é"}).encode())
         with self.assertRaises(broker.Reject):
             broker.parse_request(b"x" * 65537)
+
+    def test_request_version_requires_exact_json_integer_before_auth(self):
+        valid = {"version": 1, "action_id": "valid-action", "oidc_jwt": "a.b.c", "github_token": "token"}
+        self.assertEqual(broker.parse_request(json.dumps(valid).encode())["version"], 1)
+        for version in (True, 1.0, "1", 2):
+            packet = json.dumps({**valid, "version": version}).encode()
+            with self.subTest(version=version):
+                with self.assertRaises(broker.Reject) as caught:
+                    broker.parse_request(packet)
+                self.assertEqual(caught.exception.code, "request_schema_invalid")
+        class PreAuthProbe(broker.BrokerDependencies):
+            def __init__(self): self.authorization_calls = 0
+            def verify_token(self, token, action): self.authorization_calls += 1; raise AssertionError("authorization reached")
+        probe = PreAuthProbe()
+        peer = broker.PeerIdentity(uid=self.action.runner.uid, gid=self.action.runner.gid, pid=42, start_time=99, cgroup=self.action.runner.cgroup, executable=self.action.runner.executable)
+        with tempfile.TemporaryDirectory() as directory:
+            for version in (True, 1.0, "1", 2):
+                socket_type = socket.SOCK_SEQPACKET if sys.platform.startswith("linux") else socket.SOCK_DGRAM
+                client, server = socket.socketpair(socket.AF_UNIX, socket_type)
+                try:
+                    packet = json.dumps({"version": version, "action_id": self.action.action_id, "oidc_jwt": "a.b.c", "github_token": "token"}).encode()
+                    client.send(packet)
+                    response = broker.process_connection(server, self.policy, "production", Path(directory) / "state", -1, probe, peer=peer, revalidate=lambda value: value)
+                    self.assertEqual(response["reason_code"], "request_schema_invalid")
+                finally:
+                    client.close(); server.close()
+        self.assertEqual(probe.authorization_calls, 0)
 
     def test_action_mode_schema_rejects_descriptor_mixups(self):
         request = {"version": 1, "action_id": self.action.action_id, "oidc_jwt": "a.b.c", "github_token": "g"}
@@ -439,6 +529,82 @@ class ProtocolTests(unittest.TestCase):
             with self.assertRaises(broker.Reject) as ctx:
                 broker.execute_fixed_action_live(self.action, root, root, claims, -1, (22201, 22201))
         self.assertEqual(ctx.exception.code, "production_build_transport_unavailable")
+
+    def test_beehiiv_trusted_generation_is_not_source_and_refuses_without_transport(self):
+        action = self.policy.actions["ken-website-beehiiv-production-sync"]
+        generation = action.raw["trusted_generation"]
+        generate, push = generation["phases"]["generate"], generation["phases"]["push"]
+        self.assertEqual(action.input_mode, "trusted_generation")
+        self.assertNotIn("source_is_deployable", action.raw)
+        self.assertEqual(generation["phase_order"], ["generate", "push"])
+        self.assertEqual(generation["phase_overlap"], "forbidden")
+        self.assertNotEqual(generate["identity"]["uid"], push["identity"]["uid"])
+        self.assertNotEqual(generate["request_subdirectory"], push["request_subdirectory"])
+        self.assertNotEqual(generate["cgroup_template"], push["cgroup_template"])
+        for phase in (generate, push):
+            self.assertTrue(phase["cgroup_template"].startswith("/ken-actions-deploy.slice/{transaction_slice}/"))
+        self.assertTrue(set(generate["descriptor_set"]).isdisjoint(push["descriptor_set"]))
+        self.assertTrue(set(generate["template"]["fields"]).isdisjoint(push["template"]["fields"]))
+        self.assertNotEqual(generate["network_profile"], push["network_profile"])
+        with tempfile.TemporaryDirectory() as directory:
+            claims = broker.synthetic_claims_for_action(action, 2_000_000_000)
+            with self.assertRaises(broker.Reject) as ctx:
+                broker.execute_fixed_action_live(action, Path(directory), Path(directory), claims, -1, (22102, 22102))
+        self.assertEqual(ctx.exception.code, "trusted_generation_transport_unavailable")
+
+    def test_beehiiv_phase_schema_rejects_credential_identity_network_and_transport_overlap(self):
+        raw = yaml.safe_load(policy_path.read_text())
+        index = next(index for index, item in enumerate(raw["actions"]) if item["action_id"] == "ken-website-beehiiv-production-sync")
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "policy.yaml"
+            mutations = {
+                "source_commit_marker": lambda action: action.__setitem__("source_is_deployable", True),
+                "shared_uid": lambda action: action["trusted_generation"]["phases"]["push"]["identity"].__setitem__("uid", 22102),
+                "shared_network": lambda action: action["trusted_generation"]["phases"]["push"].__setitem__("network_profile", "beehiiv-api-fixed-target"),
+                "shared_directory": lambda action: action["trusted_generation"]["phases"]["push"].__setitem__("request_subdirectory", "generate"),
+                "shared_cgroup": lambda action: action["trusted_generation"]["phases"]["push"].__setitem__("cgroup_template", "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-generate.scope"),
+                "missing_cgroup": lambda action: action["trusted_generation"]["phases"]["generate"].pop("cgroup_template"),
+                "wrong_cgroup_parent": lambda action: action["trusted_generation"]["phases"]["generate"].__setitem__("cgroup_template", "/system.slice/{transaction_slice}/ken-beehiiv-generate.scope"),
+                "deploy_key_to_generator": lambda action: action["trusted_generation"]["phases"]["generate"]["descriptor_set"].append("DEPLOY_SSH_KEY"),
+                "beehiiv_key_to_pusher": lambda action: action["trusted_generation"]["phases"]["push"]["descriptor_set"].append("BEEHIIV_API_KEY"),
+                "phase_overlap": lambda action: action["trusted_generation"].__setitem__("phase_overlap", "allowed"),
+                "transport_not_deferred": lambda action: action["deferred_bindings"].remove("trusted_generation.transport.phase_transport_sha256"),
+                "uid_bool": lambda action: action["trusted_generation"]["phases"]["generate"]["identity"].__setitem__("uid", True),
+                "action_code_false": lambda action: action.__setitem__("executes_repository_code", False),
+                "action_code_string": lambda action: action.__setitem__("executes_repository_code", "ambiguous"),
+            }
+            for name, mutate in mutations.items():
+                value = copy.deepcopy(raw); mutate(value["actions"][index])
+                target.write_text(yaml.safe_dump(value, sort_keys=False))
+                with self.subTest(name=name), self.assertRaises(broker.Reject):
+                    broker.load_policy(target, allow_nonroot=True)
+            value = copy.deepcopy(raw)
+            other = value["actions"][1]
+            other["input_mode"] = "trusted_generation"
+            other["trusted_generation"] = copy.deepcopy(value["actions"][index]["trusted_generation"])
+            other.pop("artifact_input")
+            other.pop("executor")
+            target.write_text(yaml.safe_dump(value, sort_keys=False))
+            with self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
+            profile_mutations = (
+                ["github-ssh"], ["beehiiv-api", "github-ssh"], [], "beehiiv-api",
+            )
+            for profile in profile_mutations:
+                value = copy.deepcopy(raw)
+                value["firewall_phase_interface"]["profiles"]["beehiiv-api-fixed-target"] = profile
+                target.write_text(yaml.safe_dump(value, sort_keys=False))
+                with self.subTest(profile=profile), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
+            for profile in (["beehiiv-api"], ["github-ssh", "beehiiv-api"], [], "github-ssh"):
+                value = copy.deepcopy(raw)
+                value["firewall_phase_interface"]["profiles"]["github-ssh-ken-website-fixed-target"] = profile
+                target.write_text(yaml.safe_dump(value, sort_keys=False))
+                with self.subTest(push_profile=profile), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
+            for field in ("dependency_acquisition_sha256", "generated_paths_manifest_sha256", "commit_input_contract_sha256", "cgroup_contract_sha256", "phase_transport_sha256"):
+                for scalar in (False, 0, 1.0, "", "not-a-hash", "a" * 64):
+                    value = copy.deepcopy(raw)
+                    value["actions"][index]["trusted_generation"]["transport"][field] = scalar
+                    target.write_text(yaml.safe_dump(value, sort_keys=False))
+                    with self.subTest(field=field, scalar=scalar), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
 
     def test_website_wrapper_parses_only_reviewed_ssh_fields(self):
         argv = ["--broker-action", "ken-website-production-deploy", "--input-fd", "3", "--rendered-fd", "4"]
@@ -620,11 +786,15 @@ class ProtocolTests(unittest.TestCase):
         for value in canaries:
             self.assertNotIn(value, text)
 
-    def _bound_policy(self, directory, selected_action):
+    def _bound_policy(self, directory, selected_action, *, source_mode=False):
         raw = yaml.safe_load(policy_path.read_text())
         for action in raw["actions"]:
             if action["action_id"] != selected_action:
                 continue
+            if source_mode:
+                action["input_mode"] = "source_commit"
+                action["source_is_deployable"] = True
+                action.pop("artifact_input", None)
             action["runner"].update({"id": 501, "group_id": 502, "listener_generation": 1})
             if action["executor"].get("operation_binding_sha256") is None:
                 broker.OPERATION_BINDINGS[selected_action] = {"fixture": "fully-bound-operation"}
@@ -654,7 +824,7 @@ class ProtocolTests(unittest.TestCase):
             def github_get(self, token, path, action):
                 self.calls.append(path); repo=action.raw["repository"]
                 if path.startswith("/repositories/"): return {"id":repo["id"],"name":repo["name"],"full_name":f"{repo['owner']}/{repo['name']}","private":True,"visibility":"private","default_branch":"main","owner":{"login":repo["owner"],"id":repo["owner_id"]}}
-                if "/actions/runs/" in path: return {"id":self.claims["run_id"],"run_attempt":self.claims["run_attempt"],"head_sha":self.claims["sha"],"event":self.claims["event_name"],"status":"in_progress","head_branch":"main","path":".github/workflows/beehiiv-sync.yml","repository":{"id":repo["id"],"full_name":f"{repo['owner']}/{repo['name']}"},"head_repository":{"id":repo["id"],"full_name":f"{repo['owner']}/{repo['name']}"}}
+                if "/actions/runs/" in path: return {"id":self.claims["run_id"],"run_attempt":self.claims["run_attempt"],"head_sha":self.claims["sha"],"event":self.claims["event_name"],"status":"in_progress","head_branch":"main","path":".github/workflows/deploy.yml","repository":{"id":repo["id"],"full_name":f"{repo['owner']}/{repo['name']}"},"head_repository":{"id":repo["id"],"full_name":f"{repo['owner']}/{repo['name']}"}}
                 if "/actions/jobs/" in path: return broker.synthetic_job_for_action(action,self.claims)
                 if "/git/commits/" in path: return {"sha":self.claims["sha"],"tree":{"sha":"c"*40}}
                 raise AssertionError(path)
@@ -667,7 +837,7 @@ class ProtocolTests(unittest.TestCase):
                 finally: os.close(credential_fd)
                 return "succeeded"
         with tempfile.TemporaryDirectory() as td:
-            policy=self._bound_policy(td,"ken-website-beehiiv-production-sync"); action=policy.actions["ken-website-beehiiv-production-sync"]
+            policy=self._bound_policy(td,"ken-website-production-deploy",source_mode=True); action=policy.actions["ken-website-production-deploy"]
             claims=broker.synthetic_claims_for_action(action,int(time.time())); fixture=Fixture(action,claims)
             credential=Path(td)/"credential"; credential.write_bytes(b"fixture-token"); os.chmod(credential,0o600); credential_fd=os.open(credential,os.O_RDONLY)
             packet=json.dumps({"version":1,"action_id":action.action_id,"oidc_jwt":"a.b.c","github_token":"ghs-fixture"},separators=(",",":")).encode()
