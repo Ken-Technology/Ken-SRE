@@ -1,0 +1,45 @@
+[Unit]
+Description=Ken frontend production builder for request %i
+Requires=ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+After=ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+
+[Service]
+Type=oneshot
+User=ken-fe-builder
+Group=ken-fe-builder
+UMask=0077
+Slice=ken-actions-deploy-builder.slice
+ExecStart=/usr/local/libexec/ken-actions/ken-actions-deploy-transaction run-frontend-phase --phase builder --request-id %i
+TimeoutStartSec=1800
+TimeoutStopSec=120
+KillMode=mixed
+NoNewPrivileges=no
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @process @network-io @mount
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/ken-op-broker /usr/local/libexec/ken-actions /opt/ken-toolchain /run/ken-actions-deploy-phases/%i-builder
+ReadWritePaths=/run/ken-actions-deploy-phases/%i-builder/output
+MemoryMax=8G
+MemorySwapMax=0
+CPUQuota=300%
+TasksMax=1024
+LimitNOFILE=4096
+LimitNPROC=1024

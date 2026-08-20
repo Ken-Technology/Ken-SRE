@@ -1,0 +1,47 @@
+[Unit]
+Description=Ken frontend immutable-digest deploy executor for request %i
+Requires=ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+After=ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+
+[Service]
+Type=oneshot
+User=ken-fe-deploy
+Group=ken-fe-deploy
+UMask=0077
+Slice=ken-actions-deploy-executor.slice
+ExecStart=/usr/local/libexec/ken-actions/ken-actions-deploy-transaction run-frontend-phase --phase deploy --request-id %i
+TimeoutStartSec=1200
+TimeoutStopSec=60
+KillMode=mixed
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @network-io
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/ken-op-broker /usr/local/bin/ken-frontend-production-release /usr/local/libexec/ken-actions /run/ken-actions-deploy-phases/%i-deploy
+ReadWritePaths=/run/ken-actions-deploy-phases/%i-deploy/output
+MemoryMax=1G
+MemorySwapMax=0
+CPUQuota=100%
+TasksMax=256
+LimitNOFILE=512
+LimitNPROC=256

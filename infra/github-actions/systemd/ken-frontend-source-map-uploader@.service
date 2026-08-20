@@ -1,0 +1,47 @@
+[Unit]
+Description=Ken frontend source-map uploader for request %i
+Requires=ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+After=ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+
+[Service]
+Type=oneshot
+User=ken-fe-uploader
+Group=ken-fe-uploader
+UMask=0077
+Slice=ken-actions-deploy-uploader.slice
+ExecStart=/usr/local/libexec/ken-actions/ken-actions-deploy-transaction run-frontend-phase --phase uploader --request-id %i
+TimeoutStartSec=600
+TimeoutStopSec=60
+KillMode=mixed
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @network-io
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/ken-op-broker /usr/local/bin/ken-frontend-source-map-upload /usr/local/libexec/ken-actions /run/ken-actions-deploy-phases/%i-uploader
+ReadWritePaths=/run/ken-actions-deploy-phases/%i-uploader/output
+MemoryMax=512M
+MemorySwapMax=0
+CPUQuota=50%
+TasksMax=128
+LimitNOFILE=512
+LimitNPROC=128

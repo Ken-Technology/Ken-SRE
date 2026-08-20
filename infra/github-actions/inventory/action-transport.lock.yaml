@@ -1,0 +1,58 @@
+schema_version: 1
+transport_version: 2026-08-20.1
+status: reviewed-transport-awaiting-task6-final-bindings
+enabled: false
+installation_authorized: false
+live_execution_authorized: false
+authorities:
+  plan_sha256: 75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658
+  matrix_sha256: f471a1fe1633e8be3ea40b78bc07762bc14512e011a813ac628754d10e35f0b6
+task6_core:
+  integrated_commit_sha: 63c9e0b17ae8e894b85152de6f1ea26b33481930
+  integrated_tree_sha: df327c0de3ab5444011c41028f9dc9bc0e4248dd
+  reviewed_source_commit_sha: 1eb21d952c202d301a0252125f9a7b8fdc010ef6
+  reviewed_source_tree_sha: 1673e50129214f1e00c9926803be30b270148dae
+  broker_sha256: 8d1c7859a1d4108e507d2f9a32acee8a1e26a10c212186fc751ab39e1c47d22e
+  policy_sha256: b1e15a9b74e3330c32eb63143d65f51fd1ec595c8eeb3a36cfb46abcc27cc89b
+  runtime_lock_sha256: 2aae227ff90d932c0d80ef71a23993e2819e911b83c7a9ed492647bae67d465f
+task6_final:
+  status: unavailable
+  commit_sha: null
+  policy_sha256: null
+  runtime_lock_sha256: null
+leases:
+  ordinary_slots:
+    - {slot: 1, unit: ken-actions-deploy-transaction-1.service, slice: ken-actions-deploy-transaction-1.slice}
+    - {slot: 2, unit: ken-actions-deploy-transaction-2.service, slice: ken-actions-deploy-transaction-2.slice}
+  writer_preference: true
+  production_build_holds_both: true
+  recovery: stop-reap-cgroup-empty-cleanup-then-release
+artifacts:
+  coordinator:
+    path: bin/ken-actions-deploy-transaction
+    sha256: 5b309be70de0bf4455f24d8e8f9deeebfad57cc4dc82b228f37aaabcee024aca
+  ordinary_slot_1:
+    path: systemd/ken-actions-deploy-transaction-1.service
+    sha256: 8934f845a0ea882a26f3b6699f6a865662febbb736ec5816897504186b9faa24
+  ordinary_slot_2:
+    path: systemd/ken-actions-deploy-transaction-2.service
+    sha256: d137931523ec039b51f1b2428bf9e0c485b2ce688e5efca06b8678ba55f91ba1
+  frontend_builder:
+    path: systemd/ken-frontend-production-builder@.service
+    sha256: 434e76ae73a386c290bb16f3f45df48cfc892b738d8fec2c32ed1bcda3cc3c3e
+  frontend_uploader:
+    path: systemd/ken-frontend-source-map-uploader@.service
+    sha256: 0e67084dc290d659581e250c5ba78d33f5c1b3ac42bb0aacbb9d3557d97d0ce0
+  frontend_deploy:
+    path: systemd/ken-frontend-deploy-executor@.service
+    sha256: dac86637f7f99ec71087585052250fbc4e32fc73cc585ac3370998c96fde78fd
+task6_bindings:
+  ordinary_systemd_transaction_transport_sha256: d8746421176465a3c83d4b361516dc98cd4e77b256f3dd41669f4e477fcd54a1
+  frontend_operation_binding_sha256: c2ebf1603f52fdb1a17c8c5910ae5c2f7f8ff18717f27369f294f5ee540367d8
+  frontend_phase_transport_sha256: 25c2eeefe364d2dfdc39e48a9b92a04482bc52805d15130bcc6f4e504a458322
+  frontend_deploy_contract_sha256: 01b26e5cb494f4658fe670b6b3e43fe7b7cd9e2d59e12fa287a98871eb99b4b3
+  trusted_generation_dependency_acquisition_sha256: dcd386771149140e68e19a2c44989ea3e268c7171afd32fa38db166541ae6933
+  trusted_generation_generated_paths_manifest_sha256: 08720cf30192a6daf13056fd150cece9c4308ff13adad1861b9f2db6deea3ec9
+  trusted_generation_commit_input_contract_sha256: d2d81004d9076702ddc01e37cb0d8f189008f033cd7b03871eacf1d8d4e484df
+  trusted_generation_cgroup_contract_sha256: 9c01ecb1ada3ae65f0f157698accf56cc56cbafadd078589bf3df7d4893cf854
+  trusted_generation_phase_transport_sha256: 6e0945130af419de14091f5afc06d404a919319f7dc2bcee7cf40489561ec12b
