@@ -498,12 +498,62 @@ jobs:
 
 
 class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
+    FRONTEND_PRODUCTION_BUILD_BOUNDARY = {
+        "action_id": "ken-frontend-production-release",
+        "mode": "production_build",
+        "workflow": ".github/workflows/deploy.yml",
+        "production_build_job": "build-image",
+        "deployment_job": "deploy",
+        "runner_class": "ken-deploy-production",
+        "broker_only": True,
+        "ci_validation_only": True,
+        "forbid_ken_ci_production_artifact": True,
+    }
+    FRONTEND_POST_BUILD_BOUNDARY = {
+        "action_id": "ken-frontend-production-release",
+        "mode": "post-build-sourcemap-upload",
+        "workflow": ".github/workflows/deploy.yml",
+        "production_build_job": "build-image",
+        "deployment_job": "deploy",
+        "runner_class": "ken-deploy-production",
+        "broker_only": True,
+        "ci_validation_only": True,
+        "forbid_ken_ci_production_artifact": True,
+    }
+    FRONTEND_POSTHOG_FIELDS = (
+        "POSTHOG_PERSONAL_API_KEY",
+        "POSTHOG_PROJECT_ID",
+    )
+
     @staticmethod
     def _production_action(evidence):
         return next(
             row
             for row in evidence["broker_actions"]
             if row["action_id"] == "ken-frontend-production-release"
+        )
+
+    @staticmethod
+    def _frontend_annotation(evidence, name):
+        return next(
+            row
+            for row in evidence["unresolved_annotations"]
+            if row["repository"] == "ken-frontend"
+            and row["github_secret_name"] == name
+        )
+
+    @staticmethod
+    def _unrelated_frontend_annotation(evidence):
+        return next(
+            row
+            for row in evidence["unresolved_annotations"]
+            if row["repository"] == "ken-frontend"
+            and row["github_secret_name"]
+            not in {
+                "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+                "POSTHOG_PERSONAL_API_KEY",
+                "POSTHOG_PROJECT_ID",
+            }
         )
 
     @staticmethod
@@ -815,6 +865,138 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
                 self._assert_full_generation_rejects(
                     evidence,
                     "production build contract|frontend broker semantic mismatch",
+                )
+
+    def test_frontend_runtime_identity_and_boundary_fail_closed(self):
+        import build_task6_authority_evidence as builder
+
+        mutations = []
+        encryption = "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
+
+        missing_identity = copy.deepcopy(builder.build_evidence())
+        self._frontend_annotation(missing_identity, encryption).pop(
+            "required_runtime_identity", None
+        )
+        mutations.append(("encryption-missing-identity", missing_identity))
+
+        missing_boundary = copy.deepcopy(builder.build_evidence())
+        self._frontend_annotation(missing_boundary, encryption).pop(
+            "execution_boundary", None
+        )
+        mutations.append(("encryption-missing-boundary", missing_boundary))
+
+        ci_identity = copy.deepcopy(builder.build_evidence())
+        self._frontend_annotation(ci_identity, encryption)[
+            "required_runtime_identity"
+        ] = "ken-ci-runtime"
+        mutations.append(("encryption-ci-identity", ci_identity))
+
+        changed_boundary = copy.deepcopy(builder.build_evidence())
+        self._frontend_annotation(changed_boundary, encryption)["execution_boundary"][
+            "broker_only"
+        ] = False
+        mutations.append(("encryption-changed-boundary", changed_boundary))
+
+        unrelated_boundary = copy.deepcopy(builder.build_evidence())
+        self._frontend_annotation(unrelated_boundary, encryption)[
+            "execution_boundary"
+        ] = dict(self.FRONTEND_POST_BUILD_BOUNDARY)
+        mutations.append(("encryption-unrelated-boundary", unrelated_boundary))
+
+        for field in self.FRONTEND_POSTHOG_FIELDS:
+            missing_posthog_identity = copy.deepcopy(builder.build_evidence())
+            self._frontend_annotation(missing_posthog_identity, field).pop(
+                "required_runtime_identity", None
+            )
+            mutations.append((f"{field}-missing-identity", missing_posthog_identity))
+
+            wrong_posthog_identity = copy.deepcopy(builder.build_evidence())
+            self._frontend_annotation(wrong_posthog_identity, field)[
+                "required_runtime_identity"
+            ] = "ken-ci-runtime"
+            mutations.append((f"{field}-wrong-identity", wrong_posthog_identity))
+
+            missing_posthog_boundary = copy.deepcopy(builder.build_evidence())
+            self._frontend_annotation(missing_posthog_boundary, field).pop(
+                "execution_boundary", None
+            )
+            mutations.append((f"{field}-missing-boundary", missing_posthog_boundary))
+
+            wrong_posthog_boundary = copy.deepcopy(builder.build_evidence())
+            self._frontend_annotation(wrong_posthog_boundary, field)[
+                "execution_boundary"
+            ] = {
+                **self.FRONTEND_POST_BUILD_BOUNDARY,
+                "broker_only": False,
+            }
+            mutations.append((f"{field}-wrong-boundary", wrong_posthog_boundary))
+
+            production_boundary = copy.deepcopy(builder.build_evidence())
+            self._frontend_annotation(production_boundary, field)[
+                "required_runtime_identity"
+            ] = "ken-action-frontend-posthog"
+            self._frontend_annotation(production_boundary, field)[
+                "execution_boundary"
+            ] = dict(self.FRONTEND_PRODUCTION_BUILD_BOUNDARY)
+            mutations.append(
+                (f"{field}-production-build-boundary", production_boundary)
+            )
+
+            encryption_phase = copy.deepcopy(builder.build_evidence())
+            self._frontend_annotation(encryption_phase, field)[
+                "action_phase"
+            ] = "offline-buildkit-secret-phase"
+            mutations.append((f"{field}-encryption-phase", encryption_phase))
+
+        extra_identity = copy.deepcopy(builder.build_evidence())
+        extra = self._unrelated_frontend_annotation(extra_identity)
+        extra["required_runtime_identity"] = "ken-deploy-production"
+        extra["execution_boundary"] = dict(self.FRONTEND_PRODUCTION_BUILD_BOUNDARY)
+        mutations.append(("unrelated-frontend-boundary", extra_identity))
+
+        cross_phase = copy.deepcopy(builder.build_evidence())
+        self._frontend_annotation(cross_phase, encryption)[
+            "required_runtime_identity"
+        ] = "ken-action-frontend-posthog"
+        self._frontend_annotation(cross_phase, "POSTHOG_PERSONAL_API_KEY")[
+            "required_runtime_identity"
+        ] = "ken-deploy-production"
+        self._frontend_annotation(cross_phase, "POSTHOG_PERSONAL_API_KEY")[
+            "execution_boundary"
+        ] = dict(self.FRONTEND_PRODUCTION_BUILD_BOUNDARY)
+        mutations.append(("cross-phase-identities", cross_phase))
+
+        for name, evidence in mutations:
+            with self.subTest(name=name, path="validate"):
+                with self.assertRaisesRegex(
+                    ValueError, "frontend broker semantic mismatch"
+                ):
+                    aw.validate_authority_evidence(evidence)
+
+        full_generation_names = {
+            "encryption-missing-identity",
+            "encryption-missing-boundary",
+            "encryption-ci-identity",
+            "encryption-changed-boundary",
+            "encryption-unrelated-boundary",
+            "POSTHOG_PERSONAL_API_KEY-missing-identity",
+            "POSTHOG_PERSONAL_API_KEY-wrong-identity",
+            "POSTHOG_PERSONAL_API_KEY-missing-boundary",
+            "POSTHOG_PERSONAL_API_KEY-wrong-boundary",
+            "POSTHOG_PERSONAL_API_KEY-production-build-boundary",
+            "POSTHOG_PERSONAL_API_KEY-encryption-phase",
+            "POSTHOG_PROJECT_ID-missing-identity",
+            "POSTHOG_PROJECT_ID-production-build-boundary",
+            "unrelated-frontend-boundary",
+            "cross-phase-identities",
+        }
+        for name, evidence in mutations:
+            if name not in full_generation_names:
+                continue
+            with self.subTest(name=name, path="generate"):
+                self._assert_full_generation_rejects(
+                    evidence,
+                    "frontend broker semantic mismatch",
                 )
 
 
@@ -3135,6 +3317,24 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                 "ken-frontend-production-release",
             )
             self.assertEqual(annotation["action_phase"], "post-build-sourcemap-upload")
+            self.assertEqual(
+                annotation["required_runtime_identity"],
+                "ken-action-frontend-posthog",
+            )
+            self.assertEqual(
+                annotation["execution_boundary"],
+                {
+                    "action_id": "ken-frontend-production-release",
+                    "mode": "post-build-sourcemap-upload",
+                    "workflow": ".github/workflows/deploy.yml",
+                    "production_build_job": "build-image",
+                    "deployment_job": "deploy",
+                    "runner_class": "ken-deploy-production",
+                    "broker_only": True,
+                    "ci_validation_only": True,
+                    "forbid_ken_ci_production_artifact": True,
+                },
+            )
 
     def test_hermes_keeps_dedicated_deploy_identity_unresolved(self):
         import build_task6_authority_evidence as builder

@@ -1519,6 +1519,17 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
             data_classification="configuration",
         )
 
+    posthog_execution_boundary = {
+        "action_id": "ken-frontend-production-release",
+        "mode": "post-build-sourcemap-upload",
+        "workflow": ".github/workflows/deploy.yml",
+        "production_build_job": "build-image",
+        "deployment_job": "deploy",
+        "runner_class": "ken-deploy-production",
+        "broker_only": True,
+        "ci_validation_only": True,
+        "forbid_ken_ci_production_artifact": True,
+    }
     annotate_many(
         "ken-frontend",
         ("POSTHOG_PERSONAL_API_KEY",),
@@ -1530,6 +1541,8 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         provider_rotation_steps=provider_steps(
             "PostHog", "the Ken production project and deployment operations"
         ),
+        required_runtime_identity="ken-action-frontend-posthog",
+        execution_boundary=dict(posthog_execution_boundary),
         broker_action_id="ken-frontend-production-release",
         action_phase="post-build-sourcemap-upload",
     )
@@ -1542,6 +1555,8 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         handoff_group="frontend/posthog",
         reason="The PostHog project identifier can be read from the project settings, but it was not present in readable evidence.",
         data_classification="identifier",
+        required_runtime_identity="ken-action-frontend-posthog",
+        execution_boundary=dict(posthog_execution_boundary),
         broker_action_id="ken-frontend-production-release",
         action_phase="post-build-sourcemap-upload",
     )

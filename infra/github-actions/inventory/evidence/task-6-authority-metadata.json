@@ -5853,6 +5853,17 @@
         "Cut the exact workflow consumers over to the local broker and verify the live provider operation.",
         "Only after verification, delete the GitHub secret field and revoke the predecessor provider credential."
       ],
+      "execution_boundary": {
+        "action_id": "ken-frontend-production-release",
+        "broker_only": true,
+        "ci_validation_only": true,
+        "deployment_job": "deploy",
+        "forbid_ken_ci_production_artifact": true,
+        "mode": "post-build-sourcemap-upload",
+        "production_build_job": "build-image",
+        "runner_class": "ken-deploy-production",
+        "workflow": ".github/workflows/deploy.yml"
+      },
       "github_secret_name": "POSTHOG_PERSONAL_API_KEY",
       "handoff_group": "frontend/posthog",
       "provider_rotation_steps": [
@@ -5860,6 +5871,7 @@
         "Use the temporary migration writer to store it in the named target vault, verify the exact workflow consumer, then revoke the predecessor at the provider."
       ],
       "repository": "ken-frontend",
+      "required_runtime_identity": "ken-action-frontend-posthog",
       "resolution_class": "provider-rotation",
       "target_vault": "Ken Deploy Production",
       "unresolved_reason": "The frontend release needs this field only in the fixed post-build sourcemap executor; no readable authority was found."
@@ -5875,10 +5887,22 @@
         "Cut the exact workflow consumers over to the local broker and verify the live operation.",
         "Only after verification, delete the GitHub secret field; retain the authoritative operator configuration record."
       ],
+      "execution_boundary": {
+        "action_id": "ken-frontend-production-release",
+        "broker_only": true,
+        "ci_validation_only": true,
+        "deployment_job": "deploy",
+        "forbid_ken_ci_production_artifact": true,
+        "mode": "post-build-sourcemap-upload",
+        "production_build_job": "build-image",
+        "runner_class": "ken-deploy-production",
+        "workflow": ".github/workflows/deploy.yml"
+      },
       "github_secret_name": "POSTHOG_PROJECT_ID",
       "handoff_group": "frontend/posthog",
       "provider_rotation_steps": null,
       "repository": "ken-frontend",
+      "required_runtime_identity": "ken-action-frontend-posthog",
       "resolution_class": "operator-supplied-config",
       "target_vault": "Ken Deploy Production",
       "unresolved_reason": "The PostHog project identifier can be read from the project settings, but it was not present in readable evidence."

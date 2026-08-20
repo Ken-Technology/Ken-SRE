@@ -47,6 +47,51 @@ FRONTEND_EXPLICIT_REVIEWED_VARIABLES = frozenset(
         "NEXT_PUBLIC_EXPERIMENTS_ALLOWED_CLIENT_IDS",
     }
 )
+FRONTEND_PRODUCTION_RELEASE_ACTION_ID = "ken-frontend-production-release"
+FRONTEND_PRODUCTION_DEPLOY_IDENTITY = "ken-deploy-production"
+FRONTEND_SOURCEMAP_UPLOADER_IDENTITY = "ken-action-frontend-posthog"
+FRONTEND_PRODUCTION_BUILD_BOUNDARY = {
+    "action_id": FRONTEND_PRODUCTION_RELEASE_ACTION_ID,
+    "mode": "production_build",
+    "workflow": ".github/workflows/deploy.yml",
+    "production_build_job": "build-image",
+    "deployment_job": "deploy",
+    "runner_class": FRONTEND_PRODUCTION_DEPLOY_IDENTITY,
+    "broker_only": True,
+    "ci_validation_only": True,
+    "forbid_ken_ci_production_artifact": True,
+}
+FRONTEND_POST_BUILD_BOUNDARY = {
+    "action_id": FRONTEND_PRODUCTION_RELEASE_ACTION_ID,
+    "mode": "post-build-sourcemap-upload",
+    "workflow": ".github/workflows/deploy.yml",
+    "production_build_job": "build-image",
+    "deployment_job": "deploy",
+    "runner_class": FRONTEND_PRODUCTION_DEPLOY_IDENTITY,
+    "broker_only": True,
+    "ci_validation_only": True,
+    "forbid_ken_ci_production_artifact": True,
+}
+FRONTEND_ANNOTATION_CONTRACTS = {
+    "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": {
+        "required_runtime_identity": FRONTEND_PRODUCTION_DEPLOY_IDENTITY,
+        "execution_boundary": FRONTEND_PRODUCTION_BUILD_BOUNDARY,
+        "action_phase": "offline-buildkit-secret-phase",
+        "broker_action_id": FRONTEND_PRODUCTION_RELEASE_ACTION_ID,
+    },
+    "POSTHOG_PERSONAL_API_KEY": {
+        "required_runtime_identity": FRONTEND_SOURCEMAP_UPLOADER_IDENTITY,
+        "execution_boundary": FRONTEND_POST_BUILD_BOUNDARY,
+        "action_phase": "post-build-sourcemap-upload",
+        "broker_action_id": FRONTEND_PRODUCTION_RELEASE_ACTION_ID,
+    },
+    "POSTHOG_PROJECT_ID": {
+        "required_runtime_identity": FRONTEND_SOURCEMAP_UPLOADER_IDENTITY,
+        "execution_boundary": FRONTEND_POST_BUILD_BOUNDARY,
+        "action_phase": "post-build-sourcemap-upload",
+        "broker_action_id": FRONTEND_PRODUCTION_RELEASE_ACTION_ID,
+    },
+}
 FIXED_BROKER_ACTION_POLICIES: dict[str, dict[str, Any]] = {
     "ken-vexa-mcp-auth-production-deploy": {
         "repository": "ken-vexa-mcp-auth",
@@ -1223,17 +1268,24 @@ def _validate_production_build_action(action: dict[str, Any]) -> None:
         raise ValueError("invalid production build contract")
 
 
+def _frontend_annotation_contract(
+    repository: Any, name: Any
+) -> dict[str, Any] | None:
+    if repository != "ken-frontend" or name not in FRONTEND_ANNOTATION_CONTRACTS:
+        return None
+    return FRONTEND_ANNOTATION_CONTRACTS[str(name)]
+
+
 def _validate_frontend_broker_semantics(
     evidence: dict[str, Any], action_by_id: dict[str, dict[str, Any]]
 ) -> None:
-    action_id = "ken-frontend-production-release"
+    action_id = FRONTEND_PRODUCTION_RELEASE_ACTION_ID
     action = action_by_id.get(action_id)
     if action is None:
         return
     expected_phases = {
-        "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": "offline-buildkit-secret-phase",
-        "POSTHOG_PERSONAL_API_KEY": "post-build-sourcemap-upload",
-        "POSTHOG_PROJECT_ID": "post-build-sourcemap-upload",
+        name: contract["action_phase"]
+        for name, contract in FRONTEND_ANNOTATION_CONTRACTS.items()
     }
     annotations = [
         row
@@ -1246,16 +1298,28 @@ def _validate_frontend_broker_semantics(
         annotations_by_name.setdefault(annotation["github_secret_name"], []).append(
             annotation
         )
-    if set(annotations_by_name) != set(expected_phases) or any(
-        len(rows) != 1 for rows in annotations_by_name.values()
+    if (
+        len(annotations_by_name) != len(FRONTEND_ANNOTATION_CONTRACTS)
+        or set(annotations_by_name) != set(FRONTEND_ANNOTATION_CONTRACTS)
+        or any(len(rows) != 1 for rows in annotations_by_name.values())
     ):
         raise ValueError("frontend broker semantic mismatch")
-    for name, phase in expected_phases.items():
+    for name, contract in FRONTEND_ANNOTATION_CONTRACTS.items():
         annotation = annotations_by_name[name][0]
         if (
-            annotation.get("broker_action_id") != action_id
-            or annotation.get("action_phase") != phase
+            annotation.get("broker_action_id") != contract["broker_action_id"]
+            or annotation.get("action_phase") != contract["action_phase"]
+            or annotation.get("required_runtime_identity")
+            != contract["required_runtime_identity"]
+            or annotation.get("execution_boundary") != contract["execution_boundary"]
         ):
+            raise ValueError("frontend broker semantic mismatch")
+    for row in evidence["unresolved_annotations"]:
+        if row.get("repository") != "ken-frontend":
+            continue
+        if row.get("github_secret_name") in FRONTEND_ANNOTATION_CONTRACTS:
+            continue
+        if row.get("required_runtime_identity") or row.get("execution_boundary"):
             raise ValueError("frontend broker semantic mismatch")
     expected_names_by_phase = {
         "offline-buildkit-secret-phase": {
@@ -1887,30 +1951,41 @@ def apply_unresolved_annotation(
     entry["unresolved_reason"] = reason
     entry["provider_rotation_steps"] = steps
     entry["downstream_update_steps"] = downstream
-    if annotation.get("required_runtime_identity"):
-        entry["required_runtime_identity"] = annotation[
-            "required_runtime_identity"
-        ]
-    if annotation.get("execution_boundary"):
-        boundary = annotation["execution_boundary"]
-        expected = {
-            "action_id": "ken-frontend-production-release",
-            "mode": "production_build",
-            "workflow": ".github/workflows/deploy.yml",
-            "production_build_job": "build-image",
-            "deployment_job": "deploy",
-            "runner_class": "ken-deploy-production",
-            "broker_only": True,
-            "ci_validation_only": True,
-            "forbid_ken_ci_production_artifact": True,
-        }
-        if boundary != expected:
-            raise ValueError("invalid fixed production build execution boundary")
-        entry["execution_boundary"] = dict(boundary)
-    if annotation.get("broker_action_id"):
-        entry["broker_action_id"] = annotation["broker_action_id"]
-    if annotation.get("action_phase"):
-        entry["action_phase"] = annotation["action_phase"]
+    contract = _frontend_annotation_contract(
+        entry.get("repository"), entry.get("github_secret_name")
+    )
+    if contract is not None:
+        if (
+            annotation.get("required_runtime_identity")
+            != contract["required_runtime_identity"]
+            or annotation.get("execution_boundary") != contract["execution_boundary"]
+            or annotation.get("broker_action_id") != contract["broker_action_id"]
+            or annotation.get("action_phase") != contract["action_phase"]
+        ):
+            raise ValueError("frontend broker semantic mismatch")
+        entry["required_runtime_identity"] = contract["required_runtime_identity"]
+        entry["execution_boundary"] = dict(contract["execution_boundary"])
+        entry["broker_action_id"] = contract["broker_action_id"]
+        entry["action_phase"] = contract["action_phase"]
+    else:
+        if entry.get("repository") == "ken-frontend" and (
+            annotation.get("required_runtime_identity")
+            or annotation.get("execution_boundary")
+        ):
+            raise ValueError("frontend broker semantic mismatch")
+        if annotation.get("required_runtime_identity"):
+            entry["required_runtime_identity"] = annotation[
+                "required_runtime_identity"
+            ]
+        if annotation.get("execution_boundary"):
+            boundary = annotation["execution_boundary"]
+            if boundary != FRONTEND_PRODUCTION_BUILD_BOUNDARY:
+                raise ValueError("invalid fixed production build execution boundary")
+            entry["execution_boundary"] = dict(boundary)
+        if annotation.get("broker_action_id"):
+            entry["broker_action_id"] = annotation["broker_action_id"]
+        if annotation.get("action_phase"):
+            entry["action_phase"] = annotation["action_phase"]
     if annotation.get("data_classification"):
         entry["data_classification"] = annotation["data_classification"]
     return entry
@@ -2077,15 +2152,28 @@ def validate_authority_mapping_coverage(
             or action.get("runner_class") != entry.get("consumer")
         ):
             raise ValueError("secret broker action trust boundary mismatch")
-        boundary = entry.get("execution_boundary")
-        if boundary and (
-            boundary.get("action_id") != action.get("action_id")
-            or boundary.get("mode") != action.get("mode")
-            or boundary.get("workflow") != action.get("workflow")
-            or boundary.get("production_build_job") != action.get("job")
-            or boundary.get("runner_class") != action.get("runner_class")
-        ):
-            raise ValueError("production build execution boundary mismatch")
+        contract = _frontend_annotation_contract(
+            entry.get("repository"), entry.get("github_secret_name")
+        )
+        if contract is not None:
+            if (
+                entry.get("required_runtime_identity")
+                != contract["required_runtime_identity"]
+                or entry.get("execution_boundary") != contract["execution_boundary"]
+                or entry.get("action_phase") != contract["action_phase"]
+                or entry.get("broker_action_id") != contract["broker_action_id"]
+            ):
+                raise ValueError("frontend broker semantic mismatch")
+        else:
+            boundary = entry.get("execution_boundary")
+            if boundary and (
+                boundary.get("action_id") != action.get("action_id")
+                or boundary.get("mode") != action.get("mode")
+                or boundary.get("workflow") != action.get("workflow")
+                or boundary.get("production_build_job") != action.get("job")
+                or boundary.get("runner_class") != action.get("runner_class")
+            ):
+                raise ValueError("production build execution boundary mismatch")
     used_action_ids = {
         str(entry["broker_action_id"])
         for entry in [*entries, *(direct_entries or [])]
