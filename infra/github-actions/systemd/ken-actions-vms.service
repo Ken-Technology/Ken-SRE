@@ -1,0 +1,28 @@
+[Unit]
+Description=Start verified Ken Actions guests
+Requires=libvirtd.service
+Requires=ken-actions-vm-firewall.service
+Requires=ken-actions-artifact-proxy-deploy.service
+Requires=docker.service
+Requires=elasticsearch.service
+Requires=actions.runner.Ken-Technology-ken-agents.hetzner-grok-review-ken-agents.service
+Requires=actions.runner.Ken-Technology-ken-ai-mcp.hetzner-grok-review-ken-ai-mcp.service
+Requires=actions.runner.Ken-Technology-ken-backend.hetzner-grok-review-ken-backend.service
+Requires=actions.runner.Ken-Technology-ken-frontend.hetzner-grok-review-ken-frontend.service
+Requires=actions.runner.Ken-Technology-ken-scraping.hetzner-grok-review-ken-scraping.service
+Requires=actions.runner.Ken-Technology-ken-search.hetzner-grok-review-ken-search.service
+RequiresMountsFor=/mnt/data/libvirt
+After=libvirtd.service ken-actions-vm-firewall.service ken-actions-artifact-proxy-deploy.service docker.service elasticsearch.service mnt-data.mount mnt-devws.mount actions.runner.Ken-Technology-ken-agents.hetzner-grok-review-ken-agents.service actions.runner.Ken-Technology-ken-ai-mcp.hetzner-grok-review-ken-ai-mcp.service actions.runner.Ken-Technology-ken-backend.hetzner-grok-review-ken-backend.service actions.runner.Ken-Technology-ken-frontend.hetzner-grok-review-ken-frontend.service actions.runner.Ken-Technology-ken-scraping.hetzner-grok-review-ken-scraping.service actions.runner.Ken-Technology-ken-search.hetzner-grok-review-ken-search.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/local/sbin/ken-actions-vm-authority-verify --verify-host-authority vms
+ExecStart=/usr/local/sbin/ken-actions-vm-authority-verify --host-transaction start-vms /
+ExecStop=/usr/local/sbin/ken-actions-vm-authority-verify --host-transaction stop-vms /
+RemainAfterExit=yes
+TimeoutStartSec=10min
+TimeoutStopSec=5min
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

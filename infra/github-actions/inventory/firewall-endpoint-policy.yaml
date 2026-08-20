@@ -1,0 +1,182 @@
+schema_version: 1
+authority:
+  plan_sha256: 75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658
+  runner_platform_path: inventory/runner-platform.yaml
+  runner_platform_sha256: 79a0b4fd92ac0635127da68f0b273dadb8b45c61992a6f5cb7d3f6519f3ce03f
+  broker_runtime_lock_path: inventory/broker-runtime.lock.yaml
+  broker_runtime_lock_sha256: null
+  op_broker_policy_path: inventory/op-broker-policy.yaml
+  op_broker_policy_sha256: null
+  action_transport_lock_path: inventory/action-transport.lock.yaml
+  action_transport_lock_sha256: null
+refresh:
+  interval_seconds: 900
+  generation_ttl_seconds: 3600
+  resolver_family: ipv4-only
+  empty_or_partial_generation_allowed: false
+  unexpired_lkg_required_on_failure: true
+  expired_lkg_action: install-blocked-generation
+endpoint_catalog:
+  - {id: github-api, fqdn: api.github.com, protocol: tcp, port: 443, source: plan-static}
+  - {id: github-smart-https, fqdn: github.com, protocol: tcp, port: 443, source: plan-static}
+  - {id: github-ssh, fqdn: github.com, protocol: tcp, port: 22, source: plan-static}
+  - {id: actions-pipelines, fqdn: pipelines.actions.githubusercontent.com, protocol: tcp, port: 443, source: plan-static}
+  - {id: actions-results, fqdn: results-receiver.actions.githubusercontent.com, protocol: tcp, port: 443, source: plan-static}
+  - {id: oidc-discovery, fqdn: token.actions.githubusercontent.com, protocol: tcp, port: 443, source: task6-policy}
+  - {id: oidc-jwks, fqdn: token.actions.githubusercontent.com, protocol: tcp, port: 443, source: task6-policy}
+  - {id: onepassword-service-account, fqdn: ken-ai.1password.com, protocol: tcp, port: 443, source: reviewed-endpoint-report}
+  - {id: beehiiv-api, fqdn: api.beehiiv.com, protocol: tcp, port: 443, source: task6-policy}
+  - {id: node-registry, fqdn: registry-1.docker.io, protocol: tcp, port: 443, source: task7-transport}
+  - {id: node-registry-auth, fqdn: auth.docker.io, protocol: tcp, port: 443, source: task7-transport}
+  - {id: package-read, fqdn: registry.npmjs.org, protocol: tcp, port: 443, source: task7-transport}
+  - {id: posthog-upload, fqdn: us.posthog.com, protocol: tcp, port: 443, source: task6-policy}
+  - {id: ghcr, fqdn: ghcr.io, protocol: tcp, port: 443, source: task6-policy}
+  - {id: ghcr-storage, fqdn: pkg-containers.githubusercontent.com, protocol: tcp, port: 443, source: task6-policy}
+profiles:
+  github-runner-control:
+    guest: ken-deploy
+    bridge: virbr-deploy
+    phases:
+      runner-control:
+        uids: [21013, 21014]
+        targets: [github-api, github-smart-https, actions-pipelines, actions-results]
+        activation: standing
+  github-control-ci:
+    guest: ken-ci
+    bridge: virbr-ci
+    phases:
+      oidc-discovery: {uids: [22001], targets: [oidc-discovery], activation: standing}
+      oidc-jwks: {uids: [22001], targets: [oidc-jwks], activation: standing}
+      github-api: {uids: [22001], targets: [github-api], activation: standing}
+      github-smart-https: {uids: [22001], targets: [github-smart-https], activation: standing}
+      onepassword-service: {uids: [22001], targets: [onepassword-service-account], activation: standing}
+  github-control-nonproduction:
+    guest: ken-deploy
+    bridge: virbr-deploy
+    phases:
+      oidc-discovery: {uids: [22002], targets: [oidc-discovery], activation: standing}
+      oidc-jwks: {uids: [22002], targets: [oidc-jwks], activation: standing}
+      github-api: {uids: [22002], targets: [github-api], activation: standing}
+      github-smart-https: {uids: [22002], targets: [github-smart-https], activation: standing}
+      onepassword-service: {uids: [22002], targets: [onepassword-service-account], activation: standing}
+  github-control-production:
+    guest: ken-deploy
+    bridge: virbr-deploy
+    phases:
+      oidc-discovery: {uids: [22003], targets: [oidc-discovery], activation: standing}
+      oidc-jwks: {uids: [22003], targets: [oidc-jwks], activation: standing}
+      github-api: {uids: [22003], targets: [github-api], activation: standing}
+      github-smart-https: {uids: [22003], targets: [github-smart-https], activation: standing}
+      onepassword-service: {uids: [22003], targets: [onepassword-service-account], activation: standing}
+  vexa-production-fixed-target:
+    guest: ken-deploy
+    bridge: virbr-deploy
+    phases: {}
+  website-production-fixed-target:
+    guest: ken-deploy
+    bridge: virbr-deploy
+    phases: {}
+  beehiiv-api-fixed-target:
+    guest: ken-deploy
+    bridge: virbr-deploy
+    phases:
+      beehiiv-api: {uids: [22102], targets: [beehiiv-api], activation: request-bound}
+  github-ssh-ken-website-fixed-target:
+    guest: ken-deploy
+    bridge: virbr-deploy
+    phases:
+      github-ssh: {uids: [22104], targets: [github-ssh], activation: request-bound}
+  frontend-production-digest-deploy:
+    guest: ken-deploy
+    bridge: virbr-deploy
+    phases:
+      node-base-read: {uids: [22201], targets: [node-registry, node-registry-auth], activation: request-bound}
+      package-read: {uids: [22201], targets: [package-read], activation: request-bound}
+      build-offline: {uids: [22201], targets: [], activation: request-bound}
+      posthog-upload: {uids: [22202], targets: [posthog-upload], activation: request-bound}
+      ghcr-write: {uids: [22003], targets: [ghcr, ghcr-storage], activation: request-bound}
+bridge_profiles:
+  virbr-ci: [github-control-ci]
+  virbr-deploy:
+    - github-runner-control
+    - github-control-nonproduction
+    - github-control-production
+    - vexa-production-fixed-target
+    - website-production-fixed-target
+    - beehiiv-api-fixed-target
+    - github-ssh-ken-website-fixed-target
+    - frontend-production-digest-deploy
+ci_runner_egress:
+  guest: ken-ci
+  bridge: virbr-ci
+  uids: [21001, 21002, 21003, 21004, 21005, 21006, 21007, 21008, 21011, 21012]
+  address_family: ipv4-public-only
+  protocol: tcp
+  ports: [80, 443]
+  denied_endpoint_ids:
+    - onepassword-service-account
+  denied_networks:
+    - 0.0.0.0/8
+    - 10.0.0.0/8
+    - 100.64.0.0/10
+    - 127.0.0.0/8
+    - 169.254.0.0/16
+    - 172.16.0.0/12
+    - 192.0.0.0/24
+    - 192.0.2.0/24
+    - 192.88.99.0/24
+    - 192.168.0.0/16
+    - 198.18.0.0/15
+    - 198.51.100.0/24
+    - 203.0.113.0/24
+    - 224.0.0.0/4
+    - 240.0.0.0/4
+  proxy_access: denied
+  ipv6: denied
+proxy:
+  included_in_targets: false
+  included_in_bridge_direct_unions: false
+  listen_interface: virbr-deploy
+  listen_address: 192.168.211.1
+  listen_port: 3128
+  protocol: tcp
+  connect_port: 443
+  fqdn_regex: ^[a-z0-9]{3,24}[.]blob[.]core[.]windows[.]net$
+  ipv4_only: true
+  public_only: true
+  resolver_addresses: [127.0.0.53]
+  resolver_protocols: [udp, tcp]
+  resolver_port: 53
+onepassword_endpoint_authority:
+  status: provisional
+  endpoint_id: onepassword-service-account
+  fqdn: ken-ai.1password.com
+  protocol: tcp
+  port: 443
+  source_report_path: .superpowers/sdd/2026-08-19-org-ci-cutover/task-4-1password-endpoint-authority.md
+  source_report_sha256: 61f5584151143932e7a4e6311852eaf3932b0225537d05c357a66ed25b58a345
+  linux_canary:
+    status: blocked
+    commands: [op-read, op-inject, op-run]
+    cache: false
+    fresh_config: true
+    direct_egress: denied
+    exact_relay_authority: ken-ai.1password.com:443
+    receipt_path: null
+    receipt_sha256: null
+unresolved_targets:
+  - {profile: vexa-production-fixed-target, phases: [vexa-ssh, vexa-public-health], source: single-stop-target-readback}
+  - {profile: website-production-fixed-target, phases: [website-ssh, ken-so-public-health, getken-ai-separation], source: single-stop-target-readback}
+  - {profile: frontend-production-digest-deploy, phases: [frontend-deploy, frontend-public-health], source: single-stop-target-readback}
+generation:
+  status: blocked
+  receipt_path: null
+  receipt_sha256: null
+readiness:
+  state: blocked
+  blockers:
+    - missing-final-task6-lock-and-policy
+    - missing-final-task7-transport-manifest
+    - missing-single-stop-production-target-readback
+    - missing-approved-onepassword-endpoint-canary
+    - missing-final-firewall-endpoint-generation

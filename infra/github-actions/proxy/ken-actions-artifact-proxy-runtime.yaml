@@ -1,0 +1,28 @@
+schema_version: 1
+account:
+  name: ken-actions-proxy
+  uid: 22900
+  gid: 22900
+  home: /var/lib/ken-actions-artifact-proxy
+  shell: /usr/sbin/nologin
+apt_authority:
+  suite: noble-security
+  component: main
+  packages_index_sha256: 36ba4de53741fc834cf35328891c9311f81cb98a8273e683ff274cf5c05e5e23
+  inrelease_sha256: 72e28abc589872680f910a4eead774cb7a829e4f0015923edd8fc5ca530cdb29
+  archive_keyring_sha256: 80a36b0a6de2f69f49d2df75ef473ccde121e9e190b9ea01d20a4f63778d5c31
+  signer_fingerprint: F6ECB3762474EDA9D21B7022871920D1991BC93C
+packages:
+  - name: squid
+    version: 6.14-0ubuntu0.24.04.4
+    architecture: amd64
+    filename: squid_6.14-0ubuntu0.24.04.4_amd64.deb
+    sha256: da7e7ee3bf12b23e21ef99b21e7a90daf86d8a0d4bd119e97255d124760592ba
+  - name: squid-common
+    version: 6.14-0ubuntu0.24.04.4
+    architecture: all
+    filename: squid-common_6.14-0ubuntu0.24.04.4_all.deb
+    sha256: e2f5d967ef71db67db1080a4f4aba0e2a6560e584318b3bf867e7fa84494bc12
+distribution_units_masked:
+  - squid.service
+custom_service: ken-actions-artifact-proxy-deploy.service

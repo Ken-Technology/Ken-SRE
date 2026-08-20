@@ -1,0 +1,25 @@
+[Unit]
+Description=Ken Actions VM and proxy firewall generation
+After=network-online.target libvirtd.service
+Wants=network-online.target
+Requires=libvirtd.service
+Before=ken-actions-artifact-proxy-deploy.service ken-actions-vms.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/local/sbin/ken-actions-vm-authority-verify --verify-host-authority firewall
+ExecStart=/usr/local/sbin/ken-actions-vm-firewall refresh
+ExecReload=/usr/local/sbin/ken-actions-vm-firewall refresh
+RemainAfterExit=yes
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/run/ken-actions-firewall /var/lib/ken-actions-firewall
+
+[Install]
+WantedBy=multi-user.target

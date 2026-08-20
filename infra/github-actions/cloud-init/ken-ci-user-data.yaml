@@ -17,114 +17,296 @@ users:
       - ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys:
       - __HOST_ADMIN_SSH_KEY__
-  - name: ken-ci-runner
-    gecos: Ken CI runner bootstrap identity
-    lock_passwd: true
-    shell: /bin/bash
-    sudo: []
 
 write_files:
-  - path: /usr/local/sbin/bootstrap-ken-actions-guest
+  - path: /etc/ken-actions/guest-class
+    owner: root:root
+    permissions: "0444"
+    content: |
+      ken-ci
+  - path: /usr/local/sbin/ken-actions-guest-firewall
     owner: root:root
     permissions: "0755"
     content: |
       #!/usr/bin/env bash
       set -euo pipefail
-
-      fail_bootstrap() {
-        printf 'CI guest bootstrap refused: %s\n' "$*" >&2
-        exit 1
-      }
-
-      image_root="${KEN_OFFLINE_IMAGE_ROOT:-/}"
-      [[ -d "${image_root}" && ! -L "${image_root}" ]] || fail_bootstrap "image root is not a real directory"
-      image_root="$(realpath -- "${image_root}")"
-
-      required_packages=(
-        ca-certificates curl docker.io fuse-overlayfs git jq libicu74 libssl3
-        nftables qemu-guest-agent slirp4netns uidmap unzip xz-utils zip
-      )
-      required_manifest_paths=(
-        etc/ssl/certs/ca-certificates.crt
-        usr/bin/curl
-        usr/bin/docker
-        usr/bin/dockerd
-        usr/bin/fuse-overlayfs
-        usr/bin/git
-        usr/bin/jq
-        usr/bin/newgidmap
-        usr/bin/newuidmap
-        usr/bin/slirp4netns
-        usr/bin/unzip
-        usr/bin/xz
-        usr/bin/zip
-        usr/sbin/nft
-        usr/sbin/qemu-ga
-      )
-
-      missing=()
-      for package in "${required_packages[@]}"; do
-        dpkg-query -W -f='${db:Status-Status}\n' "${package}" 2>/dev/null | grep -qx installed || missing+=("${package}")
+      rules=/etc/ken-actions/guest-base.nft
+      [[ -f "${rules}" && ! -L "${rules}" ]] || { echo guest-firewall-rules-invalid >&2; exit 1; }
+      case "${1:-}" in
+        apply-base)
+          /usr/sbin/nft -c -f "${rules}"
+          /usr/sbin/nft -f "${rules}"
+          ;;
+        verify-base)
+          state="$(/usr/sbin/nft list table inet ken_actions_guest)"
+          grep -Fq 'policy drop' <<<"${state}"
+          grep -Fq 'managed-by=ken-actions' <<<"${state}"
+          ! grep -Fq 'blocker=' <<<"${state}"
+          ;;
+        phase|refresh)
+          exec /usr/local/libexec/ken-actions-guest-firewall "$@"
+          ;;
+        *) echo guest-firewall-operation-invalid >&2; exit 64 ;;
+      esac
+  - path: /usr/local/sbin/ken-actions-guest-runtime-verify
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      umask 077
+      manifest=/etc/ken-actions/guest-install-contract.yaml
+      lock=/etc/ken-op-broker/broker-runtime.lock.yaml
+      policy=/etc/ken-op-broker/op-broker-policy.yaml
+      for path in "${manifest}" "${lock}" "${policy}" /usr/local/bin/op /usr/bin/python3.12 /usr/local/libexec/ken-actions/runtime-known-answer.py /usr/local/libexec/ken-actions-guest-firewall /usr/local/libexec/ken-actions-firewall-endpoint-resolve /etc/ken-actions/runner-platform.yaml /etc/ken-actions/firewall-endpoint-policy.yaml /etc/ken-actions/firewall-endpoint-generation.json /etc/ken-actions/action-transport.lock.yaml /etc/ken-actions/guest-base.nft /var/lib/ken-actions/receipts/firewall-endpoint-generation.json /var/lib/ken-actions/receipts/onepassword-linux-canary.json; do
+        [[ -f "${path}" && ! -L "${path}" ]] || { echo guest-runtime-file-invalid >&2; exit 1; }
+        [[ "$(stat -c %u "${path}")" == 0 ]] || { echo guest-runtime-owner-invalid >&2; exit 1; }
+        mode="$(stat -c %a "${path}")"
+        (( (8#${mode} & 8#022) == 0 )) || { echo guest-runtime-mode-invalid >&2; exit 1; }
       done
-      (( ${#missing[@]} == 0 )) || fail_bootstrap "offline image is missing required packages: ${missing[*]}"
-
-      manifest="${image_root%/}/etc/ken-actions-image-manifest.sha256"
-      [[ -f "${manifest}" && ! -L "${manifest}" && -s "${manifest}" ]] || fail_bootstrap "checksum manifest is missing, empty, symlinked, or non-regular"
-
-      manifest_uid="$(stat -c %u -- "${manifest}")"
-      [[ "${manifest_uid}" == 0 ]] || fail_bootstrap "checksum manifest is not owned by root"
-      manifest_mode="$(stat -c %a -- "${manifest}")"
-      [[ "${manifest_mode}" =~ ^[0-7]{3,4}$ ]] || fail_bootstrap "checksum manifest mode is invalid"
-      manifest_mode_value=$((8#${manifest_mode}))
-      (( (manifest_mode_value & 8#022) == 0 )) || fail_bootstrap "checksum manifest is group- or world-writable"
-
-      manifest_index=0
-      while IFS= read -r manifest_line || [[ -n "${manifest_line}" ]]; do
-        (( manifest_index < ${#required_manifest_paths[@]} )) || fail_bootstrap "checksum manifest contains extra or duplicate entries"
-        checksum="${manifest_line%%  *}"
-        manifest_path="${manifest_line#*  }"
-        [[ "${manifest_line}" == "${checksum}  ${manifest_path}" ]] || fail_bootstrap "checksum manifest line is malformed"
-        [[ "${checksum}" =~ ^[0-9a-f]{64}$ ]] || fail_bootstrap "checksum manifest digest is malformed"
-        [[ "${manifest_path}" =~ ^[A-Za-z0-9._+/-]+$ ]] || fail_bootstrap "checksum manifest path is malformed"
-        [[ "${manifest_path}" == "${required_manifest_paths[manifest_index]}" ]] || fail_bootstrap "checksum manifest entries are not the exact reviewed set"
-
-        manifest_target="${image_root%/}/${manifest_path}"
-        [[ -f "${manifest_target}" && ! -L "${manifest_target}" ]] || fail_bootstrap "reviewed manifest target is missing, symlinked, or non-regular: ${manifest_path}"
-        manifest_target_real="$(realpath -- "${manifest_target}")"
-        case "${manifest_target_real}" in
-          "${image_root%/}/"*) ;;
-          *) fail_bootstrap "reviewed manifest target resolves outside the image root: ${manifest_path}" ;;
-        esac
-        manifest_index=$((manifest_index + 1))
-      done <"${manifest}"
-      (( manifest_index == ${#required_manifest_paths[@]} )) || fail_bootstrap "checksum manifest is missing reviewed entries"
-      (cd "${image_root}" && sha256sum -c "${manifest}")
-
-      systemctl disable --now docker.service docker.socket || true
-      loginctl enable-linger ken-ci-runner
-      systemctl enable --now qemu-guest-agent nftables
-  - path: /etc/nftables.conf
+      /usr/bin/python3.12 -I - "${manifest}" "${lock}" "${policy}" /etc/ken-actions/guest-class <<'PY'
+      import hashlib
+      from pathlib import Path
+      import sys
+      import yaml
+      class StrictLoader(yaml.SafeLoader):
+          pass
+      def mapping(loader, node, deep=False):
+          seen = set()
+          for key_node, _ in node.value:
+              key = loader.construct_object(key_node, deep=False)
+              if key in seen:
+                  raise SystemExit("duplicate-yaml-key")
+              seen.add(key)
+          return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+      StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+      with open(sys.argv[1], encoding="utf-8") as stream:
+          manifest = yaml.load(stream, Loader=StrictLoader)
+      with open(sys.argv[2], "rb") as stream:
+          lock_bytes = stream.read()
+      lock_data = yaml.load(lock_bytes.decode("utf-8"), Loader=StrictLoader)
+      with open(sys.argv[3], "rb") as stream:
+          policy_bytes = stream.read()
+      policy_data = yaml.load(policy_bytes.decode("utf-8"), Loader=StrictLoader)
+      guest = Path(sys.argv[4]).read_text(encoding="utf-8").strip()
+      if guest not in {"ken-ci", "ken-deploy"}:
+          raise SystemExit("guest-class-invalid")
+      if type(manifest) is not dict or type(manifest.get("schema_version")) is not int or manifest.get("schema_version") != 1:
+          raise SystemExit("guest-install-contract-schema-invalid")
+      if set(manifest) != {"schema_version", "authority", "base_image", "common_runtime", "guest_images", "remote_pinned_build_inputs", "generated_files", "task4_runtime", "verification"}:
+          raise SystemExit("guest-install-contract-schema-invalid")
+      authority = manifest.get("authority") or {}
+      if set(authority) != {"plan_sha256", "task5_integrated_commit", "runner_platform_sha256", "task6_commit", "broker_runtime_lock_sha256", "op_broker_policy_sha256", "task7_commit", "action_transport_lock_sha256", "firewall_endpoint_policy_sha256", "firewall_endpoint_generation_sha256", "firewall_endpoint_generation_receipt_sha256", "onepassword_canary_receipt_sha256", "immutable_payload_manifest_sha256", "platform_payload_manifest_sha256", "generated_at_input_epoch"}:
+          raise SystemExit("guest-install-contract-authority-invalid")
+      if any(type(authority.get(key)) is not str or len(authority[key]) != size for key, size in (("plan_sha256", 64), ("task5_integrated_commit", 40), ("runner_platform_sha256", 64), ("task6_commit", 40), ("broker_runtime_lock_sha256", 64), ("op_broker_policy_sha256", 64), ("task7_commit", 40), ("action_transport_lock_sha256", 64), ("firewall_endpoint_policy_sha256", 64), ("firewall_endpoint_generation_sha256", 64), ("firewall_endpoint_generation_receipt_sha256", 64), ("onepassword_canary_receipt_sha256", 64), ("immutable_payload_manifest_sha256", 64), ("platform_payload_manifest_sha256", 64))):
+          raise SystemExit("guest-install-contract-authority-invalid")
+      if type(authority.get("generated_at_input_epoch")) is not int or authority["generated_at_input_epoch"] <= 0:
+          raise SystemExit("guest-install-contract-authority-invalid")
+      if hashlib.sha256(lock_bytes).hexdigest() != authority.get("broker_runtime_lock_sha256"):
+          raise SystemExit("broker-runtime-lock-digest-mismatch")
+      if hashlib.sha256(policy_bytes).hexdigest() != authority.get("op_broker_policy_sha256"):
+          raise SystemExit("broker-policy-digest-mismatch")
+      task4_runtime = manifest.get("task4_runtime") or {}
+      if set(task4_runtime) != {"guest_firewall", "runner_platform", "firewall_endpoint_resolver", "firewall_endpoint_policy", "firewall_endpoint_generation", "firewall_endpoint_generation_receipt", "action_transport_lock", "onepassword_canary_receipt", "guest_firewall_base", "host_transport", "guest_install_plans", "guest_repo_installed_files"}:
+          raise SystemExit("task4-runtime-schema-invalid")
+      expected_task4_runtime = {
+          "guest_firewall": "/usr/local/libexec/ken-actions-guest-firewall",
+          "runner_platform": "/etc/ken-actions/runner-platform.yaml",
+          "firewall_endpoint_resolver": "/usr/local/libexec/ken-actions-firewall-endpoint-resolve",
+          "firewall_endpoint_policy": "/etc/ken-actions/firewall-endpoint-policy.yaml",
+          "firewall_endpoint_generation": "/etc/ken-actions/firewall-endpoint-generation.json",
+          "firewall_endpoint_generation_receipt": "/var/lib/ken-actions/receipts/firewall-endpoint-generation.json",
+          "action_transport_lock": "/etc/ken-actions/action-transport.lock.yaml",
+          "onepassword_canary_receipt": "/var/lib/ken-actions/receipts/onepassword-linux-canary.json",
+      }
+      for key, expected_path in expected_task4_runtime.items():
+          record = task4_runtime.get(key) or {}
+          if set(record) != {"path", "sha256"} or record.get("path") != expected_path:
+              raise SystemExit("task4-runtime-schema-invalid")
+          path = Path(expected_path)
+          if not path.is_file() or path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != record.get("sha256"):
+              raise SystemExit("task4-runtime-digest-invalid")
+      base_record = task4_runtime.get("guest_firewall_base") or {}
+      if set(base_record) != {"path", "sha256_by_guest"} or base_record.get("path") != "/etc/ken-actions/guest-base.nft" or set(base_record.get("sha256_by_guest") or {}) != {"ken-ci", "ken-deploy"}:
+          raise SystemExit("task4-runtime-schema-invalid")
+      base_path = Path(base_record["path"])
+      if not base_path.is_file() or base_path.is_symlink() or hashlib.sha256(base_path.read_bytes()).hexdigest() != base_record["sha256_by_guest"][guest]:
+          raise SystemExit("task4-runtime-digest-invalid")
+      if task4_runtime["runner_platform"]["sha256"] != authority.get("runner_platform_sha256"):
+          raise SystemExit("runner-platform-contract-digest-mismatch")
+      for key, authority_key in (("firewall_endpoint_policy", "firewall_endpoint_policy_sha256"), ("firewall_endpoint_generation", "firewall_endpoint_generation_sha256"), ("firewall_endpoint_generation_receipt", "firewall_endpoint_generation_receipt_sha256"), ("action_transport_lock", "action_transport_lock_sha256"), ("onepassword_canary_receipt", "onepassword_canary_receipt_sha256")):
+          if task4_runtime[key]["sha256"] != authority.get(authority_key):
+              raise SystemExit("firewall-authority-contract-digest-mismatch")
+      if type(policy_data) is not dict or type(policy_data.get("schema_version")) is not int or policy_data["schema_version"] != 1:
+          raise SystemExit("broker-policy-schema-invalid")
+      if (manifest.get("common_runtime") or {}).get("status") != "ready" or (manifest.get("verification") or {}).get("network_allowed") is not False:
+          raise SystemExit("guest-install-contract-state-invalid")
+      installed_files = lock_data.get("installed_files") or []
+      selected = [entry for entry in installed_files if guest in (entry.get("hosts") or [])]
+      foreign = [entry for entry in installed_files if guest not in (entry.get("hosts") or [])]
+      required = {
+          "/usr/local/bin/op",
+          "/usr/bin/python3.12",
+          "/usr/local/libexec/ken-actions/runtime-known-answer.py",
+      }
+      selected_paths = {entry.get("path") for entry in selected}
+      if not required.issubset(selected_paths):
+          raise SystemExit("required-runtime-file-not-locked")
+      expected_repo_by_guest = {
+          name: [entry for entry in installed_files if entry.get("source", "").startswith("repo:") and name in (entry.get("hosts") or [])]
+          for name in ("ken-ci", "ken-deploy")
+      }
+      if task4_runtime.get("guest_repo_installed_files") != expected_repo_by_guest:
+          raise SystemExit("guest-repo-installed-files-authority-invalid")
+      install_plans = task4_runtime.get("guest_install_plans") or {}
+      plan_path = Path("/etc/ken-actions/guest-install-plan.json")
+      if set(install_plans) != {"ken-ci", "ken-deploy"} or not plan_path.is_file() or plan_path.is_symlink() or hashlib.sha256(plan_path.read_bytes()).hexdigest() != install_plans.get(guest):
+          raise SystemExit("guest-install-plan-digest-invalid")
+      for entry in foreign:
+          path = Path(entry.get("path", ""))
+          if path.exists() or path.is_symlink():
+              raise SystemExit(f"wrong-host-runtime-file-present:{path}")
+      for entry in selected:
+          if set(entry) != {"path", "sha256", "hosts", "source"}:
+              raise SystemExit("installed-file-schema-invalid")
+          path = Path(entry["path"])
+          expected = entry["sha256"]
+          if not path.is_absolute() or not path.is_file() or path.is_symlink():
+              raise SystemExit("installed-file-invalid")
+          if len(expected) != 64 or any(char not in "0123456789abcdef" for char in expected):
+              raise SystemExit("installed-file-digest-invalid")
+          if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+              raise SystemExit("installed-file-digest-mismatch")
+      guest_images = manifest.get("guest_images") or {}
+      if set(guest_images) != {"ken-ci", "ken-deploy"} or (guest_images.get(guest) or {}).get("status") != "ready":
+          raise SystemExit("guest-install-contract-images-invalid")
+      task4_files = (guest_images.get(guest) or {}).get("installed_files") or []
+      if not task4_files:
+          raise SystemExit("task4-installed-files-not-locked")
+      for entry in task4_files:
+          if set(entry) != {"path", "sha256", "source"}:
+              raise SystemExit("task4-installed-file-schema-invalid")
+          path = Path(entry["path"])
+          expected = entry["sha256"]
+          if not path.is_absolute() or not path.is_file() or path.is_symlink():
+              raise SystemExit("task4-installed-file-invalid")
+          if len(expected) != 64 or any(char not in "0123456789abcdef" for char in expected):
+              raise SystemExit("task4-installed-file-digest-invalid")
+          if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+              raise SystemExit("task4-installed-file-digest-mismatch")
+      generated_files = (manifest.get("generated_files") or {}).get("files") or []
+      generated = [entry for entry in generated_files if guest in (entry.get("hosts") or [])]
+      if "/etc/ssl/certs/ca-certificates.crt" not in {entry.get("path") for entry in generated}:
+          raise SystemExit("generated-ca-bundle-not-locked")
+      for entry in generated:
+          if set(entry) != {"path", "sha256", "hosts", "generator"}:
+              raise SystemExit("generated-file-schema-invalid")
+          path = Path(entry["path"])
+          expected = entry["sha256"]
+          if not path.is_absolute() or not path.is_file() or path.is_symlink():
+              raise SystemExit("generated-file-invalid")
+          if len(expected) != 64 or any(char not in "0123456789abcdef" for char in expected):
+              raise SystemExit("generated-file-digest-invalid")
+          if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+              raise SystemExit("generated-file-digest-mismatch")
+      try:
+          yaml.load("outer:\n  key: 1\n  key: 2\n", Loader=StrictLoader)
+      except SystemExit as error:
+          if str(error) != "duplicate-yaml-key":
+              raise
+      else:
+          raise SystemExit("duplicate-yaml-key-accepted")
+      import cryptography
+      import jwt
+      if not cryptography.__file__ or not jwt.__file__ or not yaml.__file__:
+          raise SystemExit("runtime-import-origin-missing")
+      PY
+      version="$(/usr/local/bin/op --version)"
+      [[ "${version}" == 2.39.0 ]] || { echo op-version-invalid >&2; exit 1; }
+      /usr/bin/python3.12 -I /usr/local/libexec/ken-actions/runtime-known-answer.py yaml-duplicate-key
+      /usr/bin/python3.12 -I /usr/local/libexec/ken-actions/runtime-known-answer.py jwt-rs256
+      install -d -m 0700 -o root -g root /run/ken-actions
+      printf '%s\n' verified >/run/ken-actions/runtime-verified
+  - path: /usr/local/sbin/ken-actions-guest-authority-check
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      for authority in /etc/ken-actions/guest-install-contract.yaml /etc/ken-op-broker/broker-runtime.lock.yaml /etc/ken-op-broker/op-broker-policy.yaml /etc/ken-actions/firewall-endpoint-policy.yaml /etc/ken-actions/firewall-endpoint-generation.json /etc/ken-actions/action-transport.lock.yaml; do
+        [[ -f "${authority}" && ! -L "${authority}" ]] || { echo guest-authority-file-invalid >&2; exit 1; }
+        [[ "$(stat -c %u "${authority}")" == 0 && "$(stat -c %a "${authority}")" == 600 ]] || { echo guest-authority-owner-mode-invalid >&2; exit 1; }
+      done
+  - path: /etc/systemd/system/ken-actions-guest-firewall.service
     owner: root:root
     permissions: "0644"
     content: |
-      flush ruleset
-      table inet ken_guest {
-        chain input {
-          type filter hook input priority 0; policy drop;
-          iifname "lo" accept
-          ct state invalid drop
-          ct state established,related accept
-          ip saddr 192.168.210.1 tcp dport 22 accept
-        }
-        chain forward {
-          type filter hook forward priority 0; policy drop;
-        }
-        chain output {
-          type filter hook output priority 0; policy accept;
-        }
-      }
+      [Unit]
+      Description=Ken Actions guest base firewall
+      DefaultDependencies=no
+      Before=network-online.target ken-actions-guest-runtime-verify.service
+      Wants=network-pre.target
+      After=local-fs.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/ken-actions-guest-firewall apply-base
+      ExecStartPost=/usr/local/sbin/ken-actions-guest-firewall verify-base
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/ken-actions-guest-runtime-verify.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Ken Actions pinned guest runtime verification
+      Requires=ken-actions-guest-firewall.service
+      After=ken-actions-guest-firewall.service local-fs.target
+
+      [Service]
+      Type=oneshot
+      ExecStartPre=/usr/local/sbin/ken-actions-guest-authority-check
+      ExecStart=/usr/local/sbin/ken-actions-guest-runtime-verify
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/ken-actions-guest-firewall-refresh.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Refresh Ken Actions guest numeric firewall authority
+      Requires=ken-actions-guest-runtime-verify.service network-online.target
+      After=ken-actions-guest-runtime-verify.service network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStartPre=/usr/local/sbin/ken-actions-guest-authority-check
+      ExecStart=/usr/local/sbin/ken-actions-guest-firewall refresh
+  - path: /etc/systemd/system/ken-actions-guest-firewall-refresh.timer
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Refresh Ken Actions guest firewall endpoints every 15 minutes
+
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=15min
+      AccuracySec=30s
+      Persistent=true
+      Unit=ken-actions-guest-firewall-refresh.service
+
+      [Install]
+      WantedBy=timers.target
 
 runcmd:
-  - /usr/local/sbin/bootstrap-ken-actions-guest
+  - systemctl daemon-reload
+  - systemctl enable --now ken-actions-guest-firewall.service
+  - systemctl enable --now ken-actions-guest-runtime-verify.service
+  - systemctl enable --now ken-actions-guest-firewall-refresh.timer
 
-final_message: Ken CI guest bootstrap complete
+final_message: Ken CI guest base gates attempted

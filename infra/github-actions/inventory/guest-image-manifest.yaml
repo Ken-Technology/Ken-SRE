@@ -1,0 +1,151 @@
+schema_version: 1
+authority:
+  plan_sha256: 75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658
+  task5_integrated_commit: e2b3b2b50890be01601288f5294ac847fb575e71
+  runner_platform_path: inventory/runner-platform.yaml
+  runner_platform_sha256: 79a0b4fd92ac0635127da68f0b273dadb8b45c61992a6f5cb7d3f6519f3ce03f
+  task6_commit: null
+  broker_runtime_lock_path: inventory/broker-runtime.lock.yaml
+  broker_runtime_lock_sha256: null
+  op_broker_policy_path: inventory/op-broker-policy.yaml
+  op_broker_policy_sha256: null
+  task7_commit: null
+  action_transport_lock_path: inventory/action-transport.lock.yaml
+  action_transport_lock_sha256: null
+  firewall_endpoint_policy_path: inventory/firewall-endpoint-policy.yaml
+  firewall_endpoint_policy_sha256: null
+  firewall_endpoint_generation_sha256: null
+  firewall_endpoint_generation_receipt_sha256: null
+  onepassword_canary_receipt_sha256: null
+  guest_install_contract_sha256: null
+  immutable_payload_manifest_sha256: 43a8d166b82c08197de6a975f4d14485c8bdae2da524db19f6f1ed1c7da8225f
+  platform_payload_manifest_sha256: dd26525559aa26532fc58658ea4c668f72df73b6cd77a60eef7ec5cb73c2a8c0
+  generated_at_input_epoch: 1787225278
+base_image:
+  status: ready
+  blocker: null
+  release_identifier: ubuntu-24.04
+  architecture: amd64
+  url: file:///private/tmp/ken-offline-payloads.WtdFkz/platform-extension/payloads/noble-server-cloudimg-amd64-20260814.img
+  sha256: 6e40c07ae715f744f84af0bec76415cc1987dd115b4b8de437818561f01a3733
+  signed_checksum_file_sha256: 3048af3f296287780875ec1ca467f2ff9c080991a50a426062d2d7d4ec3adbb6
+  signature_sha256: 9ed5c3c40f723e87c00016edb357f0638a714c2004789e1f7a58fdd4515c8b40
+  signer_fingerprint: D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81
+  dpkg_inventory_sha256: eeabaab04e894d41d33b207718b189b7bc27716af8f25aa2857a68e434203316
+common_runtime:
+  status: blocked
+  blocker: missing-final-task6-lock
+  exact_op_path: /usr/local/bin/op
+  payloads: []
+  installed_files: []
+  required_checks:
+    - op-version
+    - python-isolated-mode
+    - strict-yaml-duplicate-key-rejection
+    - jose-rs256-known-answer
+    - cryptography-import-origin-and-hash
+    - elf-soname-abi
+    - ca-bundle-generation-and-hash
+ci_image:
+  status: blocked
+  virtual_size_gib: 750
+  platform_payloads:
+    - actions-runner-linux-x64-2.336.0.tar.gz
+    - containerd.io_2.3.3-1~ubuntu.24.04~noble_amd64.deb
+    - docker-buildx-plugin_0.36.1-1~ubuntu.24.04~noble_amd64.deb
+    - docker-ce-cli_29.7.2-1~ubuntu.24.04~noble_amd64.deb
+    - docker-ce-rootless-extras_29.7.2-1~ubuntu.24.04~noble_amd64.deb
+    - docker-ce_29.7.2-1~ubuntu.24.04~noble_amd64.deb
+    - docker-compose-plugin_5.5.0-1~ubuntu.24.04~noble_amd64.deb
+    - fuse-overlayfs_1.13-1_amd64.deb
+    - liblttng-ust-common1t64_2.13.7-1.1ubuntu2_amd64.deb
+    - liblttng-ust-ctl5t64_2.13.7-1.1ubuntu2_amd64.deb
+    - liblttng-ust1t64_2.13.7-1.1ubuntu2_amd64.deb
+    - libslirp0_4.7.0-1ubuntu3.1_amd64.deb
+    - libsubid4_4.13+dfsg1-4ubuntu3.2_amd64.deb
+    - slirp4netns_1.2.1-1build2_amd64.deb
+    - uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb
+  installed_files: []
+  common_runtime_included: false
+  task6_ci_files: []
+deploy_image:
+  status: blocked
+  virtual_size_gib: 80
+  platform_payloads:
+    - actions-runner-linux-x64-2.336.0.tar.gz
+    - containerd.io_2.3.3-1~ubuntu.24.04~noble_amd64.deb
+    - docker-buildx-plugin_0.36.1-1~ubuntu.24.04~noble_amd64.deb
+    - docker-ce-cli_29.7.2-1~ubuntu.24.04~noble_amd64.deb
+    - docker-ce-rootless-extras_29.7.2-1~ubuntu.24.04~noble_amd64.deb
+    - docker-ce_29.7.2-1~ubuntu.24.04~noble_amd64.deb
+    - docker-compose-plugin_5.5.0-1~ubuntu.24.04~noble_amd64.deb
+    - fuse-overlayfs_1.13-1_amd64.deb
+    - liblttng-ust-common1t64_2.13.7-1.1ubuntu2_amd64.deb
+    - liblttng-ust-ctl5t64_2.13.7-1.1ubuntu2_amd64.deb
+    - liblttng-ust1t64_2.13.7-1.1ubuntu2_amd64.deb
+    - libslirp0_4.7.0-1ubuntu3.1_amd64.deb
+    - libsubid4_4.13+dfsg1-4ubuntu3.2_amd64.deb
+    - slirp4netns_1.2.1-1build2_amd64.deb
+    - uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb
+  installed_files: []
+  common_runtime_included: false
+  deploy_toolchain_payloads: []
+  task6_deploy_files: []
+  task6_principals: []
+  builder_subuid_range: null
+  builder_subgid_range: null
+remote_pinned_build_inputs:
+  status: blocked
+  blocker: missing-final-task6-build-inputs
+  inputs: []
+provenance_only:
+  installable: false
+  inputs: []
+generated_files:
+  status: blocked
+  files: []
+verification:
+  network_allowed: false
+  required_commands:
+    - /usr/local/sbin/ken-actions-guest-runtime-verify
+    - /usr/local/sbin/ken-actions-guest-firewall verify-base
+  result_receipts:
+    ci:
+      path: null
+      sha256: null
+    deploy:
+      path: null
+      sha256: null
+derived_images:
+  status: blocked
+  ci:
+    path: null
+    sha256: null
+    virtual_size_gib: 750
+    receipt_sha256: null
+  deploy:
+    path: null
+    sha256: null
+    virtual_size_gib: 80
+    receipt_sha256: null
+firewall:
+  status: blocked
+  blocker: missing-final-firewall-endpoint-generation
+  refresh_interval_seconds: 900
+  generation_ttl_seconds: 3600
+  host_generation_path: /var/lib/ken-actions/authority/firewall-endpoint-generation.json
+  guest_generation_path: /etc/ken-actions/firewall-endpoint-generation.json
+  guest_base_path: /etc/ken-actions/guest-base.nft
+  guest_resolver_path: /usr/local/libexec/ken-actions-firewall-endpoint-resolve
+readiness:
+  state: blocked
+  live_apply_allowed: false
+  ready_marker: null
+  blockers:
+    - missing-final-task6-lock
+    - missing-final-task6-policy-and-identities
+    - missing-final-task7-transport-manifest
+    - missing-single-stop-production-target-readback
+    - missing-approved-onepassword-endpoint-canary
+    - missing-final-firewall-endpoint-generation
+    - missing-both-guest-runtime-receipts
