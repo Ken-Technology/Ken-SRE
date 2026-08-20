@@ -5,16 +5,17 @@ from __future__ import annotations
 import hashlib
 import copy
 import json
+import shutil
 import sys
 import tempfile
 import unittest
+from collections import defaultdict
 from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 LIB = ROOT / "infra/github-actions/scripts/lib"
 FIXTURE_DIR = ROOT / "infra/github-actions/tests/fixtures/offline-org"
-LIVE_COLLECT_DIR = Path("/private/tmp/ken-actions-fix5-collect")
 sys.path.insert(0, str(LIB))
 
 import audit_workflows as aw  # noqa: E402
@@ -564,27 +565,267 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
             current = current[segment]
         current[path[-1]] = value
 
-    def _assert_full_generation_rejects(self, evidence, message, collect_dir=None):
-        import os
-        import shutil
+    def _write_hermetic_collect(self, collect: Path, evidence: dict) -> None:
+        """Build a compact collection from offline-org plus synthetic workflows.
 
-        source = collect_dir or FIXTURE_DIR
+        Workflows are value-free name/reference YAML derived from current
+        builder evidence so unmutated generate() can pass without the live
+        scratch collection. Mappings, annotations, variable migrations,
+        secretless migrations, and direct 1Password refs are covered.
+        """
+        prod = "Ken Deploy Production"
+        ci = "Ken CI Runtime"
+        nonprod = "Ken Deploy Nonproduction"
+        public_repos = {"Ken-SRE", "ken-ai-plugin"}
+        contract = {
+            "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+            "POSTHOG_PERSONAL_API_KEY",
+            "POSTHOG_PROJECT_ID",
+        }
+        variable_names = {
+            "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+            "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+        }
+        shutil.copytree(FIXTURE_DIR, collect)
+        (collect / "authority-evidence.json").write_text(
+            json.dumps(evidence), encoding="utf-8"
+        )
+        grouped: dict[str, dict[tuple[str, str], list[str]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+
+        def add(repo, vault, name, workflow):
+            if vault == prod:
+                kind, wf = "prod", workflow or ".github/workflows/deploy.yml"
+            elif vault == ci:
+                kind, wf = "ci", workflow or ".github/workflows/ci.yml"
+            elif vault == nonprod:
+                kind, wf = "nonprod", workflow or ".github/workflows/staging.yml"
+            elif vault is None:
+                return
+            else:
+                raise AssertionError(f"unknown target vault {vault!r}")
+            names = grouped[repo][(kind, wf)]
+            if name not in names:
+                names.append(name)
+
+        for row in evidence["mappings"]:
+            add(
+                row["repository"],
+                row["target_vault"],
+                row["github_secret_name"],
+                row.get("workflow"),
+            )
+        for row in evidence["unresolved_annotations"]:
+            add(
+                row["repository"],
+                row["target_vault"],
+                row["github_secret_name"],
+                row.get("workflow"),
+            )
+        for row in evidence["workflow_variable_migrations"]:
+            add(
+                row["repository"],
+                prod,
+                row["github_secret_name"],
+                row.get("workflow"),
+            )
+        for row in evidence["secretless_migrations"]:
+            names = grouped[row["repository"]][("secretless", row["workflow"])]
+            if row["github_secret_name"] not in names:
+                names.append(row["github_secret_name"])
+
+        repos = set(grouped)
+        for row in evidence["direct_onepassword_mappings"]:
+            repos.add(row["repository"])
+
+        repos_index = json.loads((collect / "repos.json").read_text(encoding="utf-8"))
+        existing = {row["name"] for row in repos_index}
+        for name in sorted(repos):
+            if name in existing:
+                continue
+            repos_index.append(
+                {
+                    "name": name,
+                    "visibility": "PUBLIC" if name in public_repos else "PRIVATE",
+                    "isArchived": False,
+                    "defaultBranchRef": {"name": "main"},
+                }
+            )
+        (collect / "repos.json").write_text(
+            json.dumps(repos_index, indent=2) + "\n", encoding="utf-8"
+        )
+
+        def write_workflow(path: Path, jobs: list[dict]) -> None:
+            lines = ["on: [push]", "jobs:"]
+            for job in jobs:
+                lines.append(f"  {job['id']}:")
+                lines.append(f"    runs-on: {job.get('runs_on', 'ubuntu-latest')}")
+                if job.get("environment"):
+                    lines.append(f"    environment: {job['environment']}")
+                if job.get("permissions"):
+                    lines.append("    permissions:")
+                    for key, value in job["permissions"].items():
+                        lines.append(f"      {key}: {value}")
+                lines.append("    steps:")
+                lines.append(f"      - uses: {job.get('uses', 'appleboy/ssh-action@v1')}")
+                env = job.get("env") or {}
+                secrets = job.get("secrets") or []
+                if env or secrets:
+                    lines.append("        env:")
+                    for key, value in env.items():
+                        lines.append(f"          {key}: {value}")
+                    for secret_name in secrets:
+                        lines.append(
+                            f"          {secret_name}: ${{{{ secrets.{secret_name} }}}}"
+                        )
+                if job.get("run"):
+                    lines.append(f"      - run: {job['run']}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        for repo in sorted(repos):
+            repo_dir = collect / "repos" / repo
+            (repo_dir / "workflows").mkdir(parents=True, exist_ok=True)
+            (repo_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "name": repo,
+                        "visibility": "public" if repo in public_repos else "private",
+                        "default_branch": "main",
+                        "default_sha": "abc",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (repo_dir / "secrets.json").write_text("[]", encoding="utf-8")
+            (repo_dir / "variables.json").write_text("[]", encoding="utf-8")
+            env_dir = repo_dir / "environments"
+            env_dir.mkdir(exist_ok=True)
+            (env_dir / "production.json").write_text(
+                json.dumps({"name": "production", "protection_rules": []}),
+                encoding="utf-8",
+            )
+            files: dict[str, list[dict]] = defaultdict(list)
+            for (kind, workflow), names in grouped[repo].items():
+                if kind == "prod":
+                    if repo == "ken-frontend" and workflow.endswith("deploy.yml"):
+                        build_names = [
+                            name
+                            for name in names
+                            if name in contract or name in variable_names
+                        ]
+                        deploy_names = [
+                            name
+                            for name in names
+                            if name not in contract and name not in variable_names
+                        ]
+                        if build_names:
+                            files[workflow].append(
+                                {
+                                    "id": "build-image",
+                                    "environment": "production",
+                                    "uses": "docker/build-push-action@v5",
+                                    "secrets": build_names,
+                                    "run": "pnpm run build && docker push ghcr.io/ken-technology/ken-frontend",
+                                }
+                            )
+                        if deploy_names:
+                            files[workflow].append(
+                                {
+                                    "id": "deploy",
+                                    "environment": "production",
+                                    "secrets": deploy_names,
+                                }
+                            )
+                    else:
+                        files[workflow].append(
+                            {
+                                "id": "deploy",
+                                "environment": "production",
+                                "secrets": names,
+                            }
+                        )
+                elif kind == "ci":
+                    files[workflow].append(
+                        {
+                            "id": "ci",
+                            "uses": "actions/checkout@v4",
+                            "secrets": names,
+                            "run": "echo ci",
+                        }
+                    )
+                elif kind == "nonprod":
+                    files[workflow].append(
+                        {
+                            "id": "deploy",
+                            "environment": "staging",
+                            "secrets": names,
+                        }
+                    )
+                elif kind == "secretless":
+                    files[workflow].append(
+                        {
+                            "id": "publish",
+                            "uses": "pypa/gh-action-pypi-publish@release/v1",
+                            "permissions": {
+                                "contents": "read",
+                                "id-token": "write",
+                            },
+                            "secrets": names,
+                            "run": "python -m build",
+                        }
+                    )
+            op_jobs: dict[tuple[str, str], dict[str, str]] = defaultdict(dict)
+            for row in evidence["direct_onepassword_mappings"]:
+                if row["repository"] != repo:
+                    continue
+                op_jobs[(row["workflow"], row["job"])][row["environment_name"]] = row[
+                    "source_reference"
+                ]
+            for (workflow, job_id), env in op_jobs.items():
+                existing_job = next(
+                    (job for job in files[workflow] if job["id"] == job_id), None
+                )
+                if existing_job is not None:
+                    existing_job.setdefault("env", {}).update(env)
+                else:
+                    files[workflow].append(
+                        {
+                            "id": job_id,
+                            "environment": "production",
+                            "env": env,
+                        }
+                    )
+            for workflow, jobs in files.items():
+                write_workflow(repo_dir / "workflows" / Path(workflow).name, jobs)
+
+    def _assert_full_generation_rejects(self, evidence, message):
+        import build_task6_authority_evidence as builder
+
+        baseline = builder.build_evidence()
         with tempfile.TemporaryDirectory() as temp:
             collect = Path(temp) / "collect"
             output = Path(temp) / "output"
-            shutil.copytree(source, collect, copy_function=os.link)
-            evidence_path = collect / "authority-evidence.json"
-            evidence_path.unlink()
-            evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+            self._write_hermetic_collect(collect, baseline)
+            (collect / "authority-evidence.json").write_text(
+                json.dumps(evidence), encoding="utf-8"
+            )
             with self.assertRaisesRegex(ValueError, message):
                 aw.generate(collect, output)
 
-    def _assert_live_full_generation_rejects(self, evidence, message):
-        if not LIVE_COLLECT_DIR.is_dir():
-            self.fail(f"missing live collection at {LIVE_COLLECT_DIR}")
-        self._assert_full_generation_rejects(
-            evidence, message, collect_dir=LIVE_COLLECT_DIR
-        )
+    def test_hermetic_unmutated_builder_evidence_generation_passes(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        with tempfile.TemporaryDirectory() as temp:
+            collect = Path(temp) / "collect"
+            output = Path(temp) / "output"
+            self._write_hermetic_collect(collect, evidence)
+            summary = aw.generate(collect, output)
+        self.assertEqual(summary["broker_actions"], 4)
+        self.assertEqual(summary["direct_onepassword_references"], 11)
+        self.assertGreaterEqual(summary["secrets"], 1)
 
     def _apply_unrelated_frontend_annotation(self, evidence):
         annotation = self._unrelated_frontend_annotation(evidence)
@@ -1132,7 +1373,7 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, reject):
                     self._apply_unrelated_frontend_annotation(evidence)
             with self.subTest(name=name, path="generate"):
-                self._assert_live_full_generation_rejects(evidence, reject)
+                self._assert_full_generation_rejects(evidence, reject)
 
         hermes_empty = copy.deepcopy(builder.build_evidence())
         next(
@@ -3734,6 +3975,23 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
             "handoff_group",
         ):
             self.assertNotIn(field, migrated)
+
+
+class HermeticTestPortabilityTests(unittest.TestCase):
+    def test_suite_has_no_absolute_scratch_collection_dependency(self):
+        tests_dir = Path(__file__).resolve().parent
+        scratch = "/private/tmp/" + "ken-actions-fix5-collect"
+        live_name = "LIVE_" + "COLLECT_DIR"
+        for path in tests_dir.rglob("*"):
+            if (
+                not path.is_file()
+                or path.suffix == ".pyc"
+                or "__pycache__" in path.parts
+            ):
+                continue
+            source = path.read_text(encoding="utf-8")
+            self.assertNotIn(scratch, source, msg=str(path))
+            self.assertNotIn(live_name, source, msg=str(path))
 
 
 if __name__ == "__main__":
