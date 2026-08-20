@@ -85,8 +85,8 @@ manifest_path = root / "inventory/action-transport.lock.yaml"
 manifest = yaml.load(manifest_path.read_text(), Loader=StrictLoader)
 
 assert type(manifest["schema_version"]) is int and manifest["schema_version"] == 1
-assert manifest["transport_version"] == "2026-08-20.2"
-assert manifest["status"] == "reviewed-transport-awaiting-task6-final-bindings"
+assert manifest["transport_version"] == "2026-08-20.3"
+assert manifest["status"] == "reviewed-transport-bound-task6-final-awaiting-live-authorization"
 assert manifest["enabled"] is False
 assert manifest["installation_authorized"] is False
 assert manifest["live_execution_authorized"] is False
@@ -121,10 +121,45 @@ assert manifest["task6_receipts"] == {
     "task4_deploy_target_authority": "deferred-until-single-stop-readback",
 }
 assert manifest["task6_final"] == {
-    "status": "unavailable",
-    "commit_sha": None,
-    "policy_sha256": None,
-    "runtime_lock_sha256": None,
+    "status": "reviewed-final-bindings",
+    "commit_sha": "d03694d41c044985d406e74d434fdf2928bc4798",
+    "tree_sha": "71b57ed890f5f39ea3ee90eaccb59a8cf3666fb4",
+    "task7_base_commit_sha": "a06da36014e6b08a7478f5306c137c52c436c3ef",
+    "artifacts": {
+        "policy": {
+            "path": "inventory/op-broker-policy.yaml",
+            "git_blob_sha": "208c5c02f1b7415887c7ff30c70f6d863d60df8d",
+            "sha256": "383ea7d1d2beb7e0ced15ed68768ce41e9ec9abbae5f180b6ac29542970b1335",
+        },
+        "runtime_lock": {
+            "path": "inventory/broker-runtime.lock.yaml",
+            "git_blob_sha": "41b6bda7e96c8c2751f10c1c4bd75d279b06458a",
+            "sha256": "0e571c4d20ce68ebb7fd97c2a3dbc0d7430c50c4a09dfd0b89cb08c0ffec2bfa",
+        },
+        "broker": {
+            "path": "bin/ken-op-broker",
+            "git_blob_sha": "8bbd30fab740a08b016d214f6d10c2f40276136a",
+            "sha256": "84f38c9f8cc2dfaa45aec438230af1c948b6fd6ae71767f39ccc1f72974257df",
+        },
+        "client": {
+            "path": "bin/ken-op-exec",
+            "git_blob_sha": "90e5a39253a082598d15533f8f4d620e84468953",
+            "sha256": "2b55d1e7687929d12edec6fe220ed84274b0d2f465f562960239064c82a1922a",
+        },
+        "broker_unit": {
+            "path": "systemd/ken-op-broker@.service",
+            "git_blob_sha": "f3e764545d133863aabb8ea2760bf74f31e8cc1a",
+            "sha256": "dbc0f8da004054a28e9a4675cd6d10d5f17d73b2ca932b022dea632394cf7989",
+        },
+    },
+    "receipt_helper_provenance": {
+        "reviewed_source_commit_sha": "45c55b6fc0cd2752d2869c4517475c86004a1e91",
+        "reviewed_source_tree_sha": "e8da0e42c2593ff4bb284d7bc52320cefb1ba517",
+        "helper_path": "bin/ken-frontend-production-release",
+        "helper_blob_sha": "ad56d39488c749a29486d2a842d713bbd838fa7d",
+        "helper_sha256": "8a611e251c69ee0af1f66043d508695461decf271cc32b76dbe224833a17f183",
+        "contract_sha256": "d5ebeb58afb5f5e24bc1b6a6e74934ee3a22ae337b103a085d2df9a5776db63c",
+    },
 }
 assert manifest["leases"] == {
     "ordinary_slots": [
@@ -1158,49 +1193,6 @@ class TransportTests(unittest.TestCase):
         ga_root = Path(path).parent.parent
         repo_root = ga_root.parent.parent
         manifest = yaml.safe_load((ga_root / "inventory/action-transport.lock.yaml").read_text())
-        manifest["transport_version"] = "2026-08-20.3"
-        manifest["status"] = "reviewed-transport-bound-task6-final-awaiting-live-authorization"
-        manifest["task6_final"] = {
-            "status": "reviewed-final-bindings",
-            "commit_sha": "81483ceaf4bbe428afe0dfe6e370003fdf740766",
-            "tree_sha": "46cd45ba7f570a8cb6be54811848027eb75e4d97",
-            "task7_base_commit_sha": "f672e261e4d11cf0c46b5133145676190341aab8",
-            "artifacts": {
-                "policy": {
-                    "path": "inventory/op-broker-policy.yaml",
-                    "git_blob_sha": "ff27efdb9f27fdeacd01cb68c0283a03db061af4",
-                    "sha256": "954c62d37b725b9669a0178a7dfa97b971419bc8f42a020da11469b45d4f4c62",
-                },
-                "runtime_lock": {
-                    "path": "inventory/broker-runtime.lock.yaml",
-                    "git_blob_sha": "d5ee3a5aa556255b4f3958362395c172d637f15c",
-                    "sha256": "8471b852e67ab3d2f53147ec1fc5e2f5ca6529d2145a307d97fbd3c5069dad90",
-                },
-                "broker": {
-                    "path": "bin/ken-op-broker",
-                    "git_blob_sha": "3125519f70f6a2802e38003d83c81033aa192960",
-                    "sha256": "211f11be2df8b085cc5ebd5815fb3d8fd10209ae34010961113cad351a481ff9",
-                },
-                "client": {
-                    "path": "bin/ken-op-exec",
-                    "git_blob_sha": "90e5a39253a082598d15533f8f4d620e84468953",
-                    "sha256": "2b55d1e7687929d12edec6fe220ed84274b0d2f465f562960239064c82a1922a",
-                },
-                "broker_unit": {
-                    "path": "systemd/ken-op-broker@.service",
-                    "git_blob_sha": "f3e764545d133863aabb8ea2760bf74f31e8cc1a",
-                    "sha256": "dbc0f8da004054a28e9a4675cd6d10d5f17d73b2ca932b022dea632394cf7989",
-                },
-            },
-            "receipt_helper_provenance": {
-                "reviewed_source_commit_sha": "45c55b6fc0cd2752d2869c4517475c86004a1e91",
-                "reviewed_source_tree_sha": "e8da0e42c2593ff4bb284d7bc52320cefb1ba517",
-                "helper_path": "bin/ken-frontend-production-release",
-                "helper_blob_sha": "ad56d39488c749a29486d2a842d713bbd838fa7d",
-                "helper_sha256": "8a611e251c69ee0af1f66043d508695461decf271cc32b76dbe224833a17f183",
-                "contract_sha256": "d5ebeb58afb5f5e24bc1b6a6e74934ee3a22ae337b103a085d2df9a5776db63c",
-            },
-        }
         payloads = {
             name: (ga_root / row["path"]).read_bytes()
             for name, row in manifest["task6_final"]["artifacts"].items()
