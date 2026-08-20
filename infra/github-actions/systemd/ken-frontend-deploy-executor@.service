@@ -1,0 +1,44 @@
+[Unit]
+Description=Ken frontend digest deploy executor %i
+Requires=ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+After=ken-frontend-source-map-uploader@%i.service ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+Conflicts=ken-frontend-production-builder@%i.service
+
+[Service]
+Type=oneshot
+User=ken-fe-deploy
+Group=ken-fe-deploy
+UMask=0077
+Slice=ken-actions-deploy-executor.slice
+ExecStart=/usr/local/bin/ken-frontend-production-release execute-digest --state-fd 3 --credential-fd 4
+StandardOutput=null
+StandardError=null
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+Environment=HOME=/nonexistent LANG=C.UTF-8 PATH=/usr/bin:/bin
+MemoryMax=1G
+MemorySwapMax=0
+CPUQuota=100%
+TasksMax=256
+LimitCORE=0
+TimeoutStartSec=600s
+KillMode=control-group

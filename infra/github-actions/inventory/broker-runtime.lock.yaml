@@ -1,0 +1,678 @@
+schema_version: 1
+lock_version: 2026-08-20.1
+plan_sha256: fa04630e96b13acc47419f790631acd8d595850affe937d665ff3216ed193b51
+target:
+  os: ubuntu-24.04
+  architecture: amd64
+compatibility:
+  artifact_class: integration-evidence-not-guest-consumable
+  payload_manifest_sha256: 43a8d166b82c08197de6a975f4d14485c8bdae2da524db19f6f1ed1c7da8225f
+  payload_count: 31
+  corrupt_payloads_allowed: false
+  installation_readiness: blocked
+  blocking_conditions:
+  - offline-guest-known-answer-not-run
+  - offline-dependency-closure
+  - both-guest-op-contract
+  - frontend-phase-transport
+  - frontend-deploy-contract
+  - frontend-variables-manifest
+  - direct-known-hosts
+  - beehiiv-operation-redesign
+  - ordinary-systemd-transaction-transport
+  live_verification: pending-offline-ubuntu-guest
+  task4_consumer_contract:
+    required_guests: [ken-ci, ken-deploy]
+    bind_exact_lock_sha256: true
+    install_network_disabled: true
+    dependency_closure_from_signed_indexes: true
+    guest_image_manifest_required: true
+    offline_hash_import_abi_checks_required: true
+runtime_contract:
+  op_path: /usr/local/bin/op
+  guest_payload_count: 30
+  remote_build_inputs: [node-build-base]
+  principals:
+  - {guest: ken-ci, name: ken-op-net-ci, uid: 22001, gid: 22001, slice: system.slice, network_profile: github-control-ci}
+  - {guest: ken-deploy, name: ken-op-net-nonprod, uid: 22002, gid: 22002, slice: ken-actions-deploy-brokers.slice, network_profile: github-control-nonproduction}
+  - {guest: ken-deploy, name: ken-op-net-prod, uid: 22003, gid: 22003, slice: ken-actions-deploy-brokers.slice, network_profile: github-control-production}
+  - {guest: ken-deploy, name: ken-vexa-deploy, uid: 22101, gid: 22101, slice: ken-actions-deploy-transactions.slice, network_profile: vexa-production-fixed-target}
+  - {guest: ken-deploy, name: ken-beehiiv-sync, uid: 22102, gid: 22102, slice: ken-actions-deploy-transactions.slice, network_profile: beehiiv-and-github-fixed-targets}
+  - {guest: ken-deploy, name: ken-website-deploy, uid: 22103, gid: 22103, slice: ken-actions-deploy-transactions.slice, network_profile: website-production-fixed-target}
+  - {guest: ken-deploy, name: ken-fe-builder, uid: 22201, gid: 22201, slice: ken-actions-deploy-builder.slice, network_profile: frontend-production-digest-deploy}
+  - {guest: ken-deploy, name: ken-fe-uploader, uid: 22202, gid: 22202, slice: ken-actions-deploy-uploader.slice, network_profile: frontend-production-digest-deploy}
+  - {guest: ken-deploy, name: ken-fe-deploy, uid: 22203, gid: 22203, slice: ken-actions-deploy-executor.slice, network_profile: frontend-production-digest-deploy}
+  subordinate_ids:
+  - {guest: ken-deploy, name: ken-fe-builder, uid: 22201, subuid_start: 300000, subuid_count: 65536, subgid_start: 300000, subgid_count: 65536}
+  firewall_phase_interface:
+    command: [/usr/local/libexec/ken-actions-guest-firewall, phase]
+    arguments: [--request-id, '{request_id}', --profile, '{network_profile}', --phase, '{phase}', --state, '{activate|deactivate}']
+    profile_authority: inventory/op-broker-policy.yaml
+    caller_supplied_targets: forbidden
+  startup_gates: [ken-actions-guest-firewall.service, ken-actions-guest-runtime-verify.service]
+components:
+- id: 1password-cli
+  version: 2.39.0
+  source_url: https://cache.agilebits.com/dist/1P/op2/pkg/v2.39.0/op_linux_amd64_v2.39.0.zip
+  payload_filename: op_linux_amd64_v2.39.0.zip
+  payload_sha256: 6fba7f376b6c6dec49f41b06408930a43ad064cce103c6a2ce5b3d0413a86434
+  hosts:
+  - ken-ci
+  - ken-deploy
+  verification:
+    vendor_signature_file: op.sig
+    signature_sha256: f17698c4ba55497e80d3b2fd20c7b8561d6f81a8cff98619ca0a61db65c28c79
+    signing_key_url: https://downloads.1password.com/linux/keys/1password.asc
+    signing_key_sha256: f39e7dd9dedc581ced85732832f217e0de5860a3b80279b5af4bc7c6d8157bae
+    signing_key_fingerprint: 3FEF9748469ADBE15DA7CA80AC2D62742012EA22
+    signature_status: good
+    guest_command: test "$(op --version)" = "2.39.0" && sha256sum -c op-installed.sha256
+- id: python
+  version: 3.12.3-1ubuntu0.15
+  source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3.12/python3.12_3.12.3-1ubuntu0.15_amd64.deb
+  payload_filename: python3.12_3.12.3-1ubuntu0.15_amd64.deb
+  payload_sha256: d02d1769ca198be054f74fab22dc46299b4994c9c00bfdd6352938402e5eed1f
+  hosts:
+  - ken-ci
+  - ken-deploy
+  payloads:
+  - filename: python3.12_3.12.3-1ubuntu0.15_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3.12/python3.12_3.12.3-1ubuntu0.15_amd64.deb
+    sha256: d02d1769ca198be054f74fab22dc46299b4994c9c00bfdd6352938402e5eed1f
+  - filename: python3.12-minimal_3.12.3-1ubuntu0.15_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3.12/python3.12-minimal_3.12.3-1ubuntu0.15_amd64.deb
+    sha256: 487383dc2a895e0a767d820e0e55f2ab7d6ebe4dccd3d2c0b81f00ee11bb1152
+  - filename: libpython3.12-stdlib_3.12.3-1ubuntu0.15_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3.12/libpython3.12-stdlib_3.12.3-1ubuntu0.15_amd64.deb
+    sha256: 47c3b48809d392570e827cb3cdeacdf750af39fc36619c83337e28cbffea791c
+  - filename: libpython3.12-minimal_3.12.3-1ubuntu0.15_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3.12/libpython3.12-minimal_3.12.3-1ubuntu0.15_amd64.deb
+    sha256: 5d16abf75f5a517c7e68dfbe888ddb40aa95d3b4445b1c223ec5ea23d2b01051
+  - filename: python3_3.12.3-0ubuntu2.1_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3-defaults/python3_3.12.3-0ubuntu2.1_amd64.deb
+    sha256: e691b9cc40841c41bbdc50bd794c876cb1b1801306ea27b06e9a1458180df1e9
+  - filename: python3-minimal_3.12.3-0ubuntu2.1_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3-defaults/python3-minimal_3.12.3-0ubuntu2.1_amd64.deb
+    sha256: 9ba5dd55cdcf6121c147dc5cb87403169b5933e3a56da0de57774f2ce819cf06
+  - filename: libpython3-stdlib_3.12.3-0ubuntu2.1_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3-defaults/libpython3-stdlib_3.12.3-0ubuntu2.1_amd64.deb
+    sha256: 57ebb378c59d2f9ef479bee0abc933c560878cc10e2c3af8e05d6fdb2ed63da4
+  installed_tree:
+    path: /usr/lib/python3.12
+    regular_file_count: 623
+    normalized_sha256_manifest_sha256: c83608cc6e757ccd9dfab248a559102b3a683f177df78206e59a2852abdc46e3
+  compatibility:
+    abi: cpython-312-x86_64-linux-gnu
+    guest_command: test "$(python3 --version)" = "Python 3.12.3"
+- id: pyyaml
+  version: 6.0.1-2build2
+  source_url: https://archive.ubuntu.com/ubuntu/pool/main/p/pyyaml/python3-yaml_6.0.1-2build2_amd64.deb
+  payload_filename: python3-yaml_6.0.1-2build2_amd64.deb
+  payload_sha256: 315e59500af855f23ee4e95525b99009bd798c4d2658af8eb4b2d66a8a91ec23
+  hosts:
+  - ken-ci
+  - ken-deploy
+  installed_tree:
+    path: /usr/lib/python3/dist-packages/yaml
+    regular_file_count: 18
+    normalized_sha256_manifest_sha256: 7eff79bdc8e17b71917ac809a19a362aaf459c8ca2ec8019d707e5cddc1a9bc2
+  compatibility:
+    strict_duplicate_keys: custom SafeLoader constructor required at every mapping depth
+    guest_command: python3 -I /usr/local/libexec/ken-actions/runtime-known-answer.py yaml-duplicate-key
+- id: pyjwt
+  version: 2.7.0-1ubuntu0.1
+  source_url: https://security.ubuntu.com/ubuntu/pool/main/p/pyjwt/python3-jwt_2.7.0-1ubuntu0.1_all.deb
+  payload_filename: python3-jwt_2.7.0-1ubuntu0.1_all.deb
+  payload_sha256: 038c42e9957c683e98834dbe405572e01c8c3aa0ebcd410beec33a260d0f0022
+  hosts:
+  - ken-ci
+  - ken-deploy
+  installed_tree:
+    path: /usr/lib/python3/dist-packages/jwt
+    regular_file_count: 13
+    normalized_sha256_manifest_sha256: 34707c4919ee26cfab79abca56e60cc6d865861021604c33f1204bd53f98c6e6
+  compatibility:
+    algorithm: RS256
+    guest_command: python3 -I /usr/local/libexec/ken-actions/runtime-known-answer.py jwt-rs256
+- id: cryptography
+  version: 41.0.7-4ubuntu0.4
+  source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python-cryptography/python3-cryptography_41.0.7-4ubuntu0.4_amd64.deb
+  payload_filename: python3-cryptography_41.0.7-4ubuntu0.4_amd64.deb
+  payload_sha256: 8fa33b608a16df054bf26ea3a653b1d512ab745d01e56fa938673ebc8c727060
+  hosts:
+  - ken-ci
+  - ken-deploy
+  payloads:
+  - filename: python3-cryptography_41.0.7-4ubuntu0.4_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python-cryptography/python3-cryptography_41.0.7-4ubuntu0.4_amd64.deb
+    sha256: 8fa33b608a16df054bf26ea3a653b1d512ab745d01e56fa938673ebc8c727060
+  - filename: python3-cffi-backend_1.16.0-2build1_amd64.deb
+    source_url: https://archive.ubuntu.com/ubuntu/pool/main/p/python-cffi/python3-cffi-backend_1.16.0-2build1_amd64.deb
+    sha256: a49f5e49b15146f6b2217cb3b6e6d62c503b02a7b271295e6d569d483ccdf687
+  installed_tree:
+    path: /usr/lib/python3/dist-packages/cryptography
+    regular_file_count: 92
+    normalized_sha256_manifest_sha256: 0e655cfc9c3ca995cd7282d32d0259ec8beae0e59ef0fa079718f79d9394fc11
+  compatibility:
+    required_abi_packages:
+    - libc6>=2.34
+    - libgcc-s1>=4.2
+    - libssl3t64>=3.0.0
+    - libffi8>=3.4
+    guest_command: python3 -I /usr/local/libexec/ken-actions/runtime-known-answer.py jwt-rs256
+- id: ca-certificates
+  version: 20260601~24.04.1
+  source_url: https://security.ubuntu.com/ubuntu/pool/main/c/ca-certificates/ca-certificates_20260601~24.04.1_all.deb
+  payload_filename: ca-certificates_20260601~24.04.1_all.deb
+  payload_sha256: 6bac2a01979e210d9eac1d4d56747ec709ea60654744d66705dc3c36e7629e50
+  hosts:
+  - ken-ci
+  - ken-deploy
+  installed_tree:
+    path: /usr/share/ca-certificates/mozilla
+    regular_file_count: 121
+    normalized_sha256_manifest_sha256: e22eacc9b363b880afc6ce22ca8fa7de8118c75debc24338daf32995895cd6c3
+  deterministic_post_install_verification:
+    command: update-ca-certificates --fresh && test -s /etc/ssl/certs/ca-certificates.crt && sha256sum /etc/ssl/certs/ca-certificates.crt
+    rule: record the generated bundle hash in guest-image-manifest.yaml and require both guests to match it
+- id: git
+  version: 1:2.43.0-1ubuntu7.3
+  source_url: https://security.ubuntu.com/ubuntu/pool/main/g/git/git_2.43.0-1ubuntu7.3_amd64.deb
+  payload_filename: git_2.43.0-1ubuntu7.3_amd64.deb
+  payload_sha256: 099bb129f543adc4c14203334b0fa0a909f8bf038c4d56bc9cc7c774ebf78f87
+  hosts:
+  - ken-ci
+  - ken-deploy
+  payloads:
+  - filename: git_2.43.0-1ubuntu7.3_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/g/git/git_2.43.0-1ubuntu7.3_amd64.deb
+    sha256: 099bb129f543adc4c14203334b0fa0a909f8bf038c4d56bc9cc7c774ebf78f87
+  - filename: git-man_2.43.0-1ubuntu7.3_all.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/g/git/git-man_2.43.0-1ubuntu7.3_all.deb
+    sha256: 5701f931ed2cd30644700b0fc1cda7c2214f93a63ef84c0c80e43ce40d2cf1d2
+  compatibility:
+    guest_command: test "$(git --version)" = "git version 2.43.0" && git fsck --strict --full
+- id: systemd
+  version: 255.4-1ubuntu8.17
+  source_url: https://security.ubuntu.com/ubuntu/pool/main/s/systemd/systemd_255.4-1ubuntu8.17_amd64.deb
+  payload_filename: systemd_255.4-1ubuntu8.17_amd64.deb
+  payload_sha256: 250345b73e42a97ee71cae7c1e470897dfad3c639eb0a7aafe4f9a3a29871cb2
+  hosts:
+  - ken-ci
+  - ken-deploy
+  payloads:
+  - filename: systemd_255.4-1ubuntu8.17_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/s/systemd/systemd_255.4-1ubuntu8.17_amd64.deb
+    sha256: 250345b73e42a97ee71cae7c1e470897dfad3c639eb0a7aafe4f9a3a29871cb2
+  - filename: systemd-sysv_255.4-1ubuntu8.17_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/s/systemd/systemd-sysv_255.4-1ubuntu8.17_amd64.deb
+    sha256: 000c90facb7f0f33a3c771ac8cf58221f80239184fb9e24fe78086ffea6e2cf9
+  - filename: systemd-dev_255.4-1ubuntu8.17_all.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/s/systemd/systemd-dev_255.4-1ubuntu8.17_all.deb
+    sha256: 70b863bd1188f49a3ba0ccde5355abd6611a8a5dcd8b92addf25c8036f22556d
+  - filename: libsystemd-shared_255.4-1ubuntu8.17_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/s/systemd/libsystemd-shared_255.4-1ubuntu8.17_amd64.deb
+    sha256: 8722a69d99c1a7e6f72c5389e9c6d8053d95d2f5f4fede5dc83118f735812518
+  - filename: libsystemd0_255.4-1ubuntu8.17_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/s/systemd/libsystemd0_255.4-1ubuntu8.17_amd64.deb
+    sha256: 4776d2ac7e21efe2ae31f3f7955a7ccd97277225eecf36910a26faf4544979ae
+  compatibility:
+    guest_commands:
+    - test "$(systemd --version | head -1)" = "systemd 255 (255.4-1ubuntu8.17)"
+    - systemd-creds --version
+    - systemd-creds encrypt --name=runtime-lock-canary - /tmp/runtime-lock-canary.cred < /dev/null
+- id: zip-safety
+  version: python-stdlib-3.12.3-1ubuntu0.15+custom-policy-v1
+  source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3.12/libpython3.12-stdlib_3.12.3-1ubuntu0.15_amd64.deb
+  payload_filename: libpython3.12-stdlib_3.12.3-1ubuntu0.15_amd64.deb
+  payload_sha256: 47c3b48809d392570e827cb3cdeacdf750af39fc36619c83337e28cbffea791c
+  hosts:
+  - ken-ci
+  - ken-deploy
+  payloads:
+  - filename: libpython3.12-stdlib_3.12.3-1ubuntu0.15_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/p/python3.12/libpython3.12-stdlib_3.12.3-1ubuntu0.15_amd64.deb
+    sha256: 47c3b48809d392570e827cb3cdeacdf750af39fc36619c83337e28cbffea791c
+  - filename: unzip_6.0-28ubuntu4.1_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/main/u/unzip/unzip_6.0-28ubuntu4.1_amd64.deb
+    sha256: a505b9d491386167bd8e14e3383315a4a7d6539e4406745901ccf009a7988271
+  compatibility:
+    authority: Python zipfile plus ken-op-broker custom validation; /usr/bin/unzip is never extraction authority
+    required_rejections:
+    - traversal
+    - absolute-path
+    - duplicate-path
+    - case-collision
+    - symlink
+    - device
+    - sparse
+    - unsupported-compression
+    - entry-limit
+    - expanded-byte-limit
+- id: buildkit
+  version: 0.24.0
+  source_url: https://github.com/moby/buildkit/releases/download/v0.24.0/buildkit-v0.24.0.linux-amd64.tar.gz
+  payload_filename: buildkit-v0.24.0.linux-amd64.tar.gz
+  payload_sha256: af8064eca16077b4d6937745988ba2d2dfa439540874cdcd918318315f3ba1d3
+  hosts:
+  - ken-deploy
+  installed_tree:
+    path: /usr/local/libexec/buildkit
+    regular_file_count: 13
+    normalized_sha256_manifest_sha256: be22a206db9a97af942d2bafd6ccac1a8e920d7e150887c2d9b87e65e6e84086
+  verification:
+    release_metadata_url: https://api.github.com/repos/moby/buildkit/releases/tags/v0.24.0
+    release_asset_digest: sha256:af8064eca16077b4d6937745988ba2d2dfa439540874cdcd918318315f3ba1d3
+    provenance_url: https://github.com/moby/buildkit/releases/download/v0.24.0/buildkit-v0.24.0.linux-amd64.provenance.json
+    provenance_sha256: f22a142a6f4986acf0df8b480b17cfde7b6e4686371a230ad5e8039b4e8309c3
+    provenance_subject_sha256: af8064eca16077b4d6937745988ba2d2dfa439540874cdcd918318315f3ba1d3
+    guest_commands:
+    - buildkitd --version
+    - buildctl --version
+- id: rootlesskit
+  version: 2.3.6
+  source_url: https://github.com/rootless-containers/rootlesskit/releases/download/v2.3.6/rootlesskit-x86_64.tar.gz
+  payload_filename: rootlesskit-x86_64-v2.3.6.tar.gz
+  payload_sha256: afc52e9fa2f7a2d4bb692f675cf3d2f70f3a184f02593e8b18cfbbbc34cbfd41
+  hosts:
+  - ken-deploy
+  compatibility:
+    requires:
+    - uidmap
+    - subordinate-uid-range
+    - subordinate-gid-range
+    - unprivileged-user-namespaces
+    guest_command: rootlesskit --version
+  verification:
+    vendor_checksums_url: https://github.com/rootless-containers/rootlesskit/releases/download/v2.3.6/SHA256SUMS
+    vendor_checksums_sha256: d8abffca38ffdfdd5f8ce62b1f489b5dfecbc68b8972f0889f1c7f1186d1029c
+    vendor_payload_sha256: afc52e9fa2f7a2d4bb692f675cf3d2f70f3a184f02593e8b18cfbbbc34cbfd41
+- id: buildkit-rootless-prerequisites
+  version: ubuntu-noble-pinned-2026-08-20
+  source_url: https://archive.ubuntu.com/ubuntu/pool/main/s/shadow/uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb
+  payload_filename: uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb
+  payload_sha256: a80cb7f72dd18c73cbb0b07b7fbe855504f26bfafae072a9b3d125c89d499b9e
+  hosts:
+  - ken-deploy
+  payloads:
+  - filename: uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb
+    source_url: https://archive.ubuntu.com/ubuntu/pool/main/s/shadow/uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb
+    sha256: a80cb7f72dd18c73cbb0b07b7fbe855504f26bfafae072a9b3d125c89d499b9e
+  - filename: slirp4netns_1.2.1-1build2_amd64.deb
+    source_url: https://archive.ubuntu.com/ubuntu/pool/universe/s/slirp4netns/slirp4netns_1.2.1-1build2_amd64.deb
+    sha256: 3fc72a72a376a3ad3b439434bc87d89d245f9d54a1d540e8a06b74d4e2385e0a
+  - filename: fuse-overlayfs_1.13-1_amd64.deb
+    source_url: https://archive.ubuntu.com/ubuntu/pool/universe/f/fuse-overlayfs/fuse-overlayfs_1.13-1_amd64.deb
+    sha256: 627033f1e3f6534165aba934f16fb5b1f25544ba9d79088c70087cde8b27cc42
+- id: node
+  version: 22.20.0
+  source_url: https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz
+  payload_filename: node-v22.20.0-linux-x64.tar.xz
+  payload_sha256: 00bbd05e306ea68b6e13e17360d0e2f680b493ef95f2fea1c4296ff7437530bc
+  hosts:
+  - ken-deploy
+  compatibility:
+    kernel_minimum: 3.2.0
+    libc: glibc-x86_64
+  verification:
+    vendor_checksums_url: https://nodejs.org/dist/v22.20.0/SHASUMS256.txt
+    vendor_checksums_sha256: bf8c265bcf527d132273051e4d57c7b4a1da51c90c4acf121b9784a6e2e81e47
+    vendor_signature_url: https://nodejs.org/dist/v22.20.0/SHASUMS256.txt.sig
+    vendor_signature_sha256: 6b4ea0c5b22e9596639e1af06860c22d0111e31c22b32e1c2ab8cc970dd6ba55
+    signing_key_fingerprint: C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C
+    signature_status: good
+    guest_command: test "$(node --version)" = "v22.20.0"
+- id: corepack
+  version: 0.34.0
+  source_url: https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz
+  payload_filename: node-v22.20.0-linux-x64.tar.xz
+  payload_sha256: 00bbd05e306ea68b6e13e17360d0e2f680b493ef95f2fea1c4296ff7437530bc
+  hosts:
+  - ken-deploy
+  installed_tree:
+    path: /opt/ken-toolchain/node-v22.20.0/lib/node_modules/corepack
+    regular_file_count: 54
+    normalized_sha256_manifest_sha256: f34fdf3e616863c3eb78898beb6ad88223ee66d9c3950cd1776f603d82b426d6
+  compatibility:
+    guest_command: test "$(corepack --version)" = "0.34.0"
+    network_rule: do not run corepack prepare or another network-backed resolver during guest provisioning
+- id: pnpm
+  version: 10.28.2
+  source_url: https://registry.npmjs.org/pnpm/-/pnpm-10.28.2.tgz
+  payload_filename: pnpm-10.28.2.tgz
+  payload_sha256: afa99b0b4b3d11c1dad2b472f9318ae2c78673829749ded527f89f09071479a7
+  hosts:
+  - ken-deploy
+  installed_tree:
+    path: /opt/ken-toolchain/lib/node_modules/pnpm
+    regular_file_count: 1068
+    normalized_sha256_manifest_sha256: 49a6008623943ec5934fb18abdaf1a26d2eef04cb2f3181290a22f6b0719f9be
+  compatibility:
+    node_engine: '>=18.12'
+    pinned_node: 22.20.0
+  verification:
+    npm_registry_metadata_url: https://registry.npmjs.org/pnpm/10.28.2
+    npm_dist_shasum_sha1: ca14ef85043bcf001d0ba152c8629d9fac7fb799
+    npm_dist_integrity: sha512-QYcvA3rSL3NI47Heu69+hnz9RI8nJtnPdMCPGVB8MdLI56EVJbmD/rwt9kC1Q43uYCPrsfhO1DzC1lTSvDJiZA==
+    guest_command: test "$(pnpm --version)" = "10.28.2"
+- id: oci-image-tools
+  version: crane-0.21.7+umoci-0.4.7
+  source_url: https://github.com/google/go-containerregistry/releases/download/v0.21.7/go-containerregistry_Linux_x86_64.tar.gz
+  payload_filename: go-containerregistry_Linux_x86_64-v0.21.7.tar.gz
+  payload_sha256: 1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
+  hosts:
+  - ken-deploy
+  payloads:
+  - filename: go-containerregistry_Linux_x86_64-v0.21.7.tar.gz
+    source_url: https://github.com/google/go-containerregistry/releases/download/v0.21.7/go-containerregistry_Linux_x86_64.tar.gz
+    sha256: 1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
+  - filename: umoci_0.4.7+ds-4ubuntu0.24.04.3_amd64.deb
+    source_url: https://security.ubuntu.com/ubuntu/pool/universe/u/umoci/umoci_0.4.7+ds-4ubuntu0.24.04.3_amd64.deb
+    sha256: 3e943ee618a610c8fec181c7f2aa06f149e5292dfe73b70bf64901db744a776d
+  compatibility:
+    purpose: inspect canonical manifests, push/read back exact GHCR digest, unpack OCI layout before local raw/base64/hex leak scanning
+  verification:
+    vendor_checksums_url: https://github.com/google/go-containerregistry/releases/download/v0.21.7/checksums.txt
+    vendor_checksums_sha256: cd15501232e498a51ef7d2d65dd2fb360f9f1086e234acef1af02343cea291f9
+    release_asset_digest: sha256:1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
+    guest_commands:
+    - crane version
+    - umoci --version
+- id: node-build-base
+  delivery_class: remote-pinned-build-input
+  version: 22.20.0-alpine
+  source_url: https://registry-1.docker.io/v2/library/node/manifests/sha256:aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6
+  payload_filename: node-22.20.0-alpine-linux-amd64-manifest.json
+  payload_sha256: aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6
+  hosts:
+  - ken-deploy
+  compatibility:
+    canonical_reference: docker.io/library/node@sha256:aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6
+    platform: linux/amd64
+    config_digest: sha256:735b621e3e541de2a851625c382db48f76185f79cbaa1c94adcc8a80fd849e54
+provenance_payloads:
+- id: ubuntu-archive-keyring
+  version: 2023.11.28.1
+  filename: ubuntu-keyring_2023.11.28.1_all.deb
+  source_url: https://archive.ubuntu.com/ubuntu/pool/main/u/ubuntu-keyring/ubuntu-keyring_2023.11.28.1_all.deb
+  sha256: 36de43b15853ccae0028e9a767613770c704833f82586f28eb262f0311adb8a8
+  install_on_guest: false
+  purpose: verify-signed-ubuntu-package-indexes-only
+installed_files:
+- path: /usr/local/bin/op
+  sha256: 4e05ab20412fcef9a15ddbaaee98a32ef482824948ae5a62e2b7b75762445446
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:1password-cli
+- path: /usr/bin/python3.12
+  sha256: 1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:python
+- path: /usr/lib/python3/dist-packages/yaml/__init__.py
+  sha256: 6e1974e6a49e3bed59c654918c6aef9769bd9eb5dbd67f7e1906ad4cdd0caea7
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:pyyaml
+- path: /usr/lib/python3/dist-packages/yaml/_yaml.cpython-312-x86_64-linux-gnu.so
+  sha256: 43b3b0036fab5c1385d5dc2a5bc1a070f276a317a4d5aee42deac884f8ea57eb
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:pyyaml
+- path: /usr/lib/python3/dist-packages/jwt/__init__.py
+  sha256: c5137e5b90fbe633067b2992d4eff45f7e8e047970a46bd090a088a3a5f5c438
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:pyjwt
+- path: /usr/lib/python3/dist-packages/jwt/algorithms.py
+  sha256: 443b2fe4b9b76f3c2c8964f74f29d3ec9478d51e87eacfdf59418e22a77dc7f2
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:pyjwt
+- path: /usr/lib/python3/dist-packages/cryptography/__init__.py
+  sha256: 8953e50655d64c9ca215e45e77171b30f8721c1df8be238cd7477bdaf1a75ae1
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:cryptography
+- path: /usr/lib/python3/dist-packages/cryptography/hazmat/bindings/_rust.abi3.so
+  sha256: c928893c3fd432d2aaf84a8db7162ac8a7e1d03a4d121ccd2aec8a7bc4a4b165
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:cryptography
+- path: /usr/lib/python3/dist-packages/_cffi_backend.cpython-312-x86_64-linux-gnu.so
+  sha256: 5401195ab2db5412e46a2f4b1dcda10c60d2cc282933720cf2524668d445e7f0
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:cryptography
+- path: /usr/sbin/update-ca-certificates
+  sha256: e4c6e910eab5ab006fc1c3cc4d7efd782b1a07ec083847383e27ea5fffbfab4d
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:ca-certificates
+- path: /usr/bin/git
+  sha256: 2a8c18fbf43da9f692d75474c72bea9dfd796c260b0f3dfe456376abc3bbd668
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:git
+- path: /usr/lib/git-core/git-remote-http
+  sha256: 8353a5124ddb2281838bc54bd97c21cbecfe900615fdb60b281198c5058ddb5b
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:git
+- path: /usr/bin/systemd-creds
+  sha256: 9d5ecc1e81c887bf8c27bc609c68427de460aca1c8e0e2d27ba31488a11633bd
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:systemd
+- path: /usr/bin/systemctl
+  sha256: e0d3d0e9444da1b2b58c792c3f5028b69f049b77d5ca17b3ec0d09f89117225b
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:systemd
+- path: /usr/lib/x86_64-linux-gnu/systemd/libsystemd-shared-255.so
+  sha256: 356f170e9e3a9dfb8026448b81d999863794e30f9c7136b4dfdd0b7abbf73116
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:systemd
+- path: /usr/lib/python3.12/zipfile/__init__.py
+  sha256: fa12220ba68d58a75767133c93af70d968a4be79da05ef3d67fb32ad5f518f84
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:zip-safety
+- path: /usr/bin/unzip
+  sha256: b582f2d782989a4d0105284b8032b076222eb29a6c141b5c53b792c864199396
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: component:zip-safety
+- path: /usr/local/bin/buildkitd
+  sha256: b154375ba70ec98fdfc7c08c9576226c88f3802638900ff5742de0b1668c9fcb
+  hosts:
+  - ken-deploy
+  source: component:buildkit
+- path: /usr/local/bin/buildctl
+  sha256: 89b7236ef320133478117a21e80b265abf59aadbeb3cc22f14bacb43ca75b3ac
+  hosts:
+  - ken-deploy
+  source: component:buildkit
+- path: /usr/local/bin/buildkit-runc
+  sha256: 93fd94638b47008278ac31cf81c0a60b2d995acd3e42685478f16e66f4ddb0d3
+  hosts:
+  - ken-deploy
+  source: component:buildkit
+- path: /usr/local/bin/rootlesskit
+  sha256: bd7faf198480d5934f170959ab6a81392ed9d768c08e34a43b36dd974b7b1257
+  hosts:
+  - ken-deploy
+  source: component:rootlesskit
+- path: /usr/local/bin/rootlessctl
+  sha256: d288fc3eb692f0ebf6aae2b102821f512bad53d4d13d6d9308c2bd652d7a11fb
+  hosts:
+  - ken-deploy
+  source: component:rootlesskit
+- path: /usr/local/bin/rootlesskit-docker-proxy
+  sha256: a9d10543393544e152d75a5d339e844e1bbe940a04021b39ec8e980fb365c4cc
+  hosts:
+  - ken-deploy
+  source: component:rootlesskit
+- path: /usr/bin/newuidmap
+  sha256: 9035472d2a4ab77d5df65b8b500054330e1e6c1ba58d6ddfdf7234b4e6d8b038
+  hosts:
+  - ken-deploy
+  source: component:buildkit-rootless-prerequisites
+- path: /usr/bin/newgidmap
+  sha256: 32011f9ee3aeda7c26c6aacc0a6046013aa958c35d468fd15d0dd34788f2bcc5
+  hosts:
+  - ken-deploy
+  source: component:buildkit-rootless-prerequisites
+- path: /usr/bin/slirp4netns
+  sha256: 3921b699568c75c65457326e6d3511b2be6f6cbd503bc85bff2bd852d63fbf46
+  hosts:
+  - ken-deploy
+  source: component:buildkit-rootless-prerequisites
+- path: /usr/bin/fuse-overlayfs
+  sha256: 88c660564265dac16901194540041a5a33ca04926d96e56460d9c3162c1d8093
+  hosts:
+  - ken-deploy
+  source: component:buildkit-rootless-prerequisites
+- path: /opt/ken-toolchain/node-v22.20.0/bin/node
+  sha256: b1cbec894e45a5814b6ab756e1e14f8a76516273197e67e0412b57c1e10d0d9f
+  hosts:
+  - ken-deploy
+  source: component:node
+- path: /opt/ken-toolchain/node-v22.20.0/lib/node_modules/corepack/dist/corepack.js
+  sha256: 3655bc798f300951f2070fee411b337d626b0c3ae80c2d24c46ccac4595d4bf9
+  hosts:
+  - ken-deploy
+  source: component:node
+- path: /opt/ken-toolchain/lib/node_modules/pnpm/bin/pnpm.cjs
+  sha256: b276da51dc8ca5b0d3ee3371695b50fc8b3244b281b091c63a3f082a88dadeb9
+  hosts:
+  - ken-deploy
+  source: component:pnpm
+- path: /opt/ken-toolchain/lib/node_modules/pnpm/bin/pnpx.cjs
+  sha256: 907715e8c1a40838de62c59f87082036937356df91d976777be21cfad62d6029
+  hosts:
+  - ken-deploy
+  source: component:pnpm
+- path: /usr/local/bin/crane
+  sha256: 73c254403f06a07b5274261093693afa01ab964645c929ebb79cd66e077c6ba2
+  hosts:
+  - ken-deploy
+  source: component:oci-image-tools
+- path: /usr/bin/umoci
+  sha256: 1d322e1f1d8b5c23991b76c390fc35d1cabbbac06cd553d0a4eaf37510c75cb8
+  hosts:
+  - ken-deploy
+  source: component:oci-image-tools
+- path: /usr/local/bin/ken-op-exec
+  sha256: 69fb3d164e9b85c6be4671d488a4e46509b60d559f98d39bb21552f998b0d038
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: repo:bin/ken-op-exec
+- path: /usr/local/bin/ken-op-broker
+  sha256: 42d6f7f501195a7d675b726a349d092d0ecf07b2870e407deff779dbe7ca9429
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: repo:bin/ken-op-broker
+- path: /usr/local/bin/ken-actions-artifact-download
+  sha256: 835b8b965452268558c46a62bab1af647ccabb676c27f226c7d19e4d771972a1
+  hosts:
+  - ken-deploy
+  source: repo:bin/ken-actions-artifact-download
+- path: /usr/local/bin/ken-frontend-production-release
+  sha256: e3eaecae902d36b58f4fb1bbeeca753d184a88c8d6bec25946cc8f08fd8f3889
+  hosts:
+  - ken-deploy
+  source: repo:bin/ken-frontend-production-release
+- path: /usr/local/bin/ken-frontend-source-map-upload
+  sha256: cc142c7de87fe0de4870230a70ca366bd7b4b9842fb0e32916097b87e063aa3c
+  hosts:
+  - ken-deploy
+  source: repo:bin/ken-frontend-source-map-upload
+- path: /usr/local/libexec/ken-actions/ken-vexa-mcp-auth-production-deploy
+  sha256: 491b1505adb8a69056dbdb288392ddd73065be94daff08cb5113bc31626dc853
+  hosts:
+  - ken-deploy
+  source: repo:bin/ken-vexa-mcp-auth-production-deploy
+- path: /usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync
+  sha256: 1beb7a1564b661cfb48f551cfd84b95fca3f99d75950e196d6c9fe30399f5640
+  hosts:
+  - ken-deploy
+  source: repo:bin/ken-website-beehiiv-production-sync
+- path: /usr/local/libexec/ken-actions/ken-website-production-deploy
+  sha256: 3d87a23d40bdd6a217b46e0b7bebb5ca47b48bb2b686f84c55776cbce005a34a
+  hosts:
+  - ken-deploy
+  source: repo:bin/ken-website-production-deploy
+- path: /usr/local/libexec/ken-actions/ken-frontend-production-release-build
+  sha256: ad8f98761590eb31670866c60dfe78484ff76eb0fe834b4966f99aea19c2da1c
+  hosts:
+  - ken-deploy
+  source: repo:bin/ken-frontend-production-release-build
+- path: /usr/local/libexec/ken-actions/runtime-known-answer.py
+  sha256: 19b8c03362ba504c9745059dfb2340f59a6aac30dabbdc92cd73987008fcb6c4
+  hosts: [ken-ci, ken-deploy]
+  source: repo:bin/runtime-known-answer.py
+- path: /etc/ken-op-broker/op-broker-policy.yaml
+  sha256: 58fd8d1c818ad08f325251c5ef14983d8c3b86aa642521bf433f22ba770c2e32
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: repo:inventory/op-broker-policy.yaml
+- path: /etc/systemd/system/ken-op-broker@.service
+  sha256: 2f4682f9af3a91d5cee9bcfcc8a6eba76a77061edd87b4d5be4c6abfce8b3c9d
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: repo:systemd/ken-op-broker@.service
+- path: /etc/systemd/system/ken-op-broker@.socket
+  sha256: f401dbf9c4e4229dd269ce85b0e60a6d68f1b7b80e306780ef14608d0ce41dec
+  hosts:
+  - ken-ci
+  - ken-deploy
+  source: repo:systemd/ken-op-broker@.socket
+- path: /etc/systemd/system/ken-op-executor@.service
+  sha256: e63449b85dff9ef88a8926af091d56b36c06e0a1005f1a3f94e8572d7aa290b8
+  hosts:
+  - ken-deploy
+  source: repo:systemd/ken-op-executor@.service
+- path: /etc/systemd/system/ken-frontend-production-builder@.service
+  sha256: 5f9fa8acff0a130a6882e4f36596d4026dbb95004970d50f02f1aa05d71e5cd2
+  hosts:
+  - ken-deploy
+  source: repo:systemd/ken-frontend-production-builder@.service
+- path: /etc/systemd/system/ken-frontend-source-map-uploader@.service
+  sha256: 92c8beb31fce5318b4ada650954032d06c99c45d2b82ee309534fcf6cf472d74
+  hosts:
+  - ken-deploy
+  source: repo:systemd/ken-frontend-source-map-uploader@.service
+- path: /etc/systemd/system/ken-frontend-deploy-executor@.service
+  sha256: 34247d7a403d7813fcbbc8e1bd84e8d02a85c1f0f0abdda1d52d112dd7baded6
+  hosts:
+  - ken-deploy
+  source: repo:systemd/ken-frontend-deploy-executor@.service
+verification:
+  payload_manifest_command: sha256sum -c PAYLOADS.sha256
+  network_disabled_install: true
+  signed_index_fingerprint: F6ECB3762474EDA9D21B7022871920D1991BC93C
+  known_answer_status: source-pinned-live-not-run
+  quarantined_payloads_included: false

@@ -1,0 +1,17 @@
+[Unit]
+Description=Ken %i 1Password broker socket
+Before=ken-op-broker@%i.service
+
+[Socket]
+ListenSequentialPacket=/run/ken-op-broker/%i.sock
+SocketUser=root
+SocketGroup=ken-op-%i-clients
+SocketMode=0660
+DirectoryMode=0750
+Backlog=16
+Accept=no
+FlushPending=yes
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

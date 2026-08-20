@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Unprivileged, output-bounded client for fixed Ken broker actions."""
+
+from __future__ import annotations
+
+import argparse
+import array
+import json
+import os
+import socket
+import ssl
+import sys
+from typing import Sequence
+import urllib.parse
+import urllib.request
+
+ACTION_CLASSES = {
+    "ken-frontend-production-release": "production",
+    "ken-vexa-mcp-auth-production-deploy": "production",
+    "ken-website-beehiiv-production-sync": "production",
+    "ken-website-production-deploy": "production",
+}
+ARTIFACT_ACTIONS = frozenset({"ken-vexa-mcp-auth-production-deploy", "ken-website-production-deploy"})
+MAX_RESPONSE = 4096
+
+
+class ClientError(Exception):
+    pass
+
+
+def request_oidc(audience: str) -> str:
+    raw_url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+    bearer = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+    parsed = urllib.parse.urlsplit(raw_url)
+    if parsed.scheme != "https" or parsed.hostname != "pipelines.actions.githubusercontent.com" or parsed.port not in (None, 443) or parsed.username or parsed.password or parsed.fragment or not bearer or len(bearer) > 4096:
+        raise ClientError("oidc_url_invalid")
+    pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    if any(key == "audience" for key, _ in pairs):
+        raise ClientError("oidc_audience_already_present")
+    query = urllib.parse.urlencode([*pairs, ("audience", audience)])
+    url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, ""))
+    request = urllib.request.Request(url, headers={"Authorization": "Bearer " + bearer, "Accept": "application/json"}, method="GET")
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ssl.create_default_context()), _NoRedirect())
+        with opener.open(request, timeout=10) as response:
+            data = response.read(32769)
+            if response.status != 200 or len(data) > 32768:
+                raise ClientError("oidc_response_invalid")
+    except ClientError:
+        raise
+    except Exception as exc:
+        raise ClientError("oidc_request_failed") from exc
+    try:
+        value = json.loads(data.decode(), object_pairs_hook=_no_duplicates)
+        token = value["value"]
+    except Exception as exc:
+        raise ClientError("oidc_response_invalid") from exc
+    if not isinstance(token, str) or len(token) > 16384 or token.count(".") != 2:
+        raise ClientError("oidc_token_invalid")
+    return token
+
+
+def _no_duplicates(pairs):
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError("duplicate")
+        out[key] = value
+    return out
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ClientError("oidc_redirect_forbidden")
+
+
+def invoke(action_id: str, github_token: str, oidc_jwt: str, artifact_id: int | None, artifact_fd: int | None) -> dict:
+    trust_class = ACTION_CLASSES.get(action_id)
+    if trust_class is None:
+        raise ClientError("unknown_action")
+    artifact_mode = action_id in ARTIFACT_ACTIONS
+    if artifact_mode != (artifact_id is not None and artifact_fd is not None):
+        raise ClientError("artifact_contract_mismatch")
+    request = {"version": 1, "action_id": action_id, "oidc_jwt": oidc_jwt, "github_token": github_token}
+    if artifact_mode:
+        request["artifact_id"] = artifact_id
+    packet = json.dumps(request, separators=(",", ":")).encode()
+    if len(packet) > 65536:
+        raise ClientError("request_too_large")
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    client.settimeout(10)
+    client.connect(f"/run/ken-op-broker/{trust_class}.sock")
+    ancillary = []
+    if artifact_fd is not None:
+        ancillary = [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [artifact_fd]))]
+    client.sendmsg([packet], ancillary)
+    for key in tuple(request):
+        if key.endswith("token") or key == "oidc_jwt": request[key] = ""
+    data = client.recv(MAX_RESPONSE + 1)
+    client.close()
+    if len(data) > MAX_RESPONSE:
+        raise ClientError("response_too_large")
+    value = json.loads(data.decode(), object_pairs_hook=_no_duplicates)
+    if set(value) != {"version", "request_id", "status", "reason_code"} or value["version"] != 1 or value["status"] not in {"accepted", "succeeded", "rejected", "failed"}:
+        raise ClientError("response_invalid")
+    return value
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action_id", choices=sorted(ACTION_CLASSES))
+    parser.add_argument("--artifact-id", type=int)
+    parser.add_argument("--artifact-fd", type=int)
+    parser.add_argument("--github-token-fd", type=int)
+    args = parser.parse_args(argv)
+    trust_class = ACTION_CLASSES[args.action_id]
+    audience = f"https://ken.so/actions/op-broker/{trust_class}"
+    try:
+        oidc = request_oidc(audience)
+        github_token = os.read(args.github_token_fd, 4097).decode() if args.github_token_fd is not None else os.environ.get("GITHUB_TOKEN", "")
+        if not github_token or len(github_token) > 4096:
+            raise ClientError("github_token_invalid")
+        result = invoke(args.action_id, github_token, oidc, args.artifact_id, args.artifact_fd)
+        print(json.dumps(result, separators=(",", ":")))
+        return 0 if result["status"] == "succeeded" else 1
+    except (ClientError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        print('{"version":1,"request_id":"client","status":"failed","reason_code":"client_failure"}')
+        return 1
+    finally:
+        if args.github_token_fd is not None:
+            try: os.close(args.github_token_fd)
+            except OSError: pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

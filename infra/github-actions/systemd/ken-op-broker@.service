@@ -1,0 +1,62 @@
+[Unit]
+Description=Ken %i 1Password broker
+Requires=ken-op-broker@%i.socket ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+After=network-online.target ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+Slice=ken-actions-deploy-brokers.slice
+Sockets=ken-op-broker@%i.socket
+ExecStart=/usr/local/bin/ken-op-broker serve --policy /etc/ken-op-broker/op-broker-policy.yaml --runtime-lock /etc/ken-op-broker/broker-runtime.lock.yaml --socket /run/ken-op-broker/%i.sock --state-dir /var/lib/ken-op-broker/%i --credential-dir ${CREDENTIALS_DIRECTORY}
+LoadCredentialEncrypted=op-service-account-token:/etc/credstore.encrypted/ken-op-%i.token
+RuntimeDirectory=ken-op-broker/%i
+RuntimeDirectoryMode=0700
+StateDirectory=ken-op-broker/%i
+StateDirectoryMode=0700
+CacheDirectory=ken-op-broker/%i
+CacheDirectoryMode=0700
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+KillMode=mixed
+KillSignal=SIGTERM
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_KILL CAP_SETGID CAP_SETUID
+AmbientCapabilities=
+SecureBits=noroot-locked
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=default
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @network-io @process setuid setgid setgroups prctl pidfd_open
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/ken-op-broker /usr/local/bin/ken-op-broker /usr/local/libexec/ken-actions
+ReadWritePaths=/run/ken-op-broker/%i /var/lib/ken-op-broker/%i /var/cache/ken-op-broker/%i
+LimitNOFILE=1024
+LimitNPROC=128
+MemoryMax=768M
+MemorySwapMax=0
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""Fixed coordinator primitives for the sole production-build action.
+
+The runner cannot call this helper directly. The broker launches it only after
+peer, OIDC, live-job, replay, source, policy, and exclusive-lease gates pass.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import sys
+from typing import Iterable, Sequence
+
+REGISTRY = "ghcr.io/ken-technology/ken-frontend"
+GHCR_HOSTS = frozenset({"ghcr.io", "pkg-containers.githubusercontent.com"})
+ALLOWED_METHODS = frozenset({"GET", "HEAD", "POST", "PATCH", "PUT"})
+PHASES = (
+    "authorized", "source_authenticated", "dependencies_acquired", "secret_build_complete",
+    "builder_reaped", "leakage_scan_passed", "source_maps_uploaded", "registry_pushed",
+    "registry_read_back", "token_destroyed", "deployed", "health_passed", "cleaned",
+)
+SHA1 = re.compile(r"^[0-9a-f]{40}$")
+SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+class ReleaseError(Exception):
+    pass
+
+
+class ReleaseStateMachine:
+    def __init__(self):
+        self.index = 0
+        self.complete = False
+        self.scan_evidence: str | None = None
+
+    def advance(self, phase: str, *, evidence_sha256: str | None = None) -> None:
+        if self.complete or self.index >= len(PHASES) or phase != PHASES[self.index]:
+            raise ReleaseError("phase_order_invalid")
+        if phase == "leakage_scan_passed":
+            if evidence_sha256 is None or not re.fullmatch(r"[0-9a-f]{64}", evidence_sha256): raise ReleaseError("scan_evidence_invalid")
+            self.scan_evidence = evidence_sha256
+        self.index += 1
+        self.complete = self.index == len(PHASES)
+
+
+class EphemeralRegistryBearer:
+    """One-phase package bearer that can be destroyed and never re-read."""
+    def __init__(self, token: bytes):
+        if not token or len(token) > 4096 or b"\x00" in token or b"\n" in token:
+            raise ReleaseError("registry_token_invalid")
+        self._value = bytearray(token); self._opened = False; self._destroyed = False
+
+    def open_after_scan(self, machine: ReleaseStateMachine) -> bytes:
+        if self._destroyed or self._opened or machine.scan_evidence is None or machine.index < PHASES.index("leakage_scan_passed") + 1 or machine.index > PHASES.index("registry_read_back"):
+            raise ReleaseError("registry_token_phase_invalid")
+        self._opened = True
+        return bytes(self._value)
+
+    def destroy(self) -> None:
+        for index in range(len(self._value)): self._value[index] = 0
+        self._destroyed = True
+
+    @property
+    def destroyed(self) -> bool:
+        return self._destroyed and not any(self._value)
+
+
+def derived_tag(source_sha: str) -> str:
+    if not SHA1.fullmatch(source_sha):
+        raise ReleaseError("source_sha_invalid")
+    return "sha-" + source_sha
+
+
+def validate_registry_request(method: str, host: str, path: str, source_sha: str) -> None:
+    tag = derived_tag(source_sha)
+    if method not in ALLOWED_METHODS or host not in GHCR_HOSTS:
+        raise ReleaseError("registry_authority_invalid")
+    if not path.startswith("/v2/ken-technology/ken-frontend/") or ".." in path or "//" in path:
+        raise ReleaseError("registry_path_invalid")
+    if method in {"PUT", "PATCH", "POST"} and ("latest" in path or ("manifests/" in path and tag not in path and not SHA256_DIGEST.search(path))):
+        raise ReleaseError("registry_mutation_invalid")
+    if method == "DELETE":
+        raise ReleaseError("registry_delete_forbidden")
+
+
+def validate_build_plan(plan: dict) -> None:
+    exact = {
+        "command": ["pnpm", "build"],
+        "network": "none",
+        "secret_id": "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+        "secret_target": "/run/secrets/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+        "secret_mode": "0400",
+        "secret_required": True,
+        "remote": False,
+        "cache_export": False,
+        "extra_secrets": [],
+    }
+    if plan != exact:
+        raise ReleaseError("build_plan_invalid")
+
+
+def _needles(secret: bytes) -> tuple[bytes, bytes, bytes]:
+    if not secret or len(secret) > 65536:
+        raise ReleaseError("secret_size_invalid")
+    return secret, base64.b64encode(secret), secret.hex().encode("ascii")
+
+
+def scan_paths(paths: Iterable[Path], secret: bytes) -> None:
+    needles = _needles(secret)
+    overlap = max(map(len, needles)) - 1
+    for path in paths:
+        if path.is_symlink() or not path.is_file():
+            raise ReleaseError("scan_path_invalid")
+        tail = b""
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                haystack = tail + chunk
+                if any(needle in haystack for needle in needles):
+                    raise ReleaseError("secret_leak_detected")
+                tail = haystack[-overlap:] if overlap else b""
+
+
+def _regular_files(root: Path) -> list[Path]:
+    if root.is_symlink() or not root.is_dir(): raise ReleaseError("scan_root_invalid")
+    files: list[Path] = []
+    for directory, names, filenames in os.walk(root, followlinks=False):
+        base = Path(directory)
+        for name in names:
+            candidate = base / name
+            if candidate.is_symlink(): continue
+        for name in filenames:
+            candidate = base / name
+            if candidate.is_symlink(): continue
+            if not candidate.is_file(): raise ReleaseError("scan_path_invalid")
+            files.append(candidate)
+    return files
+
+
+def complete_oci_leakage_gate(oci_layout: Path, source_sha: str, secret: bytes, scratch: Path,
+                              source_maps: Path, build_log: Path, cache_metadata: Path) -> str:
+    """Unpack and scan every OCI authority before registry capability exists."""
+    if not SHA1.fullmatch(source_sha) or scratch.exists() or any(path.is_symlink() for path in (oci_layout, source_maps, build_log, cache_metadata)):
+        raise ReleaseError("oci_scan_input_invalid")
+    scratch.mkdir(mode=0o700)
+    bundle = scratch / "bundle"
+    result = __import__("subprocess").run(
+        ["/usr/bin/umoci", "unpack", "--rootless", "--image", f"{oci_layout}:sha-{source_sha}", str(bundle)],
+        stdin=__import__("subprocess").DEVNULL, stdout=__import__("subprocess").DEVNULL, stderr=__import__("subprocess").DEVNULL,
+        env={"HOME":"/nonexistent","LANG":"C.UTF-8","PATH":"/usr/bin:/bin"}, timeout=300, check=False,
+    )
+    if result.returncode != 0: raise ReleaseError("oci_unpack_failed")
+    required = [oci_layout / "oci-layout", oci_layout / "index.json", build_log, cache_metadata]
+    if any(path.is_symlink() or not path.is_file() for path in required) or not source_maps.is_dir() or not (bundle / "rootfs").is_dir():
+        raise ReleaseError("oci_scan_coverage_invalid")
+    paths = required + _regular_files(oci_layout / "blobs") + _regular_files(bundle / "rootfs") + _regular_files(source_maps)
+    if not _regular_files(oci_layout / "blobs") or not _regular_files(bundle / "rootfs") or not _regular_files(source_maps):
+        raise ReleaseError("oci_scan_coverage_invalid")
+    scan_paths(paths, secret)
+    canonical = "\n".join(sorted(str(path.resolve()) for path in paths)).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def canonical_manifest_digest(manifest: bytes) -> str:
+    try:
+        value = json.loads(manifest.decode(), object_pairs_hook=_no_duplicates)
+    except Exception as exc:
+        raise ReleaseError("manifest_invalid") from exc
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _no_duplicates(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate key")
+        result[key] = value
+    return result
+
+
+def persist_digest_state(path: Path, identity: dict, digest: str) -> None:
+    allowed = {"repository_id", "run_id", "run_attempt", "check_run_id", "action_id", "source_sha"}
+    if set(identity) != allowed or not SHA256_DIGEST.fullmatch(digest):
+        raise ReleaseError("digest_state_invalid")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_name("." + path.name + ".new")
+    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        data = json.dumps({**identity, "image_digest": digest}, sort_keys=True, separators=(",", ":")).encode()
+        os.write(fd, data); os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(temporary, path)
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try: os.fsync(directory)
+    finally: os.close(directory)
+
+
+def guarded_cleanup(path: Path, root: Path) -> None:
+    root_real = root.resolve(strict=True)
+    if root.is_symlink() or path.is_symlink() or not path.exists():
+        raise ReleaseError("cleanup_path_invalid")
+    path_real = path.resolve(strict=True)
+    if path_real.parent != root_real or path_real == root_real or not (path_real / ".ken-production-request").is_file():
+        raise ReleaseError("cleanup_path_invalid")
+    shutil.rmtree(path_real)
+
+
+def validate_identity_separation(uids: Sequence[int]) -> None:
+    if len(uids) != 5 or len(set(uids)) != 5 or any(uid <= 0 for uid in uids):
+        raise ReleaseError("identity_separation_invalid")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    scan = sub.add_parser("scan")
+    scan.add_argument("--secret-fd", type=int, required=True)
+    scan.add_argument("paths", nargs="+", type=Path)
+    digest = sub.add_parser("digest")
+    digest.add_argument("manifest", type=Path)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "scan":
+            secret = os.read(args.secret_fd, 65537)
+            if len(secret) > 65536: raise ReleaseError("secret_size_invalid")
+            scan_paths(args.paths, secret)
+            return 0
+        print(canonical_manifest_digest(args.manifest.read_bytes()))
+        return 0
+    except (ReleaseError, OSError):
+        return 1
+    finally:
+        if getattr(args, "secret_fd", None) is not None:
+            try: os.close(args.secret_fd)
+            except OSError: pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

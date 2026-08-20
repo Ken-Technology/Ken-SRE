@@ -1,0 +1,50 @@
+[Unit]
+Description=Ken fixed broker transaction %i
+PartOf=ken-op-broker-production.service
+Requires=ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+After=ken-actions-guest-firewall.service ken-actions-guest-runtime-verify.service
+ConditionPathExists=/run/ken-op-broker/production/requests/%i/transaction.ready
+
+[Service]
+Type=exec
+User=root
+Group=root
+UMask=0077
+Slice=ken-actions-deploy-transactions.slice
+ExecStart=/usr/local/bin/ken-op-broker execute-transaction --transaction-id %i --policy /etc/ken-op-broker/op-broker-policy.yaml
+StandardInput=null
+StandardOutput=null
+StandardError=null
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
+AmbientCapabilities=
+Environment=HOME=/nonexistent LANG=C.UTF-8 PATH=/usr/bin:/bin
+LimitCORE=0
+LimitNOFILE=256
+LimitNPROC=64
+MemoryMax=3584M
+MemorySwapMax=0
+CPUQuota=125%
+TasksMax=512
+TimeoutStartSec=1200s
+KillMode=control-group
