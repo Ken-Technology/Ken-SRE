@@ -161,7 +161,7 @@ for text in (lock_text, policy_text):
 lock = yaml.load(lock_text, Loader=StrictLoader)
 policy = yaml.load(policy_text, Loader=StrictLoader)
 assert lock["schema_version"] == 1
-assert lock["plan_sha256"] == "00e93ef99f75e4101028a4838156c730f4d6bb306f20e5340bf4812128171d0f"
+assert lock["plan_sha256"] == "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658"
 required = {"1password-cli", "python", "pyyaml", "pyjwt", "cryptography", "ca-certificates", "git", "systemd", "buildkit", "node", "pnpm", "zip-safety"}
 components = {x["id"]: x for x in lock["components"]}
 assert required <= components.keys()
@@ -237,6 +237,35 @@ assert set(actions) == {
     "ken-website-production-deploy",
 }
 assert actions["ken-frontend-production-release"]["input_mode"] == "production_build"
+frontend_build = actions["ken-frontend-production-release"]["production_build"]
+assert frontend_build["firewall_phases"] == {
+    "node-base-read": {"uid": 22201, "targets": ["node-registry", "node-registry-auth"]},
+    "package-read": {"uid": 22201, "targets": ["package-read"]},
+    "build-offline": {"uid": 22201, "targets": []},
+    "posthog-upload": {"uid": 22202, "targets": ["posthog-upload"]},
+    "ghcr-write": {"uid": 22003, "targets": ["ghcr", "ghcr-storage"]},
+    "frontend-deploy": {"uid": 22203, "targets": ["frontend-deploy"]},
+    "frontend-public-health": {"uid": 22203, "targets": ["frontend-public-health"]},
+}
+assert policy["firewall_phase_interface"]["profiles"]["frontend-production-digest-deploy"] == list(frontend_build["firewall_phases"])
+assert frontend_build["receipt_contract"] == {
+    "schema_version": 2,
+    "plan_sha256": "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658",
+    "policy_binding": "root-owned-runtime-policy-sha256",
+    "contract_sha256": "d5ebeb58afb5f5e24bc1b6a6e74934ee3a22ae337b103a085d2df9a5776db63c",
+    "action_id": "ken-frontend-production-release",
+    "data_bytes_max": 16384,
+    "receipt_bytes_max": 16384,
+    "receipt_owner_uid": 0,
+    "receipt_owner_gid": 0,
+    "receipt_mode": "0600",
+    "chain": "sha256-canonical-json-with-external-root-authority",
+    "phase_authority": "root-owned-0600-canonical-json",
+    "chronology": "one-boot-strict-monotonic",
+    "runner_visible": False,
+    "phases": ["source", "build", "scan", "upload", "registry", "token-destroy", "digest", "deploy-health", "cleanup"],
+}
+assert contract["firewall_phase_interface"]["frontend_phase_ownership"] == frontend_build["firewall_phases"]
 beehiiv = actions["ken-website-beehiiv-production-sync"]
 assert beehiiv["input_mode"] == "trusted_generation"
 assert "source_is_deployable" not in beehiiv
@@ -344,6 +373,24 @@ frontend = load("ken_frontend_release_test", "ken-frontend-production-release")
 uploader = load("ken_frontend_sourcemap_test", "ken-frontend-source-map-upload")
 
 class ProtocolTests(unittest.TestCase):
+    def test_frontend_source_authority_is_broker_rooted_and_rejects_object_alias(self):
+        self.assertEqual(
+            broker.FRONTEND_RECEIPT_CONTRACT_SHA256,
+            frontend.RECEIPT_CONTRACT_SHA256,
+        )
+        policy = broker.load_policy(policy_path, allow_nonroot=True)
+        action = policy.actions["ken-frontend-production-release"]
+        raw = copy.deepcopy(action.raw)
+        raw["production_build"]["variables_manifest_sha256"] = "a" * 64
+        bound = broker.dataclasses.replace(action, raw=raw)
+        source_sha = raw["repository"]["source_commit_sha"]
+        aliased_tree = raw["repository"]["workflow_blob_sha"]
+        with self.assertRaisesRegex(broker.Reject, "source_authority_invalid"):
+            broker.write_source_phase_authority(
+                Path("/not-opened"), "b" * 64, bound, source_sha,
+                aliased_tree, "c" * 64,
+            )
+
     def setUp(self):
         self.policy = broker.load_policy(policy_path, allow_nonroot=True)
         self.action = self.policy.actions["ken-frontend-production-release"]
@@ -517,6 +564,9 @@ class ProtocolTests(unittest.TestCase):
         changed = copy.deepcopy(original); changed["schema_version"] = True; mutations.append(changed)
         changed = copy.deepcopy(original); changed["schema_version"] = 1.0; mutations.append(changed)
         changed = copy.deepcopy(original); changed["compatibility"]["task4_consumer_contract"]["bind_exact_lock_sha256"] = 1; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["runtime_contract"]["firewall_phase_interface"]["frontend_phase_ownership"]["ghcr-write"]["uid"] = 22202; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["runtime_contract"]["firewall_phase_interface"]["frontend_phase_ownership"]["build-offline"]["targets"] = ["package-read"]; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["runtime_contract"]["firewall_phase_interface"]["frontend_phase_ownership"]["posthog-upload"]["extra"] = True; mutations.append(changed)
         with tempfile.TemporaryDirectory() as directory:
             for index, value in enumerate(mutations):
                 target = Path(directory) / f"mutated-{index}.yaml"; target.write_text(yaml.safe_dump(value, sort_keys=False))
@@ -605,6 +655,31 @@ class ProtocolTests(unittest.TestCase):
                     value["actions"][index]["trusted_generation"]["transport"][field] = scalar
                     target.write_text(yaml.safe_dump(value, sort_keys=False))
                     with self.subTest(field=field, scalar=scalar), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
+
+    def test_frontend_policy_receipt_firewall_and_hash_schema_mutations_fail_closed(self):
+        raw = yaml.safe_load(policy_path.read_text())
+        index = next(index for index, item in enumerate(raw["actions"]) if item["action_id"] == "ken-frontend-production-release")
+        mutations = {
+            "ghcr_uid_crossover": lambda build: build["firewall_phases"]["ghcr-write"].__setitem__("uid", 22202),
+            "uploader_uid_crossover": lambda build: build["firewall_phases"]["posthog-upload"].__setitem__("uid", 22003),
+            "builder_uid_crossover": lambda build: build["firewall_phases"]["package-read"].__setitem__("uid", 22203),
+            "offline_uid_crossover": lambda build: build["firewall_phases"]["build-offline"].__setitem__("uid", 22203),
+            "offline_target": lambda build: build["firewall_phases"]["build-offline"]["targets"].append("package-read"),
+            "receipt_extra_key": lambda build: build["receipt_contract"].__setitem__("signature", "caller"),
+            "receipt_bool_version": lambda build: build["receipt_contract"].__setitem__("schema_version", True),
+            "receipt_runner_visible": lambda build: build["receipt_contract"].__setitem__("runner_visible", True),
+            "receipt_phase_reorder": lambda build: build["receipt_contract"]["phases"].reverse(),
+            "receipt_limit_float": lambda build: build["receipt_contract"].__setitem__("data_bytes_max", 16384.0),
+            "firewall_extra_key": lambda build: build["firewall_phases"]["ghcr-write"].__setitem__("profile", "broad"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "policy.yaml"
+            for name, mutate in mutations.items():
+                value = copy.deepcopy(raw)
+                mutate(value["actions"][index]["production_build"])
+                target.write_text(yaml.safe_dump(value, sort_keys=False))
+                with self.subTest(name=name), self.assertRaises(broker.Reject):
+                    broker.load_policy(target, allow_nonroot=True)
 
     def test_website_wrapper_parses_only_reviewed_ssh_fields(self):
         argv = ["--broker-action", "ken-website-production-deploy", "--input-fd", "3", "--rendered-fd", "4"]
@@ -766,20 +841,20 @@ class ProtocolTests(unittest.TestCase):
     def test_deploy_leases_exclusive_and_recoverable(self):
         with tempfile.TemporaryDirectory() as td:
             gate = broker.DeployLeaseGate(Path(td))
-            one = gate.acquire("ordinary", "one", block=False)
-            two = gate.acquire("ordinary", "two", block=False)
+            one = gate.acquire("ordinary", "1" * 64, block=False)
+            two = gate.acquire("ordinary", "2" * 64, block=False)
             with self.assertRaises(broker.Reject):
-                gate.acquire("ordinary", "three", block=False)
+                gate.acquire("ordinary", "3" * 64, block=False)
             one.release(); two.release()
-            exclusive = gate.acquire("production_build", "prod", block=False)
+            exclusive = gate.acquire("production_build", "4" * 64, block=False)
             with self.assertRaises(broker.Reject):
-                gate.acquire("ordinary", "late", block=False)
+                gate.acquire("ordinary", "5" * 64, block=False)
             exclusive.release()
             gate.recover()
-            gate.acquire("ordinary", "after", block=False).release()
+            gate.acquire("ordinary", "6" * 64, block=False).release()
 
     def test_safe_response_and_log_redact_all_bearers_and_outputs(self):
-        response = broker.safe_response("req-123", "rejected", "jwt_invalid")
+        response = broker.safe_response("7" * 64, "rejected", "jwt_invalid")
         self.assertEqual(set(response), {"version", "request_id", "status", "reason_code"})
         canaries = ["jwt.canary.signature", "ghs_CANARY", "ops_CANARY", "rendered-CANARY", "stdout-CANARY"]
         text = broker.safe_log({"request_id": "req-123", "status": "rejected", "reason_code": "jwt_invalid", "oidc_jwt": canaries[0], "stdout": canaries[-1]})
@@ -889,6 +964,703 @@ class DownloaderTests(unittest.TestCase):
         self.assertNotIn("Authorization", headers)
 
 class FrontendTests(unittest.TestCase):
+    def test_frontend_root_runtime_and_authority_contract_is_not_caller_attested(self):
+        import inspect
+        self.assertEqual(broker.SAFE_REQUEST_ID.pattern, r"^[0-9a-f]{64}$")
+        self.assertRegex(broker.new_request_id(), r"^[0-9a-f]{64}$")
+        self.assertEqual(set(frontend.FRONTEND_FIREWALL_PHASES), {
+            "node-base-read", "package-read", "build-offline", "posthog-upload", "ghcr-write",
+            "frontend-deploy", "frontend-public-health",
+        })
+        self.assertNotIn("observation", inspect.signature(frontend.canonical_phase_data).parameters)
+        self.assertTrue(callable(frontend.observe_phase_start))
+        self.assertEqual(frontend.PLAN_SHA256, "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658")
+
+    def test_frontend_runtime_observer_reads_systemd_proc_cgroup_and_firewall(self):
+        request_id = "a" * 64
+        source_sha = "b" * 40
+        phase = "build"
+        unit, slice_name, control_group, dedicated = frontend._expected_runtime(phase, request_id)
+        self.assertEqual(control_group, f"/ken.slice/ken-actions.slice/ken-actions-deploy.slice/{slice_name}/{unit}")
+        systemd_start = {
+            "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
+            "Slice": slice_name, "ControlGroup": control_group, "User": "ken-fe-builder",
+            "ExecMainPID": "4242", "ExecMainStartTimestampMonotonic": "100",
+            "ExecMainExitTimestampMonotonic": "0", "Result": "success",
+        }
+        process = {
+            "uid": frontend.RECEIPT_ACTOR_UIDS[phase],
+            "boot_id": "12345678-1234-1234-1234-123456789abc",
+            "start_ticks": 777, "control_group": control_group,
+            "fd_set_sha256": "4" * 64,
+        }
+        captured = {}
+        with mock.patch.object(frontend.os, "geteuid", return_value=frontend.RECEIPT_OWNER_UID), mock.patch.object(
+            frontend, "_systemd_snapshot", return_value=systemd_start
+        ) as systemd_read, mock.patch.object(frontend, "_proc_snapshot", return_value=process) as proc_read, mock.patch.object(
+            frontend, "_firewall_request", return_value="5" * 64
+        ) as firewall_read, mock.patch.object(
+            frontend, "_publish_receipt", side_effect=lambda path, data: captured.update(path=path, data=data)
+        ):
+            frontend.observe_phase_start(
+                request_id=request_id, source_sha=source_sha, phase=phase,
+                actor_pid=4242, firewall_phase="build-offline", output=Path("/root/observation"),
+            )
+        systemd_read.assert_called_once_with(unit)
+        proc_read.assert_called_once_with(4242)
+        firewall_read.assert_called_once_with(request_id, "build-offline")
+        observed = json.loads(captured["data"])
+        self.assertEqual(observed["control_group"], control_group)
+        self.assertEqual(observed["actor_start_ticks"], 777)
+
+        records = [
+            self._start_observation(phase, request_id, source_sha, name)
+            for name in frontend.RECEIPT_FIREWALL_PHASES[phase]
+        ]
+        systemd_end = {**systemd_start, "ActiveState": "inactive", "SubState": "dead", "ControlGroup": "",
+                       "ExecMainExitTimestampMonotonic": "200"}
+        with mock.patch.object(frontend, "_proc_snapshot", side_effect=frontend.ReleaseError("gone")) as proc_end, mock.patch.object(
+            frontend, "_firewall_request", return_value=None
+        ) as firewall_end, mock.patch.object(frontend, "_systemd_snapshot", return_value=systemd_end), mock.patch.object(
+            frontend, "_cgroup_empty", return_value=True
+        ) as cgroup_end:
+            finished = frontend._finish_root_observation(records, request_id=request_id, phase=phase)
+        proc_end.assert_called_once_with(4242)
+        firewall_end.assert_called_once_with(request_id, None)
+        cgroup_end.assert_called_once_with(control_group)
+        self.assertTrue(finished["process_reaped"])
+        self.assertTrue(finished["cgroup_empty_after"])
+        self.assertEqual([item["phase"] for item in finished["firewall_transitions"]], list(frontend.RECEIPT_FIREWALL_PHASES[phase]))
+
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(frontend, "PROC_ROOT", Path(td)), mock.patch.object(
+            frontend, "_proc_snapshot", side_effect=frontend.ReleaseError("malformed")
+        ):
+            (Path(td) / "4242").mkdir()
+            with self.assertRaisesRegex(frontend.ReleaseError, "runtime_process_not_reaped"):
+                frontend._finish_root_observation(records, request_id=request_id, phase=phase)
+
+        failed_end = {**systemd_end, "ActiveState": "failed"}
+        drifted_end = {**systemd_end, "ExecMainStartTimestampMonotonic": "101"}
+        for invalid_end in (failed_end, drifted_end):
+            with tempfile.TemporaryDirectory() as td, mock.patch.object(frontend, "PROC_ROOT", Path(td)), mock.patch.object(
+                frontend, "_proc_snapshot", side_effect=frontend.ReleaseError("gone")
+            ), mock.patch.object(frontend, "_firewall_request", return_value=None), mock.patch.object(
+                frontend, "_systemd_snapshot", return_value=invalid_end
+            ), mock.patch.object(frontend, "_cgroup_empty", return_value=True):
+                with self.assertRaisesRegex(frontend.ReleaseError, "runtime_end_readback_invalid"):
+                    frontend._finish_root_observation(records, request_id=request_id, phase=phase)
+
+    def test_frontend_firewall_readback_binds_active_rules_and_teardown(self):
+        request_id = "a" * 64
+        phase = "build-offline"
+        with tempfile.TemporaryDirectory() as td:
+            state = Path(td)
+            active = state / "active-requests"
+            active.mkdir(mode=0o700)
+            request = active / f"{request_id}.json"
+            request.write_text(json.dumps({
+                "schema_version": 1, "request_id": request_id,
+                "profile": "frontend-production-digest-deploy", "phase": phase,
+            }, sort_keys=True, separators=(",", ":")) + "\n")
+            rules = state / "guest-active.nft"
+            rules.write_text(f'table inet ken_actions_guest {{ comment "requests={request_id}"; }}\n')
+            os.chmod(request, 0o600); os.chmod(rules, 0o600)
+            with mock.patch.object(frontend, "FIREWALL_ACTIVE_ROOT", active), mock.patch.object(
+                frontend, "FIREWALL_ACTIVE_RULES", rules
+            ), mock.patch.object(frontend, "RECEIPT_OWNER_UID", os.geteuid()), mock.patch.object(
+                frontend, "RECEIPT_OWNER_GID", os.getegid()
+            ):
+                self.assertRegex(frontend._firewall_request(request_id, phase), r"^[0-9a-f]{64}$")
+                rules.write_text('table inet ken_actions_guest { comment "managed-by=ken-actions"; }\n')
+                with self.assertRaisesRegex(frontend.ReleaseError, "runtime_firewall_state_invalid"):
+                    frontend._firewall_request(request_id, phase)
+                request.unlink()
+                self.assertIsNone(frontend._firewall_request(request_id, None))
+                rules.write_text(f'table inet ken_actions_guest {{ comment "requests={request_id}"; }}\n')
+                with self.assertRaisesRegex(frontend.ReleaseError, "runtime_firewall_state_invalid"):
+                    frontend._firewall_request(request_id, None)
+
+    def test_frontend_cli_is_silent_and_digest_uses_preopened_fd(self):
+        import contextlib
+        script = bin_root / "ken-frontend-production-release"
+        for command in frontend.command_names():
+            result = subprocess.run([str(script), command], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            self.assertEqual((result.stdout, result.stderr), (b"", b""), command)
+        result = subprocess.run([str(script), "unknown"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        self.assertEqual((result.stdout, result.stderr), (b"", b""))
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            manifest = root / "manifest.json"; manifest.write_text('{"schemaVersion":2}')
+            output = root / "digest"; output.touch(); os.chmod(output, 0o600)
+            fd = os.open(output, os.O_WRONLY)
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with mock.patch.object(frontend, "RECEIPT_OWNER_UID", os.geteuid()), mock.patch.object(
+                frontend, "RECEIPT_OWNER_GID", os.getegid()
+            ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                self.assertEqual(frontend.main(["digest", str(manifest), "--output-fd", str(fd)]), 0)
+            self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
+            self.assertRegex(output.read_text(), r"^sha256:[0-9a-f]{64}$")
+
+    def _phase_evidence(self, phase):
+        digest = "a" * 64
+        sha = "b" * 40
+        tree_sha = "c" * 40
+        self.assertNotEqual(sha, tree_sha)
+        return {
+            "source": {
+                "repository_id": 1141163204, "commit_sha": sha, "tree_sha": tree_sha,
+                "tree_manifest_sha256": digest,
+                "workflow_blob_sha": frontend.SOURCE_BLOB_SHAS["workflow_blob_sha"],
+                "dockerfile_blob_sha": frontend.SOURCE_BLOB_SHAS["dockerfile_blob_sha"],
+                "lockfile_blob_sha": frontend.SOURCE_BLOB_SHAS["lockfile_blob_sha"],
+                "variables_manifest_sha256": digest,
+            },
+            "build": {
+                "source_sha": sha, "tree_sha": tree_sha,
+                "tree_manifest_sha256": digest,
+                "workflow_blob_sha": frontend.SOURCE_BLOB_SHAS["workflow_blob_sha"],
+                "dockerfile_blob_sha": frontend.SOURCE_BLOB_SHAS["dockerfile_blob_sha"],
+                "lockfile_blob_sha": frontend.SOURCE_BLOB_SHAS["lockfile_blob_sha"],
+                "oci_layout_sha256": digest, "source_maps_sha256": digest,
+                "oci_manifest_digest": "sha256:" + digest,
+                "provenance_sha256": digest,
+                "provenance_subject_digest": "sha256:" + digest,
+                "build_log_sha256": digest, "cache_metadata_sha256": digest,
+                "build_plan_sha256": frontend.BUILD_PLAN_SHA256,
+                "buildkit_version": "0.24.0", "buildctl_version": "0.24.0",
+                "node_version": "22.20.0", "pnpm_version": "10.28.2",
+                "base_image_digest": "sha256:aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6",
+                "platform": "linux/amd64", "variables_manifest_sha256": digest,
+            },
+            "scan": {
+                "source_sha": sha, "tree_sha": tree_sha,
+                "oci_layout_sha256": digest, "oci_manifest_digest": "sha256:" + digest,
+                "provenance_sha256": digest,
+                "provenance_subject_digest": "sha256:" + digest,
+                "scan_evidence_sha256": digest,
+                "leakage_encodings": ["raw", "canonical-base64", "lowercase-hex"],
+            },
+            "upload": {
+                "source_maps_sha256": digest, "posthog_upload_sha256": digest,
+            },
+            "registry": {
+                "registry": "ghcr.io/ken-technology/ken-frontend",
+                "image_digest": "sha256:" + digest, "manifest_digest": "sha256:" + digest,
+                "platform": "linux/amd64", "source_sha": sha, "tree_sha": tree_sha,
+                "oci_layout_sha256": digest,
+                "provenance_sha256": digest,
+                "provenance_subject_digest": "sha256:" + digest,
+                "media_type": "application/vnd.oci.image.manifest.v1+json",
+                "readback_verified": True,
+            },
+            "token-destroy": {
+                "source_sha": sha, "tree_sha": tree_sha,
+                "image_digest": "sha256:" + digest, "provenance_sha256": digest,
+                "token_descriptor_closed": True, "token_buffer_zeroed": True,
+                "token_destroyed_monotonic_ns": 64000,
+            },
+            "digest": {
+                "source_sha": sha, "tree_sha": tree_sha,
+                "image_digest": "sha256:" + digest, "provenance_sha256": digest,
+                "digest_state_sha256": digest,
+                "state_key_sha256": digest, "fsynced": True,
+                "durable_state_published_monotonic_ns": 73000,
+                "durable_state_readback_monotonic_ns": 74000,
+            },
+            "deploy-health": {
+                "source_sha": sha, "tree_sha": tree_sha,
+                "image_digest": "sha256:" + digest, "provenance_sha256": digest,
+                "deploy_receipt_sha256": digest,
+                "health_receipt_sha256": digest,
+                "deploy_completed_monotonic_ns": 80150,
+                "health_started_monotonic_ns": 80200,
+                "health_completed_monotonic_ns": 84000,
+            },
+            "cleanup": {
+                "source_sha": sha, "tree_sha": tree_sha,
+                "image_digest": "sha256:" + digest, "provenance_sha256": digest,
+                "request_state_removed": True, "source_removed": True,
+                "buildkit_removed": True, "oci_removed": True,
+                "source_maps_removed": True, "secret_mount_removed": True,
+                "descriptors_closed": True, "firewall_inactive": True,
+                "cgroups_empty": True,
+                "cleanup_completed_monotonic_ns": 94000,
+            },
+        }[phase]
+
+    def _start_observation(self, phase, request_id, source_sha, firewall_phase=None):
+        unit, slice_name, control_group, dedicated = frontend._expected_runtime(phase, request_id)
+        base = (frontend.RECEIPT_PHASES.index(phase) + 1) * 10000
+        subphase = (frontend.RECEIPT_FIREWALL_PHASES[phase].index(firewall_phase) + 1
+                    if firewall_phase is not None else 1)
+        return {
+            "schema_version": 1, "plan_sha256": frontend.PLAN_SHA256,
+            "receipt_contract_sha256": frontend.RECEIPT_CONTRACT_SHA256,
+            "request_id": request_id, "source_sha": source_sha, "phase": phase,
+            "unit": unit, "slice": slice_name, "control_group": control_group,
+            "dedicated_unit": dedicated, "actor_pid": 4242,
+            "observed_actor_uid": frontend.RECEIPT_ACTOR_UIDS[phase],
+            "boot_id": "12345678-1234-1234-1234-123456789abc",
+            "actor_start_ticks": 100, "fd_set_sha256": "1" * 64,
+            "systemd_exec_start_monotonic_usec": 100,
+            "firewall_phase": firewall_phase,
+            "firewall_request_sha256": "2" * 64 if firewall_phase else None,
+            "observed_monotonic_ns": base + subphase * 100,
+        }
+
+    def _finished_observation(self, records, request_id, phase):
+        first = records[0]
+        transitions = []
+        for record in records:
+            if record["firewall_phase"]:
+                authority = frontend.FRONTEND_FIREWALL_PHASES[record["firewall_phase"]]
+                transitions.append({
+                    "phase": record["firewall_phase"], "uid": authority["uid"],
+                    "targets": list(authority["targets"]),
+                    "activate_readback_sha256": record["firewall_request_sha256"],
+                    "activated_observed_monotonic_ns": record["observed_monotonic_ns"],
+                    "deactivated": True,
+                })
+        dedicated = first["dedicated_unit"]
+        return {
+            "unit": first["unit"], "slice": first["slice"], "control_group": first["control_group"],
+            "observed_actor_uid": first["observed_actor_uid"], "actor_pid": first["actor_pid"],
+            "boot_id": first["boot_id"], "actor_start_ticks": first["actor_start_ticks"],
+            "systemd_exec_start_monotonic_usec": 100,
+            "systemd_exec_exit_monotonic_usec": 200 if dedicated else 0,
+            "started_observed_monotonic_ns": first["observed_monotonic_ns"],
+            "completed_observed_monotonic_ns": (frontend.RECEIPT_PHASES.index(phase) + 1) * 10000 + 9000,
+            "process_reaped": True,
+            "descriptor_snapshots_sha256": "3" * 64, "descriptors_closed": True,
+            "network_authority": frontend._network_authority(phase),
+            "firewall_transitions": transitions, "firewall_inactive_after": True,
+            "cgroup_empty_after": dedicated,
+        }
+
+    def _write_observations(self, root, phase, request_id, source_sha):
+        paths = []
+        for index, firewall_phase in enumerate(frontend.RECEIPT_FIREWALL_PHASES[phase] or (None,)):
+            path = root / f"{phase}-{index}.observation"
+            value = self._start_observation(phase, request_id, source_sha, firewall_phase)
+            path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")))
+            os.chmod(path, 0o600); paths.append(path)
+        return paths
+
+    def _write_authority(self, root, phase, request_id, source_sha, evidence):
+        path = root / f"{phase}.authority"
+        observed = (frontend.RECEIPT_PHASES.index(phase) + 1) * 10000 + 5000
+        path.write_bytes(frontend.canonical_phase_authority(
+            request_id, source_sha, phase, evidence, observed,
+        ))
+        os.chmod(path, 0o600)
+        return path
+
+    def _policy_copy(self, root):
+        path = root / "op-broker-policy.yaml"
+        path.write_bytes(policy_path.read_bytes()); os.chmod(path, 0o644)
+        return path
+
+    def test_frontend_receipt_chain_is_exact_bounded_and_identity_bound(self):
+        request_id = "c" * 64
+        source_sha = "d" * 40
+        with mock.patch.object(frontend, "RECEIPT_OWNER_UID", os.geteuid()), mock.patch.object(
+            frontend, "RECEIPT_OWNER_GID", os.getegid()
+        ), mock.patch.dict(frontend.RECEIPT_ACTOR_UIDS, {phase: os.geteuid() for phase in frontend.RECEIPT_PHASES}, clear=True), mock.patch.object(
+            frontend, "_finish_root_observation", side_effect=lambda records, request_id, phase: self._finished_observation(records, request_id, phase)
+        ), tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            policy_copy = self._policy_copy(root)
+            previous = None
+            receipts = []
+            authority_paths = []
+            for phase in frontend.RECEIPT_PHASES:
+                data = root / f"{phase}.data.json"
+                evidence = self._phase_evidence(phase)
+                if phase == "source": evidence["commit_sha"] = source_sha
+                if phase in frontend.RECEIPT_PHASES:
+                    if "source_sha" in evidence: evidence["source_sha"] = source_sha
+                data.write_bytes(frontend.canonical_phase_data(
+                    request_id, source_sha, phase, evidence,
+                ))
+                os.chmod(data, 0o600)
+                observation_paths = self._write_observations(root, phase, request_id, source_sha)
+                authority = self._write_authority(root, phase, request_id, source_sha, evidence)
+                receipt = root / f"{len(receipts):02d}-{phase}.receipt.json"
+                data_fd = os.open(data, os.O_RDONLY)
+                previous_fd = os.open(previous, os.O_RDONLY) if previous else None
+                frontend.seal_phase_receipt_from_fds(
+                    request_id=request_id, source_sha=source_sha, phase=phase,
+                    data_fd=data_fd, authority_fd=os.open(authority, os.O_RDONLY),
+                    observation_fds=[os.open(path, os.O_RDONLY) for path in observation_paths],
+                    policy_fd=os.open(policy_copy, os.O_RDONLY), previous_receipt_fd=previous_fd,
+                    output=receipt,
+                )
+                with self.assertRaises(OSError): os.fstat(data_fd)
+                if previous_fd is not None:
+                    with self.assertRaises(OSError): os.fstat(previous_fd)
+                receipts.append(receipt)
+                authority_paths.append(authority)
+                previous = receipt
+            frontend.verify_receipt_chain(
+                receipts, request_id=request_id, source_sha=source_sha,
+                policy_fd=os.open(policy_copy, os.O_RDONLY),
+                authority_fds=[os.open(path, os.O_RDONLY) for path in authority_paths],
+            )
+            self.assertEqual(
+                frontend.receipt_sha256(receipts[-1]),
+                hashlib.sha256(receipts[-1].read_bytes()).hexdigest(),
+            )
+
+            replay = root / "replay.json"
+            replay.write_bytes(receipts[1].read_bytes())
+            os.chmod(replay, 0o600)
+            with self.assertRaises(frontend.ReleaseError):
+                frontend.verify_receipt_chain(
+                    [receipts[0], receipts[1], replay, *receipts[3:]], request_id=request_id,
+                    source_sha=source_sha, policy_fd=os.open(policy_copy, os.O_RDONLY),
+                    authority_fds=[os.open(path, os.O_RDONLY) for path in authority_paths],
+                )
+            mutated = root / "mutated.json"
+            value = json.loads(receipts[2].read_text())
+            value["previous_receipt_sha256"] = "f" * 64
+            mutated.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")))
+            os.chmod(mutated, 0o600)
+            with self.assertRaises(frontend.ReleaseError):
+                frontend.verify_receipt_chain(
+                    [receipts[0], receipts[1], mutated, *receipts[3:]], request_id=request_id,
+                    source_sha=source_sha, policy_fd=os.open(policy_copy, os.O_RDONLY),
+                    authority_fds=[os.open(path, os.O_RDONLY) for path in authority_paths],
+                )
+            value = json.loads(receipts[2].read_text())
+            value["caller_digest"] = "0" * 64
+            mutated.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")))
+            with self.assertRaises(frontend.ReleaseError):
+                frontend.verify_receipt_chain(
+                    [receipts[0], receipts[1], mutated, *receipts[3:]], request_id=request_id,
+                    source_sha=source_sha, policy_fd=os.open(policy_copy, os.O_RDONLY),
+                    authority_fds=[os.open(path, os.O_RDONLY) for path in authority_paths],
+                )
+            os.chmod(receipts[0], 0o640)
+            with self.assertRaises(frontend.ReleaseError):
+                frontend.verify_receipt_chain(
+                    receipts, request_id=request_id, source_sha=source_sha,
+                    policy_fd=os.open(policy_copy, os.O_RDONLY),
+                    authority_fds=[os.open(path, os.O_RDONLY) for path in authority_paths],
+                )
+
+    def test_frontend_receipt_chain_rejects_cross_phase_and_policy_drift(self):
+        request_id = "9" * 64
+        source_sha = "8" * 40
+        with mock.patch.object(frontend, "RECEIPT_OWNER_UID", os.geteuid()), mock.patch.object(
+            frontend, "RECEIPT_OWNER_GID", os.getegid()
+        ), mock.patch.dict(frontend.RECEIPT_ACTOR_UIDS, {phase: os.geteuid() for phase in frontend.RECEIPT_PHASES}, clear=True), mock.patch.object(
+            frontend, "_finish_root_observation", side_effect=lambda records, request_id, phase: self._finished_observation(records, request_id, phase)
+        ), tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            policy_copy = self._policy_copy(root)
+            previous = None
+            receipts = []
+            authority_paths = []
+            for phase in frontend.RECEIPT_PHASES:
+                evidence = self._phase_evidence(phase)
+                if phase == "source": evidence["commit_sha"] = source_sha
+                if phase in frontend.RECEIPT_PHASES:
+                    if "source_sha" in evidence: evidence["source_sha"] = source_sha
+                data = root / f"{phase}.data"
+                data.write_bytes(frontend.canonical_phase_data(
+                    request_id, source_sha, phase, evidence,
+                ))
+                os.chmod(data, 0o600)
+                observation_paths = self._write_observations(root, phase, request_id, source_sha)
+                authority = self._write_authority(root, phase, request_id, source_sha, evidence)
+                receipt = root / f"{len(receipts):02d}-{phase}.receipt"
+                frontend.seal_phase_receipt_from_fds(
+                    request_id=request_id, source_sha=source_sha, phase=phase,
+                    data_fd=os.open(data, os.O_RDONLY), authority_fd=os.open(authority, os.O_RDONLY),
+                    observation_fds=[os.open(path, os.O_RDONLY) for path in observation_paths],
+                    policy_fd=os.open(policy_copy, os.O_RDONLY),
+                    previous_receipt_fd=os.open(previous, os.O_RDONLY) if previous else None,
+                    output=receipt,
+                )
+                receipts.append(receipt); authority_paths.append(authority); previous = receipt
+            for phase, key in (("source", "commit_sha"), ("build", "tree_manifest_sha256"), ("scan", "oci_layout_sha256"), ("upload", "source_maps_sha256"), ("registry", "image_digest"), ("registry", "provenance_sha256")):
+                index = frontend.RECEIPT_PHASES.index(phase)
+                values = [json.loads(path.read_text()) for path in receipts]
+                if key == "commit_sha":
+                    values[index]["evidence"][key] = "7" * 40
+                elif key == "image_digest":
+                    values[index]["evidence"][key] = "sha256:" + "7" * 64
+                    values[index]["evidence"]["manifest_digest"] = "sha256:" + "7" * 64
+                    values[index]["evidence"]["provenance_subject_digest"] = "sha256:" + "7" * 64
+                    for downstream_phase in ("token-destroy", "digest", "deploy-health", "cleanup"):
+                        values[frontend.RECEIPT_PHASES.index(downstream_phase)]["evidence"]["image_digest"] = "sha256:" + "7" * 64
+                elif phase == "registry" and key == "provenance_sha256":
+                    values[index]["evidence"][key] = "7" * 64
+                    for downstream_phase in ("token-destroy", "digest", "deploy-health", "cleanup"):
+                        values[frontend.RECEIPT_PHASES.index(downstream_phase)]["evidence"]["provenance_sha256"] = "7" * 64
+                else:
+                    values[index]["evidence"][key] = "7" * 64
+                changed_receipts = []
+                previous_digest = None
+                for ordinal, value in enumerate(values):
+                    value["previous_receipt_sha256"] = previous_digest
+                    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+                    changed = root / f"changed-{phase}-{ordinal}.receipt"
+                    changed.write_bytes(encoded); os.chmod(changed, 0o600)
+                    changed_receipts.append(changed)
+                    previous_digest = hashlib.sha256(encoded).hexdigest()
+                with self.subTest(phase=phase), self.assertRaises(frontend.ReleaseError):
+                    frontend.verify_receipt_chain(
+                        changed_receipts,
+                        request_id=request_id, source_sha=source_sha,
+                        policy_fd=os.open(policy_copy, os.O_RDONLY),
+                        authority_fds=[os.open(path, os.O_RDONLY) for path in authority_paths],
+                    )
+            for header in ("plan_sha256", "receipt_contract_sha256", "policy_sha256"):
+                values = [json.loads(path.read_text()) for path in receipts]
+                previous_digest = None
+                changed_receipts = []
+                for ordinal, value in enumerate(values):
+                    value[header] = "7" * 64
+                    value["previous_receipt_sha256"] = previous_digest
+                    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+                    changed = root / f"changed-{header}-{ordinal}.receipt"
+                    changed.write_bytes(encoded); os.chmod(changed, 0o600)
+                    changed_receipts.append(changed); previous_digest = hashlib.sha256(encoded).hexdigest()
+                with self.subTest(header=header), self.assertRaises(frontend.ReleaseError):
+                    frontend.verify_receipt_chain(
+                        changed_receipts, request_id=request_id, source_sha=source_sha,
+                        policy_fd=os.open(policy_copy, os.O_RDONLY),
+                        authority_fds=[os.open(path, os.O_RDONLY) for path in authority_paths],
+                    )
+
+            # Rebuilding every related actor claim and every predecessor hash is
+            # still rejected because the root authority files remain immutable.
+            values = [json.loads(path.read_text()) for path in receipts]
+            replacement_sha = "6" * 40
+            replacement_hash = "6" * 64
+            replacement_digest = "sha256:" + replacement_hash
+            for value in values:
+                evidence = value["evidence"]
+                for key in ("tree_sha",):
+                    if key in evidence: evidence[key] = replacement_sha
+                for key in (
+                    "tree_manifest_sha256", "variables_manifest_sha256", "oci_layout_sha256",
+                    "source_maps_sha256", "build_log_sha256", "cache_metadata_sha256",
+                    "provenance_sha256", "scan_evidence_sha256", "posthog_upload_sha256",
+                    "digest_state_sha256", "state_key_sha256", "deploy_receipt_sha256",
+                    "health_receipt_sha256",
+                ):
+                    if key in evidence: evidence[key] = replacement_hash
+                for key in ("oci_manifest_digest", "provenance_subject_digest", "image_digest", "manifest_digest"):
+                    if key in evidence: evidence[key] = replacement_digest
+                value["phase_authority_sha256"] = replacement_hash
+            substituted = []
+            predecessor = None
+            for ordinal, value in enumerate(values):
+                value["previous_receipt_sha256"] = predecessor
+                encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+                path = root / f"substituted-{ordinal}.receipt"
+                path.write_bytes(encoded); os.chmod(path, 0o600)
+                substituted.append(path); predecessor = hashlib.sha256(encoded).hexdigest()
+            with self.assertRaises(frontend.ReleaseError):
+                frontend.verify_receipt_chain(
+                    substituted, request_id=request_id, source_sha=source_sha,
+                    policy_fd=os.open(policy_copy, os.O_RDONLY),
+                    authority_fds=[os.open(path, os.O_RDONLY) for path in authority_paths],
+                )
+
+    def test_frontend_root_observation_and_atomic_publish_fail_closed(self):
+        request_id = "6" * 64
+        source_sha = "5" * 40
+        phase = "source"
+        evidence = self._phase_evidence(phase); evidence["commit_sha"] = source_sha
+        with mock.patch.object(frontend, "RECEIPT_OWNER_UID", os.geteuid()), mock.patch.object(
+            frontend, "RECEIPT_OWNER_GID", os.getegid()
+        ), mock.patch.dict(frontend.RECEIPT_ACTOR_UIDS, {name: os.geteuid() for name in frontend.RECEIPT_PHASES}, clear=True), mock.patch.object(
+            frontend, "_finish_root_observation", side_effect=lambda records, request_id, phase: self._finished_observation(records, request_id, phase)
+        ), tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            policy_copy = self._policy_copy(root)
+            data = root / "data"
+            data.write_bytes(frontend.canonical_phase_data(
+                request_id, source_sha, phase, evidence,
+            ))
+            os.chmod(data, 0o600)
+            observation_paths = self._write_observations(root, phase, request_id, source_sha)
+            authority = self._write_authority(root, phase, request_id, source_sha, evidence)
+            original_write = os.write
+            with mock.patch.object(frontend.os, "write", side_effect=lambda fd, value: original_write(fd, value[:7])):
+                output = root / "short-write.receipt"
+                frontend.seal_phase_receipt_from_fds(
+                    request_id=request_id, source_sha=source_sha, phase=phase,
+                    data_fd=os.open(data, os.O_RDONLY), authority_fd=os.open(authority, os.O_RDONLY),
+                    observation_fds=[os.open(path, os.O_RDONLY) for path in observation_paths],
+                    policy_fd=os.open(policy_copy, os.O_RDONLY), previous_receipt_fd=None,
+                    output=output,
+                )
+                self.assertEqual(json.loads(output.read_text())["phase"], phase)
+            output = root / "failed-write.receipt"
+            with mock.patch.object(frontend.os, "write", side_effect=OSError("write failed")), self.assertRaises(OSError):
+                frontend.seal_phase_receipt_from_fds(
+                    request_id=request_id, source_sha=source_sha, phase=phase,
+                    data_fd=os.open(data, os.O_RDONLY), authority_fd=os.open(authority, os.O_RDONLY),
+                    observation_fds=[os.open(path, os.O_RDONLY) for path in observation_paths],
+                    policy_fd=os.open(policy_copy, os.O_RDONLY), previous_receipt_fd=None,
+                    output=output,
+                )
+            self.assertFalse(output.exists())
+            self.assertEqual(list(root.glob(".*.receipt.*.tmp")), [])
+
+    def test_frontend_phase_data_and_receipt_mutations_fail_closed(self):
+        request_id = "e" * 64
+        source_sha = "b" * 40
+        phase = "registry"
+        evidence = self._phase_evidence(phase)
+        evidence["source_sha"] = source_sha
+        canonical = frontend.canonical_phase_data(request_id, source_sha, phase, evidence)
+        parsed = frontend.parse_phase_data(canonical, request_id=request_id, source_sha=source_sha, phase=phase)
+        self.assertEqual(parsed["actor_uid"], 22003)
+
+        mutations = []
+        base = json.loads(canonical)
+        mutations.append({**base, "extra": True})
+        mutations.append({**base, "request_id": "f" * 64})
+        mutations.append({**base, "actor_uid": 22202})
+        mutations.append({**base, "evidence": {**evidence, "repository": "other"}})
+        mutations.append({**base, "evidence": {**evidence, "readback_verified": False}})
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), self.assertRaises(frontend.ReleaseError):
+                frontend.parse_phase_data(
+                    json.dumps(mutation, separators=(",", ":")).encode(),
+                    request_id=request_id, source_sha=source_sha, phase=phase,
+                )
+        with self.assertRaises(frontend.ReleaseError):
+            frontend.parse_phase_data(b"x" * 16385, request_id=request_id, source_sha=source_sha, phase=phase)
+
+        actor_supplied_observation = {**base, "root_observation": {"process_reaped": True}}
+        with self.assertRaises(frontend.ReleaseError):
+            frontend.parse_phase_data(
+                json.dumps(actor_supplied_observation, sort_keys=True, separators=(",", ":")).encode(),
+                request_id=request_id, source_sha=source_sha, phase=phase,
+            )
+
+        token_evidence = self._phase_evidence("token-destroy")
+        for key in ("token_descriptor_closed", "token_buffer_zeroed"):
+            with self.subTest(key=key), self.assertRaises(frontend.ReleaseError):
+                frontend.canonical_phase_data(
+                    request_id, source_sha, "token-destroy", {**token_evidence, key: False},
+                )
+
+    def test_frontend_receipt_commands_and_firewall_ownership_are_fixed(self):
+        self.assertEqual(
+            frontend.command_names(),
+            {"scan", "digest", "observe-start", "seal-receipt", "verify-receipts"},
+        )
+        self.assertEqual(frontend.FRONTEND_FIREWALL_PHASES, {
+            "node-base-read": {"uid": 22201, "targets": ("node-registry", "node-registry-auth")},
+            "package-read": {"uid": 22201, "targets": ("package-read",)},
+            "build-offline": {"uid": 22201, "targets": ()},
+            "posthog-upload": {"uid": 22202, "targets": ("posthog-upload",)},
+            "ghcr-write": {"uid": 22003, "targets": ("ghcr", "ghcr-storage")},
+            "frontend-deploy": {"uid": 22203, "targets": ("frontend-deploy",)},
+            "frontend-public-health": {"uid": 22203, "targets": ("frontend-public-health",)},
+        })
+        self.assertEqual(frontend.FRONTEND_FIREWALL_PHASES["build-offline"]["targets"], ())
+        self.assertEqual(frontend.FRONTEND_FIREWALL_PHASES["ghcr-write"]["uid"], 22003)
+
+    def test_frontend_final_policy_binding_is_acyclic_and_deploy_phases_are_predeclared(self):
+        import inspect
+        self.assertNotIn("EXPECTED_POLICY_SHA256", vars(frontend))
+        self.assertRegex(frontend.RECEIPT_CONTRACT_SHA256, r"^[0-9a-f]{64}$")
+        self.assertIn("authority_fd", inspect.signature(frontend.seal_phase_receipt_from_fds).parameters)
+        self.assertIn("authority_fds", inspect.signature(frontend.verify_receipt_chain).parameters)
+        self.assertEqual(frontend.RECEIPT_FIREWALL_PHASES["deploy-health"], (
+            "frontend-deploy", "frontend-public-health",
+        ))
+        self.assertEqual(frontend.FRONTEND_FIREWALL_PHASES["frontend-deploy"], {
+            "uid": 22203, "targets": ("frontend-deploy",),
+        })
+        self.assertEqual(frontend.FRONTEND_FIREWALL_PHASES["frontend-public-health"], {
+            "uid": 22203, "targets": ("frontend-public-health",),
+        })
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+            frontend, "RECEIPT_OWNER_UID", os.geteuid()
+        ), mock.patch.object(frontend, "RECEIPT_OWNER_GID", os.getegid()):
+            policy_copy = self._policy_copy(Path(td))
+            original = frontend._policy_sha256_from_fd(os.open(policy_copy, os.O_RDONLY))
+            value = yaml.safe_load(policy_copy.read_text())
+            action = next(item for item in value["actions"] if item["action_id"] == "ken-frontend-production-release")
+            action["production_build"]["phase_transport_sha256"] = "7" * 64
+            policy_copy.write_text(yaml.safe_dump(value, sort_keys=False))
+            os.chmod(policy_copy, 0o644)
+            changed = frontend._policy_sha256_from_fd(os.open(policy_copy, os.O_RDONLY))
+            self.assertNotEqual(changed, original)
+
+    def test_frontend_source_object_alias_and_unanchored_authority_fail_closed(self):
+        request_id = "4" * 64
+        source_sha = "5" * 40
+        source = self._phase_evidence("source")
+        source["commit_sha"] = source_sha
+        source["tree_sha"] = frontend.SOURCE_BLOB_SHAS["workflow_blob_sha"]
+        with self.assertRaises(frontend.ReleaseError):
+            frontend.canonical_phase_data(request_id, source_sha, "source", source)
+        self.assertTrue(callable(frontend.canonical_phase_authority))
+        self.assertTrue(callable(broker.write_source_phase_authority))
+
+    def test_frontend_chronology_requires_one_boot_and_strict_phase_order(self):
+        records = {}
+        for ordinal, phase in enumerate(frontend.RECEIPT_PHASES):
+            records[phase] = {"root_observation": {
+                "boot_id": "12345678-1234-1234-1234-123456789abc",
+                "started_observed_monotonic_ns": 1000 + ordinal * 20,
+                "completed_observed_monotonic_ns": 1010 + ordinal * 20,
+            }}
+        frontend.validate_receipt_chronology(records)
+        reversed_records = json.loads(json.dumps(records))
+        reversed_records["digest"]["root_observation"]["started_observed_monotonic_ns"] = 1
+        with self.assertRaises(frontend.ReleaseError):
+            frontend.validate_receipt_chronology(reversed_records)
+        changed_boot = json.loads(json.dumps(records))
+        changed_boot["cleanup"]["root_observation"]["boot_id"] = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        with self.assertRaises(frontend.ReleaseError):
+            frontend.validate_receipt_chronology(changed_boot)
+        build_records = [
+            self._start_observation("build", "4" * 64, "5" * 40, name)
+            for name in frontend.RECEIPT_FIREWALL_PHASES["build"]
+        ]
+        build_records[1]["observed_monotonic_ns"] = build_records[0]["observed_monotonic_ns"] - 1
+        with self.assertRaisesRegex(frontend.ReleaseError, "runtime_observation_order_invalid"):
+            frontend._finish_root_observation(
+                build_records, request_id="4" * 64, phase="build",
+            )
+
+    def test_digest_state_is_no_replace_idempotent_and_short_write_safe(self):
+        identity = {"repository_id": 1141163204, "run_id": 1, "run_attempt": 1,
+                    "check_run_id": 2, "action_id": "ken-frontend-production-release",
+                    "source_sha": "a" * 40}
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+            frontend, "RECEIPT_OWNER_UID", os.geteuid()
+        ), mock.patch.object(frontend, "RECEIPT_OWNER_GID", os.getegid()):
+            root = Path(td); os.chmod(root, 0o700)
+            state = root / "digest.json"
+            original_write = os.write
+            with mock.patch.object(frontend.os, "write", side_effect=lambda fd, value: original_write(fd, value[:7])):
+                frontend.persist_digest_state(state, identity, "sha256:" + "b" * 64)
+            expected = state.read_bytes()
+            self.assertEqual(json.loads(expected)["image_digest"], "sha256:" + "b" * 64)
+            frontend.persist_digest_state(state, identity, "sha256:" + "b" * 64)
+            self.assertEqual(state.read_bytes(), expected)
+            with self.assertRaises(frontend.ReleaseError):
+                frontend.persist_digest_state(state, identity, "sha256:" + "c" * 64)
+            self.assertEqual(state.read_bytes(), expected)
+            failed = root / "failed.json"
+            with mock.patch.object(frontend.os, "write", side_effect=OSError("forced")), self.assertRaises(OSError):
+                frontend.persist_digest_state(failed, identity, "sha256:" + "d" * 64)
+            self.assertFalse(failed.exists())
+            self.assertEqual(list(root.glob(".digest.json.*.tmp")), [])
+            self.assertEqual(list(root.glob(".failed.json.*.tmp")), [])
+
     def test_complete_oci_gate_unpacks_and_scans_all_authority_classes(self):
         secret=b"oci-canary"
         with tempfile.TemporaryDirectory() as td:
@@ -943,7 +1715,10 @@ class FrontendTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td); request=root/"request"; request.mkdir(); (request/".ken-production-request").write_text("ok")
             state=root/"state/digest.json"; identity={"repository_id":1141163204,"run_id":1,"run_attempt":1,"check_run_id":2,"action_id":"ken-frontend-production-release","source_sha":"a"*40}
-            frontend.persist_digest_state(state,identity,"sha256:"+"b"*64)
+            with mock.patch.object(frontend, "RECEIPT_OWNER_UID", os.geteuid()), mock.patch.object(
+                frontend, "RECEIPT_OWNER_GID", os.getegid()
+            ):
+                frontend.persist_digest_state(state,identity,"sha256:"+"b"*64)
             self.assertEqual(json.loads(state.read_text())["image_digest"],"sha256:"+"b"*64)
             frontend.guarded_cleanup(request,root); self.assertFalse(request.exists())
 

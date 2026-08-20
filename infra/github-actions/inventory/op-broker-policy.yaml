@@ -101,7 +101,7 @@ firewall_phase_interface:
     website-production-fixed-target: [website-ssh, ken-so-public-health, getken-ai-separation]
     beehiiv-api-fixed-target: [beehiiv-api]
     github-ssh-ken-website-fixed-target: [github-ssh]
-    frontend-production-digest-deploy: [github-read, node-base-read, package-read, posthog-upload, ghcr-write, frontend-deploy, frontend-public-health]
+    frontend-production-digest-deploy: [node-base-read, package-read, build-offline, posthog-upload, ghcr-write, frontend-deploy, frontend-public-health]
 classes:
   ci:
     audience: https://ken.so/actions/op-broker/ci
@@ -215,6 +215,30 @@ actions:
       leakage_encodings: [raw, canonical-base64, lowercase-hex]
       posthog_fields: [POSTHOG_PERSONAL_API_KEY, POSTHOG_PROJECT_ID]
       build_field: NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+      firewall_phases:
+        node-base-read: {uid: 22201, targets: [node-registry, node-registry-auth]}
+        package-read: {uid: 22201, targets: [package-read]}
+        build-offline: {uid: 22201, targets: []}
+        posthog-upload: {uid: 22202, targets: [posthog-upload]}
+        ghcr-write: {uid: 22003, targets: [ghcr, ghcr-storage]}
+        frontend-deploy: {uid: 22203, targets: [frontend-deploy]}
+        frontend-public-health: {uid: 22203, targets: [frontend-public-health]}
+      receipt_contract:
+        schema_version: 2
+        plan_sha256: 75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658
+        policy_binding: root-owned-runtime-policy-sha256
+        contract_sha256: d5ebeb58afb5f5e24bc1b6a6e74934ee3a22ae337b103a085d2df9a5776db63c
+        action_id: ken-frontend-production-release
+        data_bytes_max: 16384
+        receipt_bytes_max: 16384
+        receipt_owner_uid: 0
+        receipt_owner_gid: 0
+        receipt_mode: '0600'
+        chain: sha256-canonical-json-with-external-root-authority
+        phase_authority: root-owned-0600-canonical-json
+        chronology: one-boot-strict-monotonic
+        runner_visible: false
+        phases: [source, build, scan, upload, registry, token-destroy, digest, deploy-health, cleanup]
   - action_id: ken-vexa-mcp-auth-production-deploy
     enabled: false
     blocked_reason_code: vexa_host_key_runtime_identity_and_transaction_transport_required

@@ -14,9 +14,12 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import stat
+import subprocess
 import sys
+import time
 from typing import Iterable, Sequence
 
 REGISTRY = "ghcr.io/ken-technology/ken-frontend"
@@ -28,11 +31,120 @@ PHASES = (
     "registry_read_back", "token_destroyed", "deployed", "health_passed", "cleaned",
 )
 SHA1 = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+SAFE_REQUEST_ID = re.compile(r"^[0-9a-f]{64}$")
+PHASE_DATA_MAX = 16384
+RECEIPT_MAX = 16384
+POLICY_MAX = 1024 * 1024
+RECEIPT_OWNER_UID = 0
+RECEIPT_OWNER_GID = 0
+PLAN_SHA256 = "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658"
+SYSTEMCTL = "/usr/bin/systemctl"
+PROC_ROOT = Path("/proc")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+FIREWALL_ACTIVE_ROOT = Path("/var/lib/ken-actions-firewall/active-requests")
+FIREWALL_ACTIVE_RULES = Path("/var/lib/ken-actions-firewall/guest-active.nft")
+FIREWALL_RULES_MAX = 1024 * 1024
+RECEIPT_PHASES = (
+    "source", "build", "scan", "upload", "registry", "token-destroy",
+    "digest", "deploy-health", "cleanup",
+)
+RECEIPT_ACTOR_UIDS = {
+    "source": 22003,
+    "build": 22201,
+    "scan": 0,
+    "upload": 22202,
+    "registry": 22003,
+    "token-destroy": 22003,
+    "digest": 0,
+    "deploy-health": 22203,
+    "cleanup": 0,
+}
+FRONTEND_FIREWALL_PHASES = {
+    "node-base-read": {"uid": 22201, "targets": ("node-registry", "node-registry-auth")},
+    "package-read": {"uid": 22201, "targets": ("package-read",)},
+    "build-offline": {"uid": 22201, "targets": ()},
+    "posthog-upload": {"uid": 22202, "targets": ("posthog-upload",)},
+    "ghcr-write": {"uid": 22003, "targets": ("ghcr", "ghcr-storage")},
+    "frontend-deploy": {"uid": 22203, "targets": ("frontend-deploy",)},
+    "frontend-public-health": {"uid": 22203, "targets": ("frontend-public-health",)},
+}
+RECEIPT_FIREWALL_PHASES = {
+    "source": (),
+    "build": ("node-base-read", "package-read", "build-offline"),
+    "scan": (),
+    "upload": ("posthog-upload",),
+    "registry": ("ghcr-write",),
+    "token-destroy": (),
+    "digest": (),
+    "deploy-health": ("frontend-deploy", "frontend-public-health"),
+    "cleanup": (),
+}
+BUILD_PLAN = {
+    "command": ["pnpm", "build"],
+    "network": "none",
+    "secret_id": "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+    "secret_target": "/run/secrets/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
+    "secret_mode": "0400",
+    "secret_required": True,
+    "remote": False,
+    "cache_export": False,
+    "extra_secrets": [],
+}
+BUILD_PLAN_SHA256 = hashlib.sha256(
+    json.dumps(BUILD_PLAN, sort_keys=True, separators=(",", ":")).encode()
+).hexdigest()
+SOURCE_BLOB_SHAS = {
+    "workflow_blob_sha": "21b01bbfeb3db512a42080ea21dff5276f3fa28b",
+    "dockerfile_blob_sha": "6860679d7e023ac3d7828fa97cb32ed0e04bce53",
+    "lockfile_blob_sha": "4dadbbdda72a3c1ed23c1ef14240e765fe9a2170",
+}
+BASE_IMAGE_DIGEST = "sha256:aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6"
+OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
+RECEIPT_AUTHORITY_KINDS = {
+    "source": "broker-authenticated-git-object-graph",
+    "build": "root-reaped-build-output-readback",
+    "scan": "root-complete-oci-scan-readback",
+    "upload": "root-posthog-response-readback",
+    "registry": "root-registry-manifest-readback",
+    "token-destroy": "root-token-destruction-readback",
+    "digest": "root-durable-digest-state-readback",
+    "deploy-health": "root-deploy-and-health-readback",
+    "cleanup": "root-cleanup-readback",
+}
+RECEIPT_CONTRACT = {
+    "schema_version": 2,
+    "plan_sha256": PLAN_SHA256,
+    "policy_binding": "root-owned-runtime-policy-sha256",
+    "action_id": "ken-frontend-production-release",
+    "data_bytes_max": PHASE_DATA_MAX,
+    "receipt_bytes_max": RECEIPT_MAX,
+    "receipt_owner_uid": RECEIPT_OWNER_UID,
+    "receipt_owner_gid": RECEIPT_OWNER_GID,
+    "receipt_mode": "0600",
+    "chain": "sha256-canonical-json-with-external-root-authority",
+    "phase_authority": "root-owned-0600-canonical-json",
+    "chronology": "one-boot-strict-monotonic",
+    "runner_visible": False,
+    "phases": list(RECEIPT_PHASES),
+}
+RECEIPT_CONTRACT_SHA256 = hashlib.sha256(
+    json.dumps(RECEIPT_CONTRACT, sort_keys=True, separators=(",", ":")).encode()
+).hexdigest()
+CLI_COMMANDS = frozenset({"scan", "digest", "observe-start", "seal-receipt", "verify-receipts"})
 
 
 class ReleaseError(Exception):
     pass
+
+
+class SilentArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise ReleaseError("command_arguments_invalid")
+
+    def exit(self, status: int = 0, message: str | None = None) -> None:
+        raise ReleaseError("command_exit_forbidden")
 
 
 class ReleaseStateMachine:
@@ -92,18 +204,7 @@ def validate_registry_request(method: str, host: str, path: str, source_sha: str
 
 
 def validate_build_plan(plan: dict) -> None:
-    exact = {
-        "command": ["pnpm", "build"],
-        "network": "none",
-        "secret_id": "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
-        "secret_target": "/run/secrets/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY",
-        "secret_mode": "0400",
-        "secret_required": True,
-        "remote": False,
-        "cache_export": False,
-        "extra_secrets": [],
-    }
-    if plan != exact:
+    if plan != BUILD_PLAN:
         raise ReleaseError("build_plan_invalid")
 
 
@@ -189,22 +290,1010 @@ def _no_duplicates(pairs):
     return result
 
 
-def persist_digest_state(path: Path, identity: dict, digest: str) -> None:
-    allowed = {"repository_id", "run_id", "run_attempt", "check_run_id", "action_id", "source_sha"}
-    if set(identity) != allowed or not SHA256_DIGEST.fullmatch(digest):
-        raise ReleaseError("digest_state_invalid")
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    temporary = path.with_name("." + path.name + ".new")
-    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+def _exact(value: object, keys: set[str], code: str) -> dict:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ReleaseError(code)
+    return value
+
+
+def _exact_int(value: object, *, minimum: int = 0) -> bool:
+    return type(value) is int and value >= minimum
+
+
+def _sha256(value: object) -> bool:
+    return isinstance(value, str) and bool(SHA256.fullmatch(value))
+
+
+def _digest(value: object) -> bool:
+    return isinstance(value, str) and bool(SHA256_DIGEST.fullmatch(value))
+
+
+def _phase_evidence(phase: str, evidence: object) -> dict:
+    schemas = {
+        "source": {"repository_id", "commit_sha", "tree_sha", "tree_manifest_sha256", "workflow_blob_sha", "dockerfile_blob_sha", "lockfile_blob_sha", "variables_manifest_sha256"},
+        "build": {"source_sha", "tree_sha", "tree_manifest_sha256", "workflow_blob_sha", "dockerfile_blob_sha", "lockfile_blob_sha", "variables_manifest_sha256", "oci_layout_sha256", "oci_manifest_digest", "source_maps_sha256", "build_log_sha256", "cache_metadata_sha256", "build_plan_sha256", "provenance_sha256", "provenance_subject_digest", "buildkit_version", "buildctl_version", "node_version", "pnpm_version", "base_image_digest", "platform"},
+        "scan": {"source_sha", "tree_sha", "oci_layout_sha256", "oci_manifest_digest", "provenance_sha256", "provenance_subject_digest", "scan_evidence_sha256", "leakage_encodings"},
+        "upload": {"source_maps_sha256", "posthog_upload_sha256"},
+        "registry": {"registry", "image_digest", "manifest_digest", "platform", "source_sha", "tree_sha", "oci_layout_sha256", "provenance_sha256", "provenance_subject_digest", "media_type", "readback_verified"},
+        "token-destroy": {"source_sha", "tree_sha", "image_digest", "provenance_sha256", "token_descriptor_closed", "token_buffer_zeroed", "token_destroyed_monotonic_ns"},
+        "digest": {"source_sha", "tree_sha", "image_digest", "provenance_sha256", "digest_state_sha256", "state_key_sha256", "fsynced", "durable_state_published_monotonic_ns", "durable_state_readback_monotonic_ns"},
+        "deploy-health": {"source_sha", "tree_sha", "image_digest", "provenance_sha256", "deploy_receipt_sha256", "health_receipt_sha256", "deploy_completed_monotonic_ns", "health_started_monotonic_ns", "health_completed_monotonic_ns"},
+        "cleanup": {"source_sha", "tree_sha", "image_digest", "provenance_sha256", "request_state_removed", "source_removed", "buildkit_removed", "oci_removed", "source_maps_removed", "secret_mount_removed", "descriptors_closed", "firewall_inactive", "cgroups_empty", "cleanup_completed_monotonic_ns"},
+    }
+    if phase not in schemas:
+        raise ReleaseError("receipt_phase_invalid")
+    record = _exact(evidence, schemas[phase], "phase_evidence_schema_invalid")
+    if phase == "source":
+        if (record["repository_id"] != 1141163204 or type(record["repository_id"]) is not int
+                or not all(isinstance(record[key], str) and SHA1.fullmatch(record[key]) for key in ("commit_sha", "tree_sha", "workflow_blob_sha", "dockerfile_blob_sha", "lockfile_blob_sha"))
+                or len({record["commit_sha"], record["tree_sha"], record["workflow_blob_sha"], record["dockerfile_blob_sha"], record["lockfile_blob_sha"]}) != 5
+                or any(record[key] != value for key, value in SOURCE_BLOB_SHAS.items())
+                or not _sha256(record["tree_manifest_sha256"]) or not _sha256(record["variables_manifest_sha256"])):
+            raise ReleaseError("source_evidence_invalid")
+    elif phase == "build":
+        if (not all(_sha256(record[key]) for key in ("tree_manifest_sha256", "variables_manifest_sha256", "oci_layout_sha256", "source_maps_sha256", "build_log_sha256", "cache_metadata_sha256", "build_plan_sha256", "provenance_sha256"))
+                or not all(isinstance(record[key], str) and SHA1.fullmatch(record[key]) for key in ("source_sha", "tree_sha", "workflow_blob_sha", "dockerfile_blob_sha", "lockfile_blob_sha"))
+                or record["source_sha"] == record["tree_sha"]
+                or not _digest(record["oci_manifest_digest"])
+                or record["provenance_subject_digest"] != record["oci_manifest_digest"]
+                or any(record[key] != value for key, value in SOURCE_BLOB_SHAS.items())
+                or record["build_plan_sha256"] != BUILD_PLAN_SHA256
+                or record["buildkit_version"] != "0.24.0" or record["buildctl_version"] != "0.24.0"
+                or record["node_version"] != "22.20.0" or record["pnpm_version"] != "10.28.2"
+                or record["base_image_digest"] != BASE_IMAGE_DIGEST or record["platform"] != "linux/amd64"
+                or not _sha256(record["variables_manifest_sha256"])):
+            raise ReleaseError("build_evidence_invalid")
+    elif phase == "scan":
+        if (not all(_sha256(record[key]) for key in ("oci_layout_sha256", "provenance_sha256", "scan_evidence_sha256"))
+                or not all(isinstance(record[key], str) and SHA1.fullmatch(record[key]) for key in ("source_sha", "tree_sha"))
+                or not _digest(record["oci_manifest_digest"])
+                or record["provenance_subject_digest"] != record["oci_manifest_digest"]
+                or record["leakage_encodings"] != ["raw", "canonical-base64", "lowercase-hex"]):
+            raise ReleaseError("scan_evidence_invalid")
+    elif phase == "upload":
+        if not all(_sha256(record[key]) for key in ("source_maps_sha256", "posthog_upload_sha256")):
+            raise ReleaseError("upload_evidence_invalid")
+    elif phase == "registry":
+        if (record["registry"] != REGISTRY or not _digest(record["image_digest"]) or record["manifest_digest"] != record["image_digest"]
+                or record["platform"] != "linux/amd64"
+                or not all(isinstance(record[key], str) and SHA1.fullmatch(record[key]) for key in ("source_sha", "tree_sha"))
+                or not _sha256(record["oci_layout_sha256"]) or not _sha256(record["provenance_sha256"])
+                or record["provenance_subject_digest"] != record["image_digest"]
+                or record["media_type"] != OCI_MANIFEST_MEDIA_TYPE or record["readback_verified"] is not True):
+            raise ReleaseError("registry_evidence_invalid")
+    elif phase == "token-destroy":
+        if (not _digest(record["image_digest"]) or not _sha256(record["provenance_sha256"])
+                or not all(isinstance(record[key], str) and SHA1.fullmatch(record[key]) for key in ("source_sha", "tree_sha"))
+                or record["token_descriptor_closed"] is not True
+                or record["token_buffer_zeroed"] is not True
+                or not _exact_int(record["token_destroyed_monotonic_ns"], minimum=1)):
+            raise ReleaseError("token_destroy_evidence_invalid")
+    elif phase == "digest":
+        if (not _digest(record["image_digest"]) or not _sha256(record["provenance_sha256"])
+                or not all(isinstance(record[key], str) and SHA1.fullmatch(record[key]) for key in ("source_sha", "tree_sha"))
+                or not _sha256(record["digest_state_sha256"])
+                or not _sha256(record["state_key_sha256"]) or record["fsynced"] is not True
+                or not _exact_int(record["durable_state_published_monotonic_ns"], minimum=1)
+                or not _exact_int(record["durable_state_readback_monotonic_ns"], minimum=1)
+                or record["durable_state_readback_monotonic_ns"] <= record["durable_state_published_monotonic_ns"]):
+            raise ReleaseError("digest_evidence_invalid")
+    elif phase == "deploy-health":
+        if (not _digest(record["image_digest"]) or not _sha256(record["provenance_sha256"])
+                or not all(isinstance(record[key], str) and SHA1.fullmatch(record[key]) for key in ("source_sha", "tree_sha"))
+                or not _sha256(record["deploy_receipt_sha256"])
+                or not _sha256(record["health_receipt_sha256"])
+                or not all(_exact_int(record[key], minimum=1) for key in ("deploy_completed_monotonic_ns", "health_started_monotonic_ns", "health_completed_monotonic_ns"))
+                or not (record["deploy_completed_monotonic_ns"] < record["health_started_monotonic_ns"] < record["health_completed_monotonic_ns"])):
+            raise ReleaseError("deploy_health_evidence_invalid")
+    elif phase == "cleanup":
+        cleanup_booleans = set(record) - {"source_sha", "tree_sha", "image_digest", "provenance_sha256", "cleanup_completed_monotonic_ns"}
+        if (not _digest(record["image_digest"]) or not _sha256(record["provenance_sha256"])
+                or not all(isinstance(record[key], str) and SHA1.fullmatch(record[key]) for key in ("source_sha", "tree_sha"))
+                or not all(record[key] is True for key in cleanup_booleans)
+                or not _exact_int(record["cleanup_completed_monotonic_ns"], minimum=1)):
+            raise ReleaseError("cleanup_evidence_invalid")
+    return record
+
+
+def _expected_runtime(phase: str, request_id: str) -> tuple[str, str, str, bool]:
+    specialized = {
+        "build": (f"ken-frontend-production-builder@{request_id}.service", "ken-actions-deploy-builder.slice"),
+        "upload": (f"ken-frontend-source-map-uploader@{request_id}.service", "ken-actions-deploy-uploader.slice"),
+        "deploy-health": (f"ken-frontend-deploy-executor@{request_id}.service", "ken-actions-deploy-executor.slice"),
+    }
+    dedicated = phase in specialized
+    unit, slice_name = specialized.get(phase, ("ken-op-broker@production.service", "ken-actions-deploy-brokers.slice"))
+    control_group = f"/ken.slice/ken-actions.slice/ken-actions-deploy.slice/{slice_name}/{unit}"
+    return unit, slice_name, control_group, dedicated
+
+
+def _systemd_snapshot(unit: str) -> dict[str, str]:
+    properties = (
+        "LoadState", "ActiveState", "SubState", "Slice", "ControlGroup", "User",
+        "ExecMainPID", "ExecMainStartTimestampMonotonic", "ExecMainExitTimestampMonotonic", "Result",
+    )
+    result = subprocess.run(
+        [SYSTEMCTL, "show", unit, *[f"--property={name}" for name in properties]],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        env={"LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"}, timeout=15, check=False,
+    )
+    if result.returncode != 0 or len(result.stdout) > 16384:
+        raise ReleaseError("runtime_systemd_readback_invalid")
     try:
-        data = json.dumps({**identity, "image_digest": digest}, sort_keys=True, separators=(",", ":")).encode()
-        os.write(fd, data); os.fsync(fd)
+        lines = result.stdout.decode("utf-8").splitlines()
+    except UnicodeError as exc:
+        raise ReleaseError("runtime_systemd_readback_invalid") from exc
+    values = {}
+    for line in lines:
+        key, separator, value = line.partition("=")
+        if not separator or key in values:
+            raise ReleaseError("runtime_systemd_readback_invalid")
+        values[key] = value
+    if set(values) != set(properties):
+        raise ReleaseError("runtime_systemd_readback_invalid")
+    return values
+
+
+def _proc_snapshot(pid: int) -> dict:
+    if type(pid) is not int or pid <= 1:
+        raise ReleaseError("runtime_process_invalid")
+    base = PROC_ROOT / str(pid)
+    try:
+        status = (base / "status").read_text(encoding="utf-8")
+        stat_line = (base / "stat").read_text(encoding="utf-8")
+        cgroup_lines = (base / "cgroup").read_text(encoding="utf-8").splitlines()
+        boot_id = (PROC_ROOT / "sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+        fds = sorted(int(path.name) for path in (base / "fd").iterdir() if path.name.isdigit())
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ReleaseError("runtime_process_invalid") from exc
+    uid_line = next((line for line in status.splitlines() if line.startswith("Uid:")), "")
+    uid_fields = uid_line.split()[1:]
+    close = stat_line.rfind(")")
+    tail = stat_line[close + 2:].split() if close >= 0 else []
+    unified = [line[3:] for line in cgroup_lines if line.startswith("0::/")]
+    if (len(uid_fields) != 4 or len(set(uid_fields)) != 1 or not uid_fields[0].isdigit()
+            or len(tail) < 20 or not tail[19].isdigit() or len(unified) != 1
+            or not re.fullmatch(r"[0-9a-f-]{36}", boot_id)):
+        raise ReleaseError("runtime_process_invalid")
+    return {
+        "uid": int(uid_fields[0]),
+        "boot_id": boot_id,
+        "start_ticks": int(tail[19]),
+        "control_group": unified[0],
+        "fd_set_sha256": hashlib.sha256(",".join(map(str, fds)).encode()).hexdigest(),
+    }
+
+
+def _read_root_runtime_file(path: Path, maximum: int) -> bytes:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise ReleaseError("runtime_firewall_state_invalid") from exc
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != RECEIPT_OWNER_UID
+                or info.st_gid != RECEIPT_OWNER_GID or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size < 1
+                or info.st_size > maximum):
+            raise ReleaseError("runtime_firewall_state_invalid")
+        chunks = []
+        remaining = info.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 65536))
+            if not chunk:
+                raise ReleaseError("runtime_firewall_state_invalid")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise ReleaseError("runtime_firewall_state_invalid")
+        return b"".join(chunks)
+    except OSError as exc:
+        raise ReleaseError("runtime_firewall_state_invalid") from exc
     finally:
         os.close(fd)
-    os.replace(temporary, path)
-    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try: os.fsync(directory)
-    finally: os.close(directory)
+
+
+def _firewall_request(request_id: str, phase: str | None) -> str | None:
+    path = FIREWALL_ACTIVE_ROOT / f"{request_id}.json"
+    rules = _read_root_runtime_file(FIREWALL_ACTIVE_RULES, FIREWALL_RULES_MAX)
+    try:
+        rules_text = rules.decode("utf-8")
+    except UnicodeError as exc:
+        raise ReleaseError("runtime_firewall_state_invalid") from exc
+    marker = re.search(r"\brequests=([0-9a-f]{64}(?:,[0-9a-f]{64})*)\b", rules_text)
+    active_ids = [] if marker is None else marker.group(1).split(",")
+    if phase is None:
+        if path.exists() or path.is_symlink() or request_id in active_ids:
+            raise ReleaseError("runtime_firewall_state_invalid")
+        return None
+    if path.is_symlink() or not path.is_file() or active_ids != [request_id]:
+        raise ReleaseError("runtime_firewall_state_invalid")
+    data = _read_root_runtime_file(path, 4096)
+    try:
+        value = json.loads(data.decode("utf-8"), object_pairs_hook=_no_duplicates)
+    except Exception as exc:
+        raise ReleaseError("runtime_firewall_state_invalid") from exc
+    if value != {"schema_version": 1, "request_id": request_id, "profile": "frontend-production-digest-deploy", "phase": phase}:
+        raise ReleaseError("runtime_firewall_state_invalid")
+    return hashlib.sha256(data + b"\0" + rules).hexdigest()
+
+
+def _network_authority(phase: str) -> str:
+    if phase == "source":
+        return "standing-github-control-production"
+    if RECEIPT_FIREWALL_PHASES[phase]:
+        return "request-bound-frontend-production-digest-deploy"
+    if phase == "deploy-health":
+        return "deferred-task4-target-readback"
+    return "none"
+
+
+def observe_phase_start(*, request_id: str, source_sha: str, phase: str,
+                        actor_pid: int, firewall_phase: str | None, output: Path) -> None:
+    if os.geteuid() != RECEIPT_OWNER_UID or not SAFE_REQUEST_ID.fullmatch(request_id) or not SHA1.fullmatch(source_sha):
+        raise ReleaseError("runtime_observer_invalid")
+    if phase not in RECEIPT_PHASES or firewall_phase not in RECEIPT_FIREWALL_PHASES[phase]:
+        if not (phase in RECEIPT_PHASES and not RECEIPT_FIREWALL_PHASES[phase] and firewall_phase is None):
+            raise ReleaseError("runtime_firewall_phase_invalid")
+    unit, slice_name, control_group, dedicated = _expected_runtime(phase, request_id)
+    systemd = _systemd_snapshot(unit)
+    process = _proc_snapshot(actor_pid)
+    if (systemd["LoadState"] != "loaded" or systemd["ActiveState"] not in {"active", "activating"}
+            or systemd["Slice"] != slice_name or systemd["ControlGroup"] != control_group
+            or process["uid"] != RECEIPT_ACTOR_UIDS[phase] or process["control_group"] != control_group
+            or not systemd["ExecMainPID"].isdigit() or not systemd["ExecMainStartTimestampMonotonic"].isdigit()
+            or int(systemd["ExecMainStartTimestampMonotonic"]) <= 0
+            or (dedicated and int(systemd["ExecMainPID"]) != actor_pid)):
+        raise ReleaseError("runtime_start_readback_invalid")
+    firewall_sha = _firewall_request(request_id, firewall_phase)
+    record = {
+        "schema_version": 1,
+        "plan_sha256": PLAN_SHA256,
+        "receipt_contract_sha256": RECEIPT_CONTRACT_SHA256,
+        "request_id": request_id,
+        "source_sha": source_sha,
+        "phase": phase,
+        "unit": unit,
+        "slice": slice_name,
+        "control_group": control_group,
+        "dedicated_unit": dedicated,
+        "actor_pid": actor_pid,
+        "observed_actor_uid": process["uid"],
+        "boot_id": process["boot_id"],
+        "actor_start_ticks": process["start_ticks"],
+        "fd_set_sha256": process["fd_set_sha256"],
+        "systemd_exec_start_monotonic_usec": int(systemd["ExecMainStartTimestampMonotonic"]),
+        "firewall_phase": firewall_phase,
+        "firewall_request_sha256": firewall_sha,
+        "observed_monotonic_ns": time.monotonic_ns(),
+    }
+    encoded = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    if len(encoded) > PHASE_DATA_MAX:
+        raise ReleaseError("runtime_observation_size_invalid")
+    _publish_receipt(output, encoded)
+
+
+def _parse_start_observation(data: bytes, *, request_id: str, source_sha: str, phase: str) -> dict:
+    try:
+        value = json.loads(data.decode("utf-8"), object_pairs_hook=_no_duplicates)
+    except Exception as exc:
+        raise ReleaseError("runtime_observation_invalid") from exc
+    keys = {
+        "schema_version", "plan_sha256", "receipt_contract_sha256", "request_id", "source_sha", "phase",
+        "unit", "slice", "control_group", "dedicated_unit", "actor_pid", "observed_actor_uid",
+        "boot_id", "actor_start_ticks", "fd_set_sha256", "systemd_exec_start_monotonic_usec",
+        "firewall_phase", "firewall_request_sha256", "observed_monotonic_ns",
+    }
+    record = _exact(value, keys, "runtime_observation_invalid")
+    unit, slice_name, control_group, dedicated = _expected_runtime(phase, request_id)
+    if (record["schema_version"] != 1 or type(record["schema_version"]) is not int
+            or record["plan_sha256"] != PLAN_SHA256 or record["receipt_contract_sha256"] != RECEIPT_CONTRACT_SHA256
+            or record["request_id"] != request_id or record["source_sha"] != source_sha or record["phase"] != phase
+            or record["unit"] != unit or record["slice"] != slice_name or record["control_group"] != control_group
+            or record["dedicated_unit"] is not dedicated or record["observed_actor_uid"] != RECEIPT_ACTOR_UIDS[phase]
+            or not all(_exact_int(record[key], minimum=1) for key in ("actor_pid", "actor_start_ticks", "systemd_exec_start_monotonic_usec", "observed_monotonic_ns"))
+            or not re.fullmatch(r"[0-9a-f-]{36}", str(record["boot_id"])) or not _sha256(record["fd_set_sha256"])
+            or record["firewall_phase"] not in (*RECEIPT_FIREWALL_PHASES[phase], None)
+            or (record["firewall_phase"] is None) != (record["firewall_request_sha256"] is None)
+            or (record["firewall_request_sha256"] is not None and not _sha256(record["firewall_request_sha256"]))):
+        raise ReleaseError("runtime_observation_invalid")
+    canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    if canonical != data:
+        raise ReleaseError("runtime_observation_invalid")
+    return record
+
+
+def _cgroup_empty(control_group: str) -> bool:
+    path = CGROUP_ROOT / control_group.lstrip("/") / "cgroup.procs"
+    try:
+        return not path.exists() or not path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise ReleaseError("runtime_cgroup_readback_invalid") from exc
+
+
+def _finish_root_observation(records: Sequence[dict], *, request_id: str, phase: str) -> dict:
+    if not records:
+        raise ReleaseError("runtime_observation_missing")
+    first = records[0]
+    if [record["firewall_phase"] for record in records] != (list(RECEIPT_FIREWALL_PHASES[phase]) or [None]):
+        raise ReleaseError("runtime_firewall_lifecycle_invalid")
+    observed_starts = [record["observed_monotonic_ns"] for record in records]
+    if any(current <= previous for previous, current in zip(observed_starts, observed_starts[1:])):
+        raise ReleaseError("runtime_observation_order_invalid")
+    identity = (first["actor_pid"], first["boot_id"], first["actor_start_ticks"], first["unit"], first["control_group"])
+    if any((record["actor_pid"], record["boot_id"], record["actor_start_ticks"], record["unit"], record["control_group"]) != identity for record in records):
+        raise ReleaseError("runtime_process_lifecycle_invalid")
+    try:
+        _proc_snapshot(first["actor_pid"])
+    except ReleaseError:
+        try:
+            os.lstat(PROC_ROOT / str(first["actor_pid"]))
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise ReleaseError("runtime_process_not_reaped") from exc
+        else:
+            raise ReleaseError("runtime_process_not_reaped")
+    else:
+        raise ReleaseError("runtime_process_not_reaped")
+    if _firewall_request(request_id, None) is not None:
+        raise ReleaseError("runtime_firewall_lifecycle_invalid")
+    systemd = _systemd_snapshot(first["unit"])
+    dedicated = first["dedicated_unit"]
+    if dedicated:
+        valid_systemd = (systemd["LoadState"] == "loaded" and systemd["ActiveState"] == "inactive"
+                         and systemd["Slice"] == first["slice"] and systemd["ControlGroup"] == ""
+                         and systemd["Result"] == "success"
+                         and systemd["ExecMainStartTimestampMonotonic"].isdigit()
+                         and systemd["ExecMainExitTimestampMonotonic"].isdigit()
+                         and int(systemd["ExecMainStartTimestampMonotonic"]) == first["systemd_exec_start_monotonic_usec"]
+                         and int(systemd["ExecMainExitTimestampMonotonic"]) > int(systemd["ExecMainStartTimestampMonotonic"]) > 0)
+    else:
+        valid_systemd = (systemd["LoadState"] == "loaded" and systemd["ActiveState"] == "active"
+                         and systemd["Slice"] == first["slice"] and systemd["ControlGroup"] == first["control_group"]
+                         and systemd["Result"] == "success"
+                         and systemd["ExecMainStartTimestampMonotonic"].isdigit()
+                         and int(systemd["ExecMainStartTimestampMonotonic"]) == first["systemd_exec_start_monotonic_usec"])
+    cgroup_empty = _cgroup_empty(first["control_group"])
+    if not valid_systemd or cgroup_empty is not dedicated:
+        raise ReleaseError("runtime_end_readback_invalid")
+    transitions = []
+    for record in records:
+        if record["firewall_phase"] is not None:
+            authority = FRONTEND_FIREWALL_PHASES[record["firewall_phase"]]
+            transitions.append({
+                "phase": record["firewall_phase"], "uid": authority["uid"],
+                "targets": list(authority["targets"]), "activate_readback_sha256": record["firewall_request_sha256"],
+                "activated_observed_monotonic_ns": record["observed_monotonic_ns"],
+                "deactivated": True,
+            })
+    completed = time.monotonic_ns()
+    if completed <= observed_starts[-1]:
+        raise ReleaseError("runtime_observation_order_invalid")
+    return {
+        "unit": first["unit"], "slice": first["slice"], "control_group": first["control_group"],
+        "observed_actor_uid": first["observed_actor_uid"], "actor_pid": first["actor_pid"],
+        "boot_id": first["boot_id"], "actor_start_ticks": first["actor_start_ticks"],
+        "systemd_exec_start_monotonic_usec": first["systemd_exec_start_monotonic_usec"],
+        "systemd_exec_exit_monotonic_usec": int(systemd["ExecMainExitTimestampMonotonic"] or 0),
+        "started_observed_monotonic_ns": observed_starts[0],
+        "completed_observed_monotonic_ns": completed, "process_reaped": True,
+        "descriptor_snapshots_sha256": hashlib.sha256("".join(record["fd_set_sha256"] for record in records).encode()).hexdigest(),
+        "descriptors_closed": True, "network_authority": _network_authority(phase),
+        "firewall_transitions": transitions, "firewall_inactive_after": True,
+        "cgroup_empty_after": cgroup_empty,
+    }
+
+
+def _validate_root_observation(observation: object, *, request_id: str, phase: str) -> dict:
+    record = _exact(observation, {
+        "unit", "slice", "control_group", "observed_actor_uid", "actor_pid", "boot_id",
+        "actor_start_ticks", "systemd_exec_start_monotonic_usec", "systemd_exec_exit_monotonic_usec",
+        "started_observed_monotonic_ns", "completed_observed_monotonic_ns", "process_reaped", "descriptor_snapshots_sha256",
+        "descriptors_closed", "network_authority", "firewall_transitions", "firewall_inactive_after",
+        "cgroup_empty_after",
+    }, "root_observation_schema_invalid")
+    unit, slice_name, control_group, dedicated = _expected_runtime(phase, request_id)
+    for key in ("actor_pid", "actor_start_ticks", "systemd_exec_start_monotonic_usec", "started_observed_monotonic_ns", "completed_observed_monotonic_ns"):
+        if not _exact_int(record[key], minimum=1):
+            raise ReleaseError("root_observation_runtime_invalid")
+    if (type(record["observed_actor_uid"]) is not int or record["observed_actor_uid"] != RECEIPT_ACTOR_UIDS[phase]
+            or type(record["systemd_exec_exit_monotonic_usec"]) is not int
+            or record["unit"] != unit or record["slice"] != slice_name or record["control_group"] != control_group
+            or not re.fullmatch(r"[0-9a-f-]{36}", str(record["boot_id"]))
+            or not _sha256(record["descriptor_snapshots_sha256"])
+            or record["process_reaped"] is not True or record["descriptors_closed"] is not True
+            or record["network_authority"] != _network_authority(phase)
+            or record["firewall_inactive_after"] is not True or record["cgroup_empty_after"] is not dedicated
+            or record["completed_observed_monotonic_ns"] <= record["started_observed_monotonic_ns"]
+            or (dedicated and record["systemd_exec_exit_monotonic_usec"] <= record["systemd_exec_start_monotonic_usec"])
+            or (not dedicated and record["systemd_exec_exit_monotonic_usec"] != 0)):
+        raise ReleaseError("root_observation_runtime_invalid")
+    transitions = record["firewall_transitions"]
+    if not isinstance(transitions, list) or len(transitions) != len(RECEIPT_FIREWALL_PHASES[phase]):
+        raise ReleaseError("root_observation_firewall_invalid")
+    for transition, name in zip(transitions, RECEIPT_FIREWALL_PHASES[phase], strict=True):
+        authority = FRONTEND_FIREWALL_PHASES[name]
+        expected = {"phase": name, "uid": authority["uid"], "targets": list(authority["targets"]), "deactivated": True}
+        value = _exact(transition, {*expected, "activate_readback_sha256", "activated_observed_monotonic_ns"}, "root_observation_firewall_invalid")
+        if (any(value[key] != expected[key] for key in expected)
+                or not _sha256(value["activate_readback_sha256"])
+                or not _exact_int(value["activated_observed_monotonic_ns"], minimum=1)):
+            raise ReleaseError("root_observation_firewall_invalid")
+    transition_times = [value["activated_observed_monotonic_ns"] for value in transitions]
+    if (transition_times and (transition_times[0] < record["started_observed_monotonic_ns"]
+            or transition_times[-1] >= record["completed_observed_monotonic_ns"]
+            or any(current <= previous for previous, current in zip(transition_times, transition_times[1:])))):
+        raise ReleaseError("root_observation_firewall_invalid")
+    return record
+
+
+def validate_receipt_chronology(records: dict[str, dict]) -> None:
+    if set(records) != set(RECEIPT_PHASES):
+        raise ReleaseError("receipt_chronology_invalid")
+    boot_id = None
+    previous_completed = None
+    for phase in RECEIPT_PHASES:
+        observation = records[phase].get("root_observation")
+        if not isinstance(observation, dict):
+            raise ReleaseError("receipt_chronology_invalid")
+        current_boot = observation.get("boot_id")
+        started = observation.get("started_observed_monotonic_ns")
+        completed = observation.get("completed_observed_monotonic_ns")
+        if (not re.fullmatch(r"[0-9a-f-]{36}", str(current_boot))
+                or not _exact_int(started, minimum=1) or not _exact_int(completed, minimum=1)
+                or completed <= started
+                or (boot_id is not None and current_boot != boot_id)
+                or (previous_completed is not None and started <= previous_completed)):
+            raise ReleaseError("receipt_chronology_invalid")
+        boot_id = current_boot
+        previous_completed = completed
+
+
+def canonical_phase_data(request_id: str, source_sha: str, phase: str, evidence: dict) -> bytes:
+    if not SAFE_REQUEST_ID.fullmatch(request_id) or not SHA1.fullmatch(source_sha) or phase not in RECEIPT_PHASES:
+        raise ReleaseError("phase_data_identity_invalid")
+    payload = {
+        "schema_version": 1,
+        "request_id": request_id,
+        "action_id": "ken-frontend-production-release",
+        "source_sha": source_sha,
+        "phase": phase,
+        "actor_uid": RECEIPT_ACTOR_UIDS[phase],
+        "evidence": _phase_evidence(phase, evidence),
+    }
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    if len(data) > PHASE_DATA_MAX:
+        raise ReleaseError("phase_data_size_invalid")
+    return data
+
+
+def parse_phase_data(data: bytes, *, request_id: str, source_sha: str, phase: str) -> dict:
+    if not data or len(data) > PHASE_DATA_MAX:
+        raise ReleaseError("phase_data_size_invalid")
+    try:
+        value = json.loads(data.decode("utf-8"), object_pairs_hook=_no_duplicates)
+    except Exception as exc:
+        raise ReleaseError("phase_data_json_invalid") from exc
+    record = _exact(value, {"schema_version", "request_id", "action_id", "source_sha", "phase", "actor_uid", "evidence"}, "phase_data_schema_invalid")
+    if (type(record["schema_version"]) is not int or record["schema_version"] != 1
+            or record["request_id"] != request_id or record["action_id"] != "ken-frontend-production-release"
+            or record["source_sha"] != source_sha or not SHA1.fullmatch(source_sha)
+            or record["phase"] != phase or type(record["actor_uid"]) is not int
+            or record["actor_uid"] != RECEIPT_ACTOR_UIDS.get(phase)):
+        raise ReleaseError("phase_data_identity_invalid")
+    _phase_evidence(phase, record["evidence"])
+    if json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode() != data:
+        raise ReleaseError("phase_data_not_canonical")
+    return record
+
+
+def canonical_phase_authority(request_id: str, source_sha: str, phase: str,
+                              evidence: dict, observed_monotonic_ns: int) -> bytes:
+    if (not SAFE_REQUEST_ID.fullmatch(request_id) or not SHA1.fullmatch(source_sha)
+            or phase not in RECEIPT_PHASES or not _exact_int(observed_monotonic_ns, minimum=1)):
+        raise ReleaseError("phase_authority_identity_invalid")
+    payload = {
+        "schema_version": 1,
+        "plan_sha256": PLAN_SHA256,
+        "receipt_contract_sha256": RECEIPT_CONTRACT_SHA256,
+        "request_id": request_id,
+        "action_id": "ken-frontend-production-release",
+        "source_sha": source_sha,
+        "phase": phase,
+        "authority_kind": RECEIPT_AUTHORITY_KINDS[phase],
+        "observed_monotonic_ns": observed_monotonic_ns,
+        "evidence": _phase_evidence(phase, evidence),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    if len(encoded) > PHASE_DATA_MAX:
+        raise ReleaseError("phase_authority_size_invalid")
+    return encoded
+
+
+def parse_phase_authority(data: bytes, *, request_id: str, source_sha: str, phase: str) -> dict:
+    if not data or len(data) > PHASE_DATA_MAX:
+        raise ReleaseError("phase_authority_size_invalid")
+    try:
+        value = json.loads(data.decode("utf-8"), object_pairs_hook=_no_duplicates)
+    except Exception as exc:
+        raise ReleaseError("phase_authority_json_invalid") from exc
+    record = _exact(value, {
+        "schema_version", "plan_sha256", "receipt_contract_sha256", "request_id",
+        "action_id", "source_sha", "phase", "authority_kind",
+        "observed_monotonic_ns", "evidence",
+    }, "phase_authority_schema_invalid")
+    if (type(record["schema_version"]) is not int or record["schema_version"] != 1
+            or record["plan_sha256"] != PLAN_SHA256
+            or record["receipt_contract_sha256"] != RECEIPT_CONTRACT_SHA256
+            or record["request_id"] != request_id
+            or record["action_id"] != "ken-frontend-production-release"
+            or record["source_sha"] != source_sha or not SHA1.fullmatch(source_sha)
+            or record["phase"] != phase
+            or record["authority_kind"] != RECEIPT_AUTHORITY_KINDS.get(phase)
+            or not _exact_int(record["observed_monotonic_ns"], minimum=1)):
+        raise ReleaseError("phase_authority_identity_invalid")
+    _phase_evidence(phase, record["evidence"])
+    canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    if canonical != data:
+        raise ReleaseError("phase_authority_not_canonical")
+    return record
+
+
+def _validate_phase_authority_timing(phase: str, authority: dict, observation: dict) -> None:
+    observed = authority["observed_monotonic_ns"]
+    started = observation["started_observed_monotonic_ns"]
+    completed = observation["completed_observed_monotonic_ns"]
+    if ((phase != "source" and observed < started) or observed >= completed):
+        raise ReleaseError("phase_authority_order_invalid")
+    evidence = authority["evidence"]
+    if phase == "token-destroy":
+        valid = started <= evidence["token_destroyed_monotonic_ns"] <= observed
+    elif phase == "digest":
+        valid = (started <= evidence["durable_state_published_monotonic_ns"]
+                 < evidence["durable_state_readback_monotonic_ns"] <= observed)
+    elif phase == "deploy-health":
+        transitions = observation["firewall_transitions"]
+        valid = (len(transitions) == 2
+                 and transitions[0]["phase"] == "frontend-deploy"
+                 and transitions[1]["phase"] == "frontend-public-health"
+                 and transitions[0]["activated_observed_monotonic_ns"]
+                    <= evidence["deploy_completed_monotonic_ns"]
+                    < transitions[1]["activated_observed_monotonic_ns"]
+                    <= evidence["health_started_monotonic_ns"]
+                    < evidence["health_completed_monotonic_ns"] <= observed)
+    elif phase == "cleanup":
+        valid = started <= evidence["cleanup_completed_monotonic_ns"] <= observed
+    else:
+        valid = True
+    if not valid:
+        raise ReleaseError("phase_authority_order_invalid")
+
+
+def _read_regular_fd(fd: int, *, owner_uid: int, maximum: int, code: str) -> bytes:
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size < 1 or info.st_size > maximum):
+            raise ReleaseError(code)
+        os.lseek(fd, 0, os.SEEK_SET)
+        data = os.read(fd, maximum + 1)
+        if len(data) != info.st_size or len(data) > maximum:
+            raise ReleaseError(code)
+        return data
+    except OSError as exc:
+        raise ReleaseError(code) from exc
+
+
+def _parse_receipt_bytes(data: bytes, *, request_id: str, source_sha: str, phase: str,
+                         policy_sha256: str) -> dict:
+    if not data or len(data) > RECEIPT_MAX:
+        raise ReleaseError("receipt_size_invalid")
+    try:
+        value = json.loads(data.decode("utf-8"), object_pairs_hook=_no_duplicates)
+    except Exception as exc:
+        raise ReleaseError("receipt_json_invalid") from exc
+    record = _exact(value, {"schema_version", "plan_sha256", "receipt_contract_sha256", "policy_sha256", "request_id", "action_id", "source_sha", "phase", "ordinal", "actor_uid", "previous_receipt_sha256", "phase_authority_sha256", "evidence", "root_observation"}, "receipt_schema_invalid")
+    ordinal = RECEIPT_PHASES.index(phase) if phase in RECEIPT_PHASES else -1
+    previous = record["previous_receipt_sha256"]
+    if (type(record["schema_version"]) is not int or record["schema_version"] != 1
+            or record["plan_sha256"] != PLAN_SHA256
+            or record["receipt_contract_sha256"] != RECEIPT_CONTRACT_SHA256
+            or record["policy_sha256"] != policy_sha256 or not _sha256(policy_sha256)
+            or record["request_id"] != request_id or record["action_id"] != "ken-frontend-production-release"
+            or record["source_sha"] != source_sha or not SHA1.fullmatch(source_sha)
+            or record["phase"] != phase or type(record["ordinal"]) is not int or record["ordinal"] != ordinal
+            or type(record["actor_uid"]) is not int or record["actor_uid"] != RECEIPT_ACTOR_UIDS.get(phase)
+            or not _sha256(record["phase_authority_sha256"])
+            or (ordinal == 0 and previous is not None)
+            or (ordinal > 0 and not _sha256(previous))):
+        raise ReleaseError("receipt_identity_invalid")
+    _phase_evidence(phase, record["evidence"])
+    _validate_root_observation(record["root_observation"], request_id=request_id, phase=phase)
+    if json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode() != data:
+        raise ReleaseError("receipt_not_canonical")
+    return record
+
+
+def _read_receipt_fd(fd: int, *, request_id: str, source_sha: str, phase: str,
+                     owner_uid: int, owner_gid: int, policy_sha256: str) -> tuple[bytes, dict]:
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid or info.st_gid != owner_gid
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_size < 1 or info.st_size > RECEIPT_MAX):
+            raise ReleaseError("receipt_file_invalid")
+        os.lseek(fd, 0, os.SEEK_SET)
+        data = os.read(fd, RECEIPT_MAX + 1)
+        if len(data) != info.st_size:
+            raise ReleaseError("receipt_file_invalid")
+        return data, _parse_receipt_bytes(
+            data, request_id=request_id, source_sha=source_sha, phase=phase,
+            policy_sha256=policy_sha256,
+        )
+    except OSError as exc:
+        raise ReleaseError("receipt_file_invalid") from exc
+
+
+def _publish_receipt(output: Path, encoded: bytes) -> None:
+    if not output.name or output.name in {".", ".."} or output.is_symlink() or output.parent.is_symlink():
+        raise ReleaseError("receipt_output_invalid")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        directory = os.open(output.parent, flags)
+    except OSError as exc:
+        raise ReleaseError("receipt_output_invalid") from exc
+    temporary = f".{output.name}.{secrets.token_hex(16)}.tmp"
+    fd = None
+    temp_exists = False
+    try:
+        parent = os.fstat(directory)
+        if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != RECEIPT_OWNER_UID
+                or parent.st_gid != RECEIPT_OWNER_GID or parent.st_mode & 0o077):
+            raise ReleaseError("receipt_output_invalid")
+        fd = os.open(
+            temporary,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory,
+        )
+        temp_exists = True
+        os.fchmod(fd, 0o600)
+        current = os.fstat(fd)
+        if current.st_uid != RECEIPT_OWNER_UID or current.st_gid != RECEIPT_OWNER_GID:
+            os.fchown(fd, RECEIPT_OWNER_UID, RECEIPT_OWNER_GID)
+        view = memoryview(encoded)
+        written = 0
+        while written < len(view):
+            count = os.write(fd, view[written:])
+            if type(count) is not int or count <= 0:
+                raise OSError("receipt write made no progress")
+            written += count
+        current = os.fstat(fd)
+        if (current.st_size != len(encoded) or current.st_uid != RECEIPT_OWNER_UID
+                or current.st_gid != RECEIPT_OWNER_GID or stat.S_IMODE(current.st_mode) != 0o600
+                or current.st_nlink != 1):
+            raise ReleaseError("receipt_output_invalid")
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        os.link(temporary, output.name, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
+        os.fsync(directory)
+        os.unlink(temporary, dir_fd=directory)
+        temp_exists = False
+        os.fsync(directory)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if temp_exists:
+            try:
+                os.unlink(temporary, dir_fd=directory)
+                os.fsync(directory)
+            except OSError:
+                pass
+        os.close(directory)
+
+
+def _policy_sha256_from_fd(fd: int) -> str:
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != RECEIPT_OWNER_UID or info.st_gid != RECEIPT_OWNER_GID
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o644
+                or info.st_size < 1 or info.st_size > POLICY_MAX):
+            raise ReleaseError("policy_authority_file_invalid")
+        os.lseek(fd, 0, os.SEEK_SET)
+        data = os.read(fd, POLICY_MAX + 1)
+    except OSError as exc:
+        raise ReleaseError("policy_authority_file_invalid") from exc
+    digest = hashlib.sha256(data).hexdigest()
+    if len(data) != info.st_size:
+        raise ReleaseError("policy_authority_file_invalid")
+    return digest
+
+
+def seal_phase_receipt_from_fds(*, request_id: str, source_sha: str, phase: str,
+                                data_fd: int, authority_fd: int, observation_fds: Sequence[int], policy_fd: int,
+                                previous_receipt_fd: int | None, output: Path) -> None:
+    fds = [data_fd, authority_fd, policy_fd, *observation_fds] + ([] if previous_receipt_fd is None else [previous_receipt_fd])
+    try:
+        ordinal = RECEIPT_PHASES.index(phase) if phase in RECEIPT_PHASES else -1
+        if not SAFE_REQUEST_ID.fullmatch(request_id) or not SHA1.fullmatch(source_sha) or ordinal < 0:
+            raise ReleaseError("receipt_identity_invalid")
+        expected_actor = RECEIPT_ACTOR_UIDS[phase]
+        policy_sha256 = _policy_sha256_from_fd(policy_fd)
+        phase_data = parse_phase_data(
+            _read_regular_fd(data_fd, owner_uid=expected_actor, maximum=PHASE_DATA_MAX, code="phase_data_file_invalid"),
+            request_id=request_id, source_sha=source_sha, phase=phase,
+        )
+        authority_data = _read_regular_fd(
+            authority_fd, owner_uid=RECEIPT_OWNER_UID, maximum=PHASE_DATA_MAX,
+            code="phase_authority_file_invalid",
+        )
+        authority = parse_phase_authority(
+            authority_data, request_id=request_id, source_sha=source_sha, phase=phase,
+        )
+        if phase_data["evidence"] != authority["evidence"]:
+            raise ReleaseError("phase_authority_evidence_mismatch")
+        expected_observations = len(RECEIPT_FIREWALL_PHASES[phase]) or 1
+        if len(observation_fds) != expected_observations or len(set(observation_fds)) != len(observation_fds):
+            raise ReleaseError("runtime_observation_count_invalid")
+        observations = [
+            _parse_start_observation(
+                _read_regular_fd(fd, owner_uid=RECEIPT_OWNER_UID, maximum=PHASE_DATA_MAX, code="runtime_observation_file_invalid"),
+                request_id=request_id, source_sha=source_sha, phase=phase,
+            )
+            for fd in observation_fds
+        ]
+        root_observation = _finish_root_observation(observations, request_id=request_id, phase=phase)
+        _validate_phase_authority_timing(phase, authority, root_observation)
+        previous_digest = None
+        if ordinal == 0:
+            if previous_receipt_fd is not None:
+                raise ReleaseError("receipt_predecessor_invalid")
+        else:
+            if previous_receipt_fd is None:
+                raise ReleaseError("receipt_predecessor_invalid")
+            previous_data, _ = _read_receipt_fd(
+                previous_receipt_fd, request_id=request_id, source_sha=source_sha,
+                phase=RECEIPT_PHASES[ordinal - 1], owner_uid=RECEIPT_OWNER_UID, owner_gid=RECEIPT_OWNER_GID,
+                policy_sha256=policy_sha256,
+            )
+            previous_digest = hashlib.sha256(previous_data).hexdigest()
+        receipt = {
+            "schema_version": 1,
+            "plan_sha256": PLAN_SHA256,
+            "receipt_contract_sha256": RECEIPT_CONTRACT_SHA256,
+            "policy_sha256": policy_sha256,
+            "request_id": request_id,
+            "action_id": "ken-frontend-production-release",
+            "source_sha": source_sha,
+            "phase": phase,
+            "ordinal": ordinal,
+            "actor_uid": expected_actor,
+            "previous_receipt_sha256": previous_digest,
+            "phase_authority_sha256": hashlib.sha256(authority_data).hexdigest(),
+            "evidence": phase_data["evidence"],
+            "root_observation": root_observation,
+        }
+        encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        if len(encoded) > RECEIPT_MAX:
+            raise ReleaseError("receipt_output_invalid")
+        _publish_receipt(output, encoded)
+    finally:
+        for fd in fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def verify_receipt_chain(receipts: Sequence[Path], *, request_id: str, source_sha: str,
+                         policy_fd: int, authority_fds: Sequence[int]) -> None:
+    if (len(receipts) != len(RECEIPT_PHASES) or len(authority_fds) != len(RECEIPT_PHASES)
+            or len(set(authority_fds)) != len(authority_fds)):
+        raise ReleaseError("receipt_chain_length_invalid")
+    try:
+        policy_sha256 = _policy_sha256_from_fd(policy_fd)
+        previous_digest = None
+        records = {}
+        for ordinal, (path, phase) in enumerate(zip(receipts, RECEIPT_PHASES, strict=True)):
+            if path.is_symlink() or not path.is_file():
+                raise ReleaseError("receipt_file_invalid")
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                data, record = _read_receipt_fd(
+                    fd, request_id=request_id, source_sha=source_sha, phase=phase,
+                    owner_uid=RECEIPT_OWNER_UID, owner_gid=RECEIPT_OWNER_GID,
+                    policy_sha256=policy_sha256,
+                )
+            finally:
+                os.close(fd)
+            if record["ordinal"] != ordinal or record["previous_receipt_sha256"] != previous_digest:
+                raise ReleaseError("receipt_chain_invalid")
+            authority_data = _read_regular_fd(
+                authority_fds[ordinal], owner_uid=RECEIPT_OWNER_UID,
+                maximum=PHASE_DATA_MAX, code="phase_authority_file_invalid",
+            )
+            authority = parse_phase_authority(
+                authority_data, request_id=request_id, source_sha=source_sha, phase=phase,
+            )
+            if (record["phase_authority_sha256"] != hashlib.sha256(authority_data).hexdigest()
+                    or record["evidence"] != authority["evidence"]):
+                raise ReleaseError("phase_authority_mismatch")
+            _validate_phase_authority_timing(phase, authority, record["root_observation"])
+            records[phase] = record
+            previous_digest = hashlib.sha256(data).hexdigest()
+    finally:
+        os.close(policy_fd)
+        for fd in authority_fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    validate_receipt_chronology(records)
+    source = records["source"]["evidence"]
+    build = records["build"]["evidence"]
+    scan = records["scan"]["evidence"]
+    upload = records["upload"]["evidence"]
+    registry = records["registry"]["evidence"]
+    token = records["token-destroy"]["evidence"]
+    digest = records["digest"]["evidence"]
+    deploy = records["deploy-health"]["evidence"]
+    cleanup = records["cleanup"]["evidence"]
+    downstream = (registry, token, digest, deploy, cleanup)
+    if (source["commit_sha"] != source_sha
+            or build["source_sha"] != source["commit_sha"]
+            or any(build[key] != source[key] for key in ("tree_sha", "tree_manifest_sha256", "workflow_blob_sha", "dockerfile_blob_sha", "lockfile_blob_sha", "variables_manifest_sha256"))
+            or scan["source_sha"] != build["source_sha"]
+            or scan["tree_sha"] != build["tree_sha"]
+            or scan["oci_layout_sha256"] != build["oci_layout_sha256"]
+            or scan["oci_manifest_digest"] != build["oci_manifest_digest"]
+            or scan["provenance_sha256"] != build["provenance_sha256"]
+            or scan["provenance_subject_digest"] != build["provenance_subject_digest"]
+            or build["source_maps_sha256"] != upload["source_maps_sha256"]
+            or registry["source_sha"] != build["source_sha"]
+            or registry["tree_sha"] != build["tree_sha"]
+            or registry["oci_layout_sha256"] != build["oci_layout_sha256"]
+            or registry["image_digest"] != build["oci_manifest_digest"]
+            or registry["provenance_sha256"] != build["provenance_sha256"]
+            or registry["provenance_subject_digest"] != build["provenance_subject_digest"]
+            or any(record["source_sha"] != source_sha for record in downstream)
+            or any(record["tree_sha"] != source["tree_sha"] for record in downstream)
+            or any(record["image_digest"] != registry["image_digest"] for record in downstream)
+            or any(record["provenance_sha256"] != registry["provenance_sha256"] for record in downstream)
+            or not (token["token_destroyed_monotonic_ns"]
+                    < digest["durable_state_published_monotonic_ns"]
+                    < digest["durable_state_readback_monotonic_ns"]
+                    < records["deploy-health"]["root_observation"]["started_observed_monotonic_ns"])
+            or not (deploy["deploy_completed_monotonic_ns"]
+                    < deploy["health_started_monotonic_ns"]
+                    < deploy["health_completed_monotonic_ns"]
+                    < cleanup["cleanup_completed_monotonic_ns"])):
+        raise ReleaseError("receipt_authority_drift")
+
+
+def receipt_sha256(path: Path) -> str:
+    if path.is_symlink():
+        raise ReleaseError("receipt_file_invalid")
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        data = _read_regular_fd(fd, owner_uid=RECEIPT_OWNER_UID, maximum=RECEIPT_MAX, code="receipt_file_invalid")
+        return hashlib.sha256(data).hexdigest()
+    finally:
+        os.close(fd)
+
+
+def command_names() -> set[str]:
+    return set(CLI_COMMANDS)
+
+
+def persist_digest_state(path: Path, identity: dict, digest: str) -> None:
+    allowed = {"repository_id", "run_id", "run_attempt", "check_run_id", "action_id", "source_sha"}
+    if (set(identity) != allowed or type(identity["repository_id"]) is not int
+            or identity["repository_id"] != 1141163204
+            or any(not _exact_int(identity[key], minimum=1) for key in ("run_id", "run_attempt", "check_run_id"))
+            or identity["action_id"] != "ken-frontend-production-release"
+            or not isinstance(identity["source_sha"], str) or not SHA1.fullmatch(identity["source_sha"])
+            or not isinstance(digest, str) or not SHA256_DIGEST.fullmatch(digest)
+            or not path.name or path.name in {".", ".."} or path.is_symlink() or path.parent.is_symlink()):
+        raise ReleaseError("digest_state_invalid")
+    expected = {**identity, "image_digest": digest}
+    data = json.dumps(expected, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        directory = os.open(path.parent, directory_flags)
+    except OSError as exc:
+        raise ReleaseError("digest_state_directory_invalid") from exc
+    temporary = f".{path.name}.{secrets.token_hex(16)}.tmp"
+    fd = None
+    temp_exists = False
+
+    def existing_matches() -> bool:
+        try:
+            existing_fd = os.open(
+                path.name, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=directory,
+            )
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            raise ReleaseError("digest_state_existing_invalid") from exc
+        try:
+            info = os.fstat(existing_fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != RECEIPT_OWNER_UID
+                    or info.st_gid != RECEIPT_OWNER_GID or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size != len(data)):
+                raise ReleaseError("digest_state_existing_invalid")
+            current = b""
+            while len(current) < info.st_size:
+                chunk = os.read(existing_fd, info.st_size - len(current))
+                if not chunk:
+                    raise ReleaseError("digest_state_existing_invalid")
+                current += chunk
+            try:
+                parsed = json.loads(current.decode("utf-8"), object_pairs_hook=_no_duplicates)
+            except Exception as exc:
+                raise ReleaseError("digest_state_existing_invalid") from exc
+            if parsed != expected or current != data:
+                raise ReleaseError("digest_state_conflict")
+            os.fsync(existing_fd)
+            return True
+        finally:
+            os.close(existing_fd)
+
+    try:
+        parent = os.fstat(directory)
+        if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != RECEIPT_OWNER_UID
+                or parent.st_gid != RECEIPT_OWNER_GID or parent.st_mode & 0o077):
+            raise ReleaseError("digest_state_directory_invalid")
+        if existing_matches():
+            os.fsync(directory)
+            return
+        fd = os.open(
+            temporary,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            0o600, dir_fd=directory,
+        )
+        temp_exists = True
+        os.fchmod(fd, 0o600)
+        current = os.fstat(fd)
+        if current.st_uid != RECEIPT_OWNER_UID or current.st_gid != RECEIPT_OWNER_GID:
+            os.fchown(fd, RECEIPT_OWNER_UID, RECEIPT_OWNER_GID)
+        view = memoryview(data)
+        written = 0
+        while written < len(view):
+            count = os.write(fd, view[written:])
+            if type(count) is not int or count <= 0:
+                raise ReleaseError("digest_state_write_invalid")
+            written += count
+        current = os.fstat(fd)
+        if (current.st_size != len(data) or current.st_uid != RECEIPT_OWNER_UID
+                or current.st_gid != RECEIPT_OWNER_GID or current.st_nlink != 1
+                or stat.S_IMODE(current.st_mode) != 0o600):
+            raise ReleaseError("digest_state_write_invalid")
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        try:
+            os.link(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
+        except FileExistsError:
+            if not existing_matches():
+                raise ReleaseError("digest_state_conflict")
+        os.fsync(directory)
+        os.unlink(temporary, dir_fd=directory)
+        temp_exists = False
+        os.fsync(directory)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if temp_exists:
+            try:
+                os.unlink(temporary, dir_fd=directory)
+                os.fsync(directory)
+            except OSError:
+                pass
+        os.close(directory)
 
 
 def guarded_cleanup(path: Path, root: Path) -> None:
@@ -222,27 +1311,100 @@ def validate_identity_separation(uids: Sequence[int]) -> None:
         raise ReleaseError("identity_separation_invalid")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command", required=True)
-    scan = sub.add_parser("scan")
+def _write_digest_fd(fd: int, value: bytes) -> None:
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != RECEIPT_OWNER_UID or info.st_gid != RECEIPT_OWNER_GID
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size != 0):
+            raise ReleaseError("digest_output_invalid")
+        written = 0
+        while written < len(value):
+            count = os.write(fd, value[written:])
+            if type(count) is not int or count <= 0:
+                raise ReleaseError("digest_output_invalid")
+            written += count
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = SilentArgumentParser(add_help=False)
+    sub = parser.add_subparsers(dest="command", required=True, parser_class=SilentArgumentParser)
+    scan = sub.add_parser("scan", add_help=False)
     scan.add_argument("--secret-fd", type=int, required=True)
     scan.add_argument("paths", nargs="+", type=Path)
-    digest = sub.add_parser("digest")
+    digest = sub.add_parser("digest", add_help=False)
     digest.add_argument("manifest", type=Path)
-    args = parser.parse_args(argv)
+    digest.add_argument("--output-fd", type=int, required=True)
+    observe = sub.add_parser("observe-start", add_help=False)
+    observe.add_argument("--request-id", required=True)
+    observe.add_argument("--source-sha", required=True)
+    observe.add_argument("--phase", choices=RECEIPT_PHASES, required=True)
+    observe.add_argument("--actor-pid", type=int, required=True)
+    observe.add_argument("--firewall-phase")
+    observe.add_argument("--output", type=Path, required=True)
+    seal = sub.add_parser("seal-receipt", add_help=False)
+    seal.add_argument("--request-id", required=True)
+    seal.add_argument("--source-sha", required=True)
+    seal.add_argument("--phase", choices=RECEIPT_PHASES, required=True)
+    seal.add_argument("--data-fd", type=int, required=True)
+    seal.add_argument("--authority-fd", type=int, required=True)
+    seal.add_argument("--observation-fd", type=int, action="append", required=True)
+    seal.add_argument("--policy-fd", type=int, required=True)
+    seal.add_argument("--previous-receipt-fd", type=int)
+    seal.add_argument("--output", type=Path, required=True)
+    verify = sub.add_parser("verify-receipts", add_help=False)
+    verify.add_argument("--request-id", required=True)
+    verify.add_argument("--source-sha", required=True)
+    verify.add_argument("--policy-fd", type=int, required=True)
+    verify.add_argument("--authority-fd", type=int, action="append", required=True)
+    verify.add_argument("receipts", nargs=len(RECEIPT_PHASES), type=Path)
+    if set(sub.choices) != CLI_COMMANDS:
+        raise ReleaseError("command_contract_invalid")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = None
     try:
+        args = build_parser().parse_args(argv)
         if args.command == "scan":
             secret = os.read(args.secret_fd, 65537)
             if len(secret) > 65536: raise ReleaseError("secret_size_invalid")
             scan_paths(args.paths, secret)
             return 0
-        print(canonical_manifest_digest(args.manifest.read_bytes()))
+        if args.command == "digest":
+            _write_digest_fd(args.output_fd, canonical_manifest_digest(args.manifest.read_bytes()).encode())
+            return 0
+        if args.command == "observe-start":
+            if os.geteuid() != RECEIPT_OWNER_UID:
+                raise ReleaseError("receipt_coordinator_not_root")
+            observe_phase_start(
+                request_id=args.request_id, source_sha=args.source_sha, phase=args.phase,
+                actor_pid=args.actor_pid, firewall_phase=args.firewall_phase, output=args.output,
+            )
+            return 0
+        if os.geteuid() != RECEIPT_OWNER_UID:
+            raise ReleaseError("receipt_coordinator_not_root")
+        if args.command == "seal-receipt":
+            seal_phase_receipt_from_fds(
+                request_id=args.request_id, source_sha=args.source_sha, phase=args.phase,
+                data_fd=args.data_fd, authority_fd=args.authority_fd,
+                observation_fds=args.observation_fd, policy_fd=args.policy_fd,
+                previous_receipt_fd=args.previous_receipt_fd,
+                output=args.output,
+            )
+            return 0
+        verify_receipt_chain(
+            args.receipts, request_id=args.request_id, source_sha=args.source_sha,
+            policy_fd=args.policy_fd, authority_fds=args.authority_fd,
+        )
         return 0
     except (ReleaseError, OSError):
         return 1
     finally:
-        if getattr(args, "secret_fd", None) is not None:
+        if args is not None and getattr(args, "secret_fd", None) is not None:
             try: os.close(args.secret_fd)
             except OSError: pass
 

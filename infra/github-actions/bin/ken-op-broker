@@ -46,9 +46,33 @@ except ImportError:  # runtime lock makes this fatal outside parser-only imports
 MAX_PACKET = 65536
 MAX_OIDC = 16384
 MAX_GITHUB_TOKEN = 4096
+PLAN_SHA256 = "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658"
+FRONTEND_RECEIPT_PHASES = (
+    "source", "build", "scan", "upload", "registry", "token-destroy",
+    "digest", "deploy-health", "cleanup",
+)
+FRONTEND_RECEIPT_CONTRACT = {
+    "schema_version": 2,
+    "plan_sha256": PLAN_SHA256,
+    "policy_binding": "root-owned-runtime-policy-sha256",
+    "action_id": "ken-frontend-production-release",
+    "data_bytes_max": 16384,
+    "receipt_bytes_max": 16384,
+    "receipt_owner_uid": 0,
+    "receipt_owner_gid": 0,
+    "receipt_mode": "0600",
+    "chain": "sha256-canonical-json-with-external-root-authority",
+    "phase_authority": "root-owned-0600-canonical-json",
+    "chronology": "one-boot-strict-monotonic",
+    "runner_visible": False,
+    "phases": list(FRONTEND_RECEIPT_PHASES),
+}
+FRONTEND_RECEIPT_CONTRACT_SHA256 = hashlib.sha256(
+    json.dumps(FRONTEND_RECEIPT_CONTRACT, sort_keys=True, separators=(",", ":")).encode()
+).hexdigest()
 SHA1 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
-SAFE_REQUEST_ID = re.compile(r"^[0-9a-f]{32}$")
+SAFE_REQUEST_ID = re.compile(r"^[0-9a-f]{64}$")
 SAFE_REASON = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 ALLOWED_REQUEST_KEYS = frozenset({"version", "action_id", "artifact_id", "oidc_jwt", "github_token"})
 ALLOWED_RESPONSE_FIELDS = ("version", "request_id", "status", "reason_code")
@@ -410,7 +434,7 @@ def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -
         "website-production-fixed-target": ["website-ssh", "ken-so-public-health", "getken-ai-separation"],
         "beehiiv-api-fixed-target": ["beehiiv-api"],
         "github-ssh-ken-website-fixed-target": ["github-ssh"],
-        "frontend-production-digest-deploy": ["github-read", "node-base-read", "package-read", "posthog-upload", "ghcr-write", "frontend-deploy", "frontend-public-health"],
+        "frontend-production-digest-deploy": ["node-base-read", "package-read", "build-offline", "posthog-upload", "ghcr-write", "frontend-deploy", "frontend-public-health"],
     }
     if firewall["profiles"] != expected_profiles:
         raise Reject("policy_firewall_profiles_invalid")
@@ -449,7 +473,7 @@ def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -
             raise Reject("policy_artifact_invalid")
     if record.get("production_build"):
         build = record["production_build"]
-        _require_exact_keys(build, {"builder_uid", "builder_gid", "uploader_uid", "uploader_gid", "deploy_uid", "deploy_gid", "buildkit_version", "buildctl_version", "node_version", "pnpm_version", "base_image", "base_image_digest", "platform", "registry", "derived_tag_prefix", "secret_mount", "secret_command", "secret_network", "executes_repository_code_with_secret", "transformed_embedding_residual_accepted", "source_map_endpoint", "variables_manifest_sha256", "phase_transport_sha256", "deploy_contract_sha256", "builder", "uploader", "deploy", "github_read_paths", "github_denied_resources", "ghcr_hosts", "ghcr_methods", "ghcr_path_prefix", "leakage_encodings", "posthog_fields", "build_field"}, set(), "policy_build_schema_invalid")
+        _require_exact_keys(build, {"builder_uid", "builder_gid", "uploader_uid", "uploader_gid", "deploy_uid", "deploy_gid", "buildkit_version", "buildctl_version", "node_version", "pnpm_version", "base_image", "base_image_digest", "platform", "registry", "derived_tag_prefix", "secret_mount", "secret_command", "secret_network", "executes_repository_code_with_secret", "transformed_embedding_residual_accepted", "source_map_endpoint", "variables_manifest_sha256", "phase_transport_sha256", "deploy_contract_sha256", "builder", "uploader", "deploy", "github_read_paths", "github_denied_resources", "ghcr_hosts", "ghcr_methods", "ghcr_path_prefix", "leakage_encodings", "posthog_fields", "build_field", "firewall_phases", "receipt_contract"}, set(), "policy_build_schema_invalid")
         _require_exact_keys(build["builder"], {"slice", "cpu_quota", "memory_max", "memory_swap_max", "tasks_max", "disk_max_bytes", "timeout_seconds"}, set(), "policy_build_limits_invalid")
         _require_exact_keys(build["uploader"], {"slice", "cpu_quota", "memory_max", "memory_swap_max", "tasks_max"}, set(), "policy_build_limits_invalid")
         _require_exact_keys(build["deploy"], {"slice", "cpu_quota", "memory_max", "memory_swap_max", "tasks_max"}, set(), "policy_build_limits_invalid")
@@ -460,6 +484,32 @@ def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -
         _require_exact_int_fields(build["builder"], ("tasks_max", "disk_max_bytes", "timeout_seconds"), "policy_build_limits_invalid", minimum=1)
         _require_exact_int_fields(build["uploader"], ("tasks_max",), "policy_build_limits_invalid", minimum=1)
         _require_exact_int_fields(build["deploy"], ("tasks_max",), "policy_build_limits_invalid", minimum=1)
+        expected_frontend_phases = {
+            "node-base-read": {"uid": 22201, "targets": ["node-registry", "node-registry-auth"]},
+            "package-read": {"uid": 22201, "targets": ["package-read"]},
+            "build-offline": {"uid": 22201, "targets": []},
+            "posthog-upload": {"uid": 22202, "targets": ["posthog-upload"]},
+            "ghcr-write": {"uid": 22003, "targets": ["ghcr", "ghcr-storage"]},
+            "frontend-deploy": {"uid": 22203, "targets": ["frontend-deploy"]},
+            "frontend-public-health": {"uid": 22203, "targets": ["frontend-public-health"]},
+        }
+        if build["firewall_phases"] != expected_frontend_phases:
+            raise Reject("policy_build_firewall_invalid")
+        if raw["firewall_phase_interface"]["profiles"]["frontend-production-digest-deploy"] != list(expected_frontend_phases):
+            raise Reject("policy_build_firewall_invalid")
+        for phase in build["firewall_phases"].values():
+            _require_exact_keys(phase, {"uid", "targets"}, set(), "policy_build_firewall_invalid")
+            _require_exact_int_fields(phase, ("uid",), "policy_build_firewall_invalid", minimum=1)
+            if not isinstance(phase["targets"], list) or len(phase["targets"]) != len(set(phase["targets"])):
+                raise Reject("policy_build_firewall_invalid")
+        receipt_contract = build["receipt_contract"]
+        _require_exact_keys(receipt_contract, {"schema_version", "plan_sha256", "policy_binding", "contract_sha256", "action_id", "data_bytes_max", "receipt_bytes_max", "receipt_owner_uid", "receipt_owner_gid", "receipt_mode", "chain", "phase_authority", "chronology", "runner_visible", "phases"}, set(), "policy_build_receipt_invalid")
+        _require_exact_int_fields(receipt_contract, ("schema_version", "data_bytes_max", "receipt_bytes_max", "receipt_owner_uid", "receipt_owner_gid"), "policy_build_receipt_invalid", minimum=0)
+        if receipt_contract != {
+            **FRONTEND_RECEIPT_CONTRACT,
+            "contract_sha256": FRONTEND_RECEIPT_CONTRACT_SHA256,
+        }:
+            raise Reject("policy_build_receipt_invalid")
     if record["oidc"]["audience"] != raw["classes"][record["trust_class"]]["audience"]:
         raise Reject("policy_action_audience_invalid")
 
@@ -1158,6 +1208,93 @@ def materialize_source_commit_live(token: str, claims: Mapping[str, Any], action
     return source, tree, manifest
 
 
+def write_source_phase_authority(request_dir: Path, request_id: str, action: Action,
+                                 source_sha: str, tree_sha: str,
+                                 tree_manifest_sha256: str) -> Path:
+    build = action.raw.get("production_build") or {}
+    repo = action.raw.get("repository") or {}
+    object_ids = (
+        source_sha, tree_sha, repo.get("workflow_blob_sha"),
+        repo.get("dockerfile_blob_sha"), repo.get("lockfile_blob_sha"),
+    )
+    variables_manifest = build.get("variables_manifest_sha256")
+    if (action.action_id != "ken-frontend-production-release"
+            or not SAFE_REQUEST_ID.fullmatch(request_id)
+            or not all(isinstance(value, str) and SHA1.fullmatch(value) for value in object_ids)
+            or len(set(object_ids)) != len(object_ids)
+            or not SHA256.fullmatch(str(tree_manifest_sha256))
+            or not SHA256.fullmatch(str(variables_manifest or ""))
+            or repo.get("id") != 1141163204):
+        raise Reject("source_authority_invalid")
+    evidence = {
+        "repository_id": 1141163204,
+        "commit_sha": source_sha,
+        "tree_sha": tree_sha,
+        "tree_manifest_sha256": tree_manifest_sha256,
+        "workflow_blob_sha": repo["workflow_blob_sha"],
+        "dockerfile_blob_sha": repo["dockerfile_blob_sha"],
+        "lockfile_blob_sha": repo["lockfile_blob_sha"],
+        "variables_manifest_sha256": variables_manifest,
+    }
+    payload = {
+        "schema_version": 1,
+        "plan_sha256": PLAN_SHA256,
+        "receipt_contract_sha256": FRONTEND_RECEIPT_CONTRACT_SHA256,
+        "request_id": request_id,
+        "action_id": action.action_id,
+        "source_sha": source_sha,
+        "phase": "source",
+        "authority_kind": "broker-authenticated-git-object-graph",
+        "observed_monotonic_ns": time.monotonic_ns(),
+        "evidence": evidence,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    if len(encoded) > 16384:
+        raise Reject("source_authority_invalid")
+    directory = os.open(
+        request_dir,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+    )
+    name = "source.phase-authority.json"
+    fd = None
+    try:
+        info = os.fstat(directory)
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                or info.st_mode & 0o077):
+            raise Reject("source_authority_directory_invalid")
+        fd = os.open(
+            name,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            0o600, dir_fd=directory,
+        )
+        written = 0
+        while written < len(encoded):
+            count = os.write(fd, encoded[written:])
+            if type(count) is not int or count <= 0:
+                raise Reject("source_authority_write_invalid")
+            written += count
+        current = os.fstat(fd)
+        if (current.st_uid != 0 or current.st_gid != 0 or current.st_nlink != 1
+                or stat.S_IMODE(current.st_mode) != 0o600 or current.st_size != len(encoded)):
+            raise Reject("source_authority_write_invalid")
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        os.fsync(directory)
+    except Exception:
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.unlink(name, dir_fd=directory)
+            os.fsync(directory)
+        except OSError:
+            pass
+        raise
+    finally:
+        os.close(directory)
+    return request_dir / name
+
+
 def execute_fixed_action_live(action: Action, request_dir: Path, input_path: Path, claims: Mapping[str, Any], credential_fd: int, network_identity: tuple[int, int]) -> str:
     if action.input_mode == "production_build":
         raise Reject("production_build_transport_unavailable")
@@ -1432,7 +1569,7 @@ class DeployLeaseGate:
         self.writer = root / "production-waiting"
 
     def acquire(self, kind: str, request_id: str, *, block: bool) -> Lease:
-        if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", request_id): raise Reject("lease_request_invalid")
+        if not SAFE_REQUEST_ID.fullmatch(request_id): raise Reject("lease_request_invalid")
         operation = fcntl.LOCK_EX | (0 if block else fcntl.LOCK_NB)
         if kind == "ordinary":
             if self.writer.exists(): raise Reject("lease_exclusive_waiting")
@@ -1461,8 +1598,15 @@ class DeployLeaseGate:
         except FileNotFoundError: pass
 
 
+def new_request_id() -> str:
+    request_id = secrets.token_hex(32)
+    if not SAFE_REQUEST_ID.fullmatch(request_id):
+        raise Reject("request_id_generation_invalid")
+    return request_id
+
+
 def safe_response(request_id: str, status: str, reason_code: str) -> dict[str, Any]:
-    if not (SAFE_REQUEST_ID.fullmatch(request_id) or re.fullmatch(r"req-[A-Za-z0-9_-]{1,40}", request_id)):
+    if not SAFE_REQUEST_ID.fullmatch(request_id):
         raise ValueError("unsafe request ID")
     if status not in {"accepted", "succeeded", "rejected", "failed"} or not SAFE_REASON.fullmatch(reason_code):
         raise ValueError("unsafe response")
@@ -1698,7 +1842,7 @@ def verify_runtime_lock(path: Path) -> None:
     if (set(raw) != {"schema_version", "lock_version", "plan_sha256", "target", "compatibility", "runtime_contract", "components", "provenance_payloads", "installed_files", "verification"}
             or type(raw["schema_version"]) is not int or raw["schema_version"] != 1):
         raise Reject("runtime_lock_schema_invalid")
-    if raw["plan_sha256"] != "00e93ef99f75e4101028a4838156c730f4d6bb306f20e5340bf4812128171d0f":
+    if raw["plan_sha256"] != "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658":
         raise Reject("runtime_lock_plan_invalid")
     _require_exact_keys(raw["target"], {"os", "architecture"}, set(), "runtime_lock_target_invalid")
     if raw["target"] != {"os": "ubuntu-24.04", "architecture": "amd64"} or not isinstance(raw["lock_version"], str):
@@ -1758,8 +1902,17 @@ def verify_runtime_lock(path: Path) -> None:
         if count != 65536 or any(start <= value < start + count for value in used_ids):
             raise Reject("runtime_lock_subordinate_id_invalid")
     firewall = contract["firewall_phase_interface"]
-    _require_exact_keys(firewall, {"command", "arguments", "profile_authority", "caller_supplied_targets"}, set(), "runtime_lock_firewall_invalid")
-    if firewall != {"command":["/usr/local/libexec/ken-actions-guest-firewall","phase"], "arguments":["--request-id","{request_id}","--profile","{network_profile}","--phase","{phase}","--state","{activate|deactivate}"], "profile_authority":"inventory/op-broker-policy.yaml", "caller_supplied_targets":"forbidden"}:
+    _require_exact_keys(firewall, {"command", "arguments", "profile_authority", "caller_supplied_targets", "frontend_phase_ownership"}, set(), "runtime_lock_firewall_invalid")
+    expected_phase_ownership = {
+        "node-base-read": {"uid": 22201, "targets": ["node-registry", "node-registry-auth"]},
+        "package-read": {"uid": 22201, "targets": ["package-read"]},
+        "build-offline": {"uid": 22201, "targets": []},
+        "posthog-upload": {"uid": 22202, "targets": ["posthog-upload"]},
+        "ghcr-write": {"uid": 22003, "targets": ["ghcr", "ghcr-storage"]},
+        "frontend-deploy": {"uid": 22203, "targets": ["frontend-deploy"]},
+        "frontend-public-health": {"uid": 22203, "targets": ["frontend-public-health"]},
+    }
+    if firewall != {"command":["/usr/local/libexec/ken-actions-guest-firewall","phase"], "arguments":["--request-id","{request_id}","--profile","{network_profile}","--phase","{phase}","--state","{activate|deactivate}"], "profile_authority":"inventory/op-broker-policy.yaml", "caller_supplied_targets":"forbidden", "frontend_phase_ownership": expected_phase_ownership}:
         raise Reject("runtime_lock_firewall_invalid")
     deferred_transport = contract["deferred_execution_transport"]
     _require_exact_keys(deferred_transport, {"status", "binding", "transaction_slices", "frontend_bindings", "trusted_generation_bindings"}, set(), "runtime_lock_transport_invalid")
@@ -1912,7 +2065,7 @@ def _cleanup_request(path: Path, state_dir: Path) -> None:
 
 
 def process_connection(conn: socket.socket, policy: Policy, trust_class: str, state_dir: Path, credential_fd: int, dependencies: BrokerDependencies, *, peer: PeerIdentity | None = None, revalidate: Any = revalidate_peer) -> Mapping[str, Any]:
-    request_id = secrets.token_hex(16); fds: list[int] = []; replay_key: str | None = None; replay: ReplayStore | None = None; request_dir: Path | None = None; lease: Lease | None = None; execution_credential: int | None = None; github_token: bytearray | None = None
+    request_id = new_request_id(); fds: list[int] = []; replay_key: str | None = None; replay: ReplayStore | None = None; request_dir: Path | None = None; lease: Lease | None = None; execution_credential: int | None = None; github_token: bytearray | None = None
     try:
         accepted_peer = peer if peer is not None else peer_from_socket(conn)
         packet, ancillary, flags, _ = conn.recvmsg(MAX_PACKET + 1, socket.CMSG_SPACE(4 * 8))
@@ -1959,8 +2112,12 @@ def process_connection(conn: socket.socket, policy: Policy, trust_class: str, st
             input_path = extract_authenticated_zip(archive, request_dir / "input", max_entries=int(action.raw["artifact_input"]["max_entries"]), max_bytes=int(action.raw["artifact_input"]["max_extracted_bytes"]))
             verify_artifact_manifest(input_path, claims["sha"])
         else:
-            input_path, local_tree, _ = dependencies.materialize_source(github_token.decode("ascii"), claims, action, request_dir)
+            input_path, local_tree, local_manifest = dependencies.materialize_source(github_token.decode("ascii"), claims, action, request_dir)
             if local_tree != commit_record["tree"]["sha"]: raise Reject("source_tree_mismatch")
+            if action.input_mode == "production_build":
+                write_source_phase_authority(
+                    request_dir, request_id, action, claims["sha"], local_tree, local_manifest,
+                )
         replay.transition(replay_key, "executing")
         for index in range(len(github_token)): github_token[index] = 0
         github_token = None

@@ -1,6 +1,6 @@
 schema_version: 1
 lock_version: 2026-08-20.3
-plan_sha256: 00e93ef99f75e4101028a4838156c730f4d6bb306f20e5340bf4812128171d0f
+plan_sha256: 75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658
 target:
   os: ubuntu-24.04
   architecture: amd64
@@ -41,6 +41,14 @@ runtime_contract:
     arguments: [--request-id, '{request_id}', --profile, '{network_profile}', --phase, '{phase}', --state, '{activate|deactivate}']
     profile_authority: inventory/op-broker-policy.yaml
     caller_supplied_targets: forbidden
+    frontend_phase_ownership:
+      node-base-read: {uid: 22201, targets: [node-registry, node-registry-auth]}
+      package-read: {uid: 22201, targets: [package-read]}
+      build-offline: {uid: 22201, targets: []}
+      posthog-upload: {uid: 22202, targets: [posthog-upload]}
+      ghcr-write: {uid: 22003, targets: [ghcr, ghcr-storage]}
+      frontend-deploy: {uid: 22203, targets: [frontend-deploy]}
+      frontend-public-health: {uid: 22203, targets: [frontend-public-health]}
   startup_gates: [ken-actions-guest-firewall.service, ken-actions-guest-runtime-verify.service]
   deferred_execution_transport:
     status: unavailable
@@ -586,7 +594,7 @@ installed_files:
   - ken-deploy
   source: repo:bin/ken-op-exec
 - path: /usr/local/bin/ken-op-broker
-  sha256: 8d1c7859a1d4108e507d2f9a32acee8a1e26a10c212186fc751ab39e1c47d22e
+  sha256: ecd921f6a6f9771b91fef6ebf23a82351bcf8a767455dafefddb92a7311fbbe6
   hosts:
   - ken-ci
   - ken-deploy
@@ -597,7 +605,7 @@ installed_files:
   - ken-deploy
   source: repo:bin/ken-actions-artifact-download
 - path: /usr/local/bin/ken-frontend-production-release
-  sha256: e3eaecae902d36b58f4fb1bbeeca753d184a88c8d6bec25946cc8f08fd8f3889
+  sha256: 8a611e251c69ee0af1f66043d508695461decf271cc32b76dbe224833a17f183
   hosts:
   - ken-deploy
   source: repo:bin/ken-frontend-production-release
@@ -631,7 +639,7 @@ installed_files:
   hosts: [ken-ci, ken-deploy]
   source: repo:bin/runtime-known-answer.py
 - path: /etc/ken-op-broker/op-broker-policy.yaml
-  sha256: b1e15a9b74e3330c32eb63143d65f51fd1ec595c8eeb3a36cfb46abcc27cc89b
+  sha256: 4b9ae1aad60554b7ec6cff19147e9626922113e9a5019f3a36f11437d7f511e9
   hosts:
   - ken-ci
   - ken-deploy
