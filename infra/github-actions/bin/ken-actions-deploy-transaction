@@ -158,7 +158,7 @@ def strict_json(data: bytes, *, maximum: int = 65536) -> Any:
         raise TransportReject("json_invalid") from exc
 
 
-def strict_yaml(path: Path) -> Any:
+def _strict_yaml_text(text: str) -> Any:
     if yaml is None:
         raise TransportReject("yaml_runtime_missing")
 
@@ -176,14 +176,22 @@ def strict_yaml(path: Path) -> Any:
 
     Loader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
     try:
-        text = path.read_text(encoding="utf-8")
         for event in yaml.parse(text):
             if isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None) is not None or getattr(event, "tag", None) is not None:
                 raise TransportReject("yaml_feature_forbidden")
         return yaml.load(text, Loader=Loader)
     except TransportReject:
         raise
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+    except yaml.YAMLError as exc:
+        raise TransportReject("yaml_invalid") from exc
+
+
+def strict_yaml(path: Path) -> Any:
+    try:
+        return _strict_yaml_text(path.read_text(encoding="utf-8"))
+    except TransportReject:
+        raise
+    except (OSError, UnicodeError) as exc:
         raise TransportReject("yaml_invalid") from exc
 
 
@@ -2119,10 +2127,18 @@ def validate_manifest_schema(manifest: Any) -> Mapping[str, Any]:
         "artifacts", "task6_bindings",
     }, "manifest_schema_invalid")
     if (type(value["schema_version"]) is not int or value["schema_version"] != 1
-            or value["transport_version"] != "2026-08-20.2"
-            or value["status"] != "reviewed-transport-awaiting-task6-final-bindings"
             or value["enabled"] is not False or value["installation_authorized"] is not False
             or value["live_execution_authorized"] is not False):
+        raise TransportReject("manifest_state_invalid")
+    final_status = value["task6_final"].get("status") if isinstance(value["task6_final"], dict) else None
+    expected_state = {
+        "unavailable": ("2026-08-20.2", "reviewed-transport-awaiting-task6-final-bindings"),
+        "reviewed-final-bindings": (
+            "2026-08-20.3",
+            "reviewed-transport-bound-task6-final-awaiting-live-authorization",
+        ),
+    }.get(final_status)
+    if expected_state is None or (value["transport_version"], value["status"]) != expected_state:
         raise TransportReject("manifest_state_invalid")
     if value["authorities"] != {"plan_sha256": PLAN_SHA256, "matrix_sha256": MATRIX_SHA256}:
         raise TransportReject("manifest_authority_invalid")
@@ -2150,8 +2166,46 @@ def validate_manifest_schema(manifest: Any) -> Mapping[str, Any]:
         "task4_deploy_target_authority": "deferred-until-single-stop-readback",
     }:
         raise TransportReject("manifest_receipt_invalid")
-    if value["task6_final"] != {"status": "unavailable", "commit_sha": None, "policy_sha256": None, "runtime_lock_sha256": None}:
-        raise TransportReject("manifest_final_binding_invalid")
+    if final_status == "unavailable":
+        if value["task6_final"] != {
+            "status": "unavailable", "commit_sha": None,
+            "policy_sha256": None, "runtime_lock_sha256": None,
+        }:
+            raise TransportReject("manifest_final_binding_invalid")
+    else:
+        final = _exact_keys(value["task6_final"], {
+            "status", "commit_sha", "tree_sha", "task7_base_commit_sha",
+            "artifacts", "receipt_helper_provenance",
+        }, "manifest_final_binding_invalid")
+        identities = (final["commit_sha"], final["tree_sha"], final["task7_base_commit_sha"])
+        if any(not isinstance(identity, str) or not SHA1.fullmatch(identity) for identity in identities):
+            raise TransportReject("manifest_final_binding_invalid")
+        if len(set(identities)) != len(identities):
+            raise TransportReject("manifest_final_binding_invalid")
+        final_paths = {
+            "policy": "inventory/op-broker-policy.yaml",
+            "runtime_lock": "inventory/broker-runtime.lock.yaml",
+            "broker": "bin/ken-op-broker",
+            "client": "bin/ken-op-exec",
+            "broker_unit": "systemd/ken-op-broker@.service",
+        }
+        final_artifacts = _exact_keys(final["artifacts"], set(final_paths), "manifest_final_binding_invalid")
+        for name, expected_path in final_paths.items():
+            row = _exact_keys(final_artifacts[name], {"path", "git_blob_sha", "sha256"}, "manifest_final_binding_invalid")
+            if (row["path"] != expected_path
+                    or not isinstance(row["git_blob_sha"], str) or not SHA1.fullmatch(row["git_blob_sha"])
+                    or not isinstance(row["sha256"], str) or not SHA256.fullmatch(row["sha256"])):
+                raise TransportReject("manifest_final_binding_invalid")
+        receipts = value["task6_receipts"]
+        if final["receipt_helper_provenance"] != {
+            "reviewed_source_commit_sha": receipts["reviewed_source_commit_sha"],
+            "reviewed_source_tree_sha": receipts["reviewed_source_tree_sha"],
+            "helper_path": receipts["helper_path"],
+            "helper_blob_sha": receipts["helper_blob_sha"],
+            "helper_sha256": receipts["helper_sha256"],
+            "contract_sha256": receipts["contract_sha256"],
+        }:
+            raise TransportReject("manifest_final_binding_invalid")
     if value["leases"] != {
         "ordinary_slots": [
             {"slot": 1, "unit": "ken-actions-deploy-transaction-1.service", "slice": "ken-actions-deploy-transaction-1.slice"},
@@ -2187,16 +2241,138 @@ def validate_manifest_schema(manifest: Any) -> Mapping[str, Any]:
     return value
 
 
+def _git_blob_sha(payload: bytes) -> str:
+    return hashlib.sha1(f"blob {len(payload)}\0".encode() + payload).hexdigest()
+
+
+def _contains_recursive_manifest_binding(payload: bytes) -> bool:
+    try:
+        value = _strict_yaml_text(payload.decode("utf-8"))
+    except UnicodeError as exc:
+        raise TransportReject("manifest_final_artifact_invalid") from exc
+
+    forbidden = re.compile(r"^(?:task7|action[-_]?transport|transport)[-_]?manifest[-_]?sha256$", re.IGNORECASE)
+
+    def visit(current: Any) -> bool:
+        if isinstance(current, dict):
+            return any(
+                (isinstance(key, str) and forbidden.fullmatch(key) is not None) or visit(child)
+                for key, child in current.items()
+            )
+        if isinstance(current, list):
+            return any(visit(child) for child in current)
+        return False
+
+    return visit(value)
+
+
+def verify_task6_final_artifacts(manifest: Any, payloads: Mapping[str, bytes]) -> None:
+    value = validate_manifest_schema(manifest)
+    final = value["task6_final"]
+    if final["status"] == "unavailable":
+        if payloads:
+            raise TransportReject("manifest_final_artifact_invalid")
+        return
+    artifacts = final["artifacts"]
+    if not isinstance(payloads, dict) or set(payloads) != set(artifacts):
+        raise TransportReject("manifest_final_artifact_invalid")
+    for name, row in artifacts.items():
+        payload = payloads[name]
+        if not isinstance(payload, bytes) or not payload or len(payload) > 4 * 1024 * 1024:
+            raise TransportReject("manifest_final_artifact_invalid")
+        if hashlib.sha256(payload).hexdigest() != row["sha256"] or _git_blob_sha(payload) != row["git_blob_sha"]:
+            raise TransportReject("manifest_final_artifact_invalid")
+    if _contains_recursive_manifest_binding(payloads["policy"]) or _contains_recursive_manifest_binding(payloads["runtime_lock"]):
+        raise TransportReject("manifest_recursive_binding")
+
+
+def _git_read(repo_root: Path, *args: str, binary: bool = False) -> bytes | str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError as exc:
+        raise TransportReject("manifest_git_provenance_invalid") from exc
+    if result.returncode != 0:
+        raise TransportReject("manifest_git_provenance_invalid")
+    return result.stdout if binary else result.stdout.decode("ascii").strip()
+
+
+def verify_task6_final_repository(manifest: Any, repo_root: Path) -> None:
+    value = validate_manifest_schema(manifest)
+    final = value["task6_final"]
+    if final["status"] == "unavailable":
+        return
+    if not isinstance(repo_root, Path):
+        raise TransportReject("manifest_git_provenance_invalid")
+    commit = final["commit_sha"]
+    base = final["task7_base_commit_sha"]
+    if _git_read(repo_root, "cat-file", "-t", commit) != "commit":
+        raise TransportReject("manifest_git_provenance_invalid")
+    if _git_read(repo_root, "rev-parse", f"{commit}^{{tree}}") != final["tree_sha"]:
+        raise TransportReject("manifest_git_provenance_invalid")
+    if _git_read(repo_root, "cat-file", "-t", base) != "commit":
+        raise TransportReject("manifest_git_provenance_invalid")
+    _git_read(repo_root, "merge-base", "--is-ancestor", base, commit)
+    payloads: dict[str, bytes] = {}
+    for name, row in final["artifacts"].items():
+        repo_path = f"infra/github-actions/{row['path']}"
+        blob = _git_read(repo_root, "rev-parse", f"{commit}:{repo_path}")
+        if blob != row["git_blob_sha"] or _git_read(repo_root, "cat-file", "-t", blob) != "blob":
+            raise TransportReject("manifest_git_provenance_invalid")
+        payloads[name] = _git_read(repo_root, "cat-file", "blob", blob, binary=True)
+    helper = final["receipt_helper_provenance"]
+    helper_path = f"infra/github-actions/{helper['helper_path']}"
+    helper_blob = _git_read(repo_root, "rev-parse", f"{commit}:{helper_path}")
+    if (helper_blob != helper["helper_blob_sha"]
+            or _git_read(repo_root, "cat-file", "-t", helper_blob) != "blob"):
+        raise TransportReject("manifest_git_provenance_invalid")
+    helper_payload = _git_read(repo_root, "cat-file", "blob", helper_blob, binary=True)
+    if hashlib.sha256(helper_payload).hexdigest() != helper["helper_sha256"]:
+        raise TransportReject("manifest_git_provenance_invalid")
+    verify_task6_final_artifacts(value, payloads)
+
+
+def _task6_final_installed_payloads(final: Mapping[str, Any], policy_path: Path,
+                                    runtime_lock_path: Path) -> dict[str, bytes]:
+    root = _repo_root()
+    source_tree = root.name == "github-actions"
+    paths = {
+        "policy": policy_path,
+        "runtime_lock": runtime_lock_path,
+        "broker": root / "bin/ken-op-broker" if source_tree else Path("/usr/local/bin/ken-op-broker"),
+        "client": root / "bin/ken-op-exec" if source_tree else Path("/usr/local/bin/ken-op-exec"),
+        "broker_unit": root / "systemd/ken-op-broker@.service" if source_tree else Path("/etc/systemd/system/ken-op-broker@.service"),
+    }
+    if set(paths) != set(final["artifacts"]):
+        raise TransportReject("manifest_final_artifact_invalid")
+    return {name: _regular_root_file(file_path, maximum=4 * 1024 * 1024) for name, file_path in paths.items()}
+
+
 def verify_manifest(manifest_path: Path, policy_path: Path, runtime_lock_path: Path) -> None:
     manifest = validate_manifest_schema(strict_yaml(manifest_path))
     helper = load_frontend_receipt_helper()
     if helper.RECEIPT_CONTRACT_SHA256 != manifest["task6_receipts"]["contract_sha256"]:
         raise TransportReject("manifest_receipt_invalid")
-    core = manifest["task6_core"]
-    if core.get("policy_sha256") != hashlib.sha256(_regular_root_file(policy_path)).hexdigest():
-        raise TransportReject("manifest_policy_invalid")
-    if core.get("runtime_lock_sha256") != hashlib.sha256(_regular_root_file(runtime_lock_path)).hexdigest():
-        raise TransportReject("manifest_runtime_lock_invalid")
+    final = manifest["task6_final"]
+    if final["status"] == "unavailable":
+        core = manifest["task6_core"]
+        if core.get("policy_sha256") != hashlib.sha256(_regular_root_file(policy_path)).hexdigest():
+            raise TransportReject("manifest_policy_invalid")
+        if core.get("runtime_lock_sha256") != hashlib.sha256(_regular_root_file(runtime_lock_path)).hexdigest():
+            raise TransportReject("manifest_runtime_lock_invalid")
+    else:
+        verify_task6_final_artifacts(
+            manifest,
+            _task6_final_installed_payloads(final, policy_path, runtime_lock_path),
+        )
+        root = _repo_root()
+        repo_root = root.parent.parent
+        if root.name == "github-actions" and (repo_root / ".git").exists():
+            verify_task6_final_repository(manifest, repo_root)
     if manifest["task6_bindings"] != binding_digests():
         raise TransportReject("manifest_binding_invalid")
     for row in manifest["artifacts"].values():

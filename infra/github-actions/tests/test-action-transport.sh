@@ -1151,6 +1151,190 @@ class TransportTests(unittest.TestCase):
             with self.assertRaises(transport.TransportReject):
                 transport.validate_manifest_schema(mutation)
 
+    def test_manifest_candidate_final_binding_is_nonrecursive_and_byte_verified(self):
+        import subprocess
+        import yaml
+
+        ga_root = Path(path).parent.parent
+        repo_root = ga_root.parent.parent
+        manifest = yaml.safe_load((ga_root / "inventory/action-transport.lock.yaml").read_text())
+        manifest["transport_version"] = "2026-08-20.3"
+        manifest["status"] = "reviewed-transport-bound-task6-final-awaiting-live-authorization"
+        manifest["task6_final"] = {
+            "status": "reviewed-final-bindings",
+            "commit_sha": "81483ceaf4bbe428afe0dfe6e370003fdf740766",
+            "tree_sha": "46cd45ba7f570a8cb6be54811848027eb75e4d97",
+            "task7_base_commit_sha": "f672e261e4d11cf0c46b5133145676190341aab8",
+            "artifacts": {
+                "policy": {
+                    "path": "inventory/op-broker-policy.yaml",
+                    "git_blob_sha": "ff27efdb9f27fdeacd01cb68c0283a03db061af4",
+                    "sha256": "954c62d37b725b9669a0178a7dfa97b971419bc8f42a020da11469b45d4f4c62",
+                },
+                "runtime_lock": {
+                    "path": "inventory/broker-runtime.lock.yaml",
+                    "git_blob_sha": "d5ee3a5aa556255b4f3958362395c172d637f15c",
+                    "sha256": "8471b852e67ab3d2f53147ec1fc5e2f5ca6529d2145a307d97fbd3c5069dad90",
+                },
+                "broker": {
+                    "path": "bin/ken-op-broker",
+                    "git_blob_sha": "3125519f70f6a2802e38003d83c81033aa192960",
+                    "sha256": "211f11be2df8b085cc5ebd5815fb3d8fd10209ae34010961113cad351a481ff9",
+                },
+                "client": {
+                    "path": "bin/ken-op-exec",
+                    "git_blob_sha": "90e5a39253a082598d15533f8f4d620e84468953",
+                    "sha256": "2b55d1e7687929d12edec6fe220ed84274b0d2f465f562960239064c82a1922a",
+                },
+                "broker_unit": {
+                    "path": "systemd/ken-op-broker@.service",
+                    "git_blob_sha": "f3e764545d133863aabb8ea2760bf74f31e8cc1a",
+                    "sha256": "dbc0f8da004054a28e9a4675cd6d10d5f17d73b2ca932b022dea632394cf7989",
+                },
+            },
+            "receipt_helper_provenance": {
+                "reviewed_source_commit_sha": "45c55b6fc0cd2752d2869c4517475c86004a1e91",
+                "reviewed_source_tree_sha": "e8da0e42c2593ff4bb284d7bc52320cefb1ba517",
+                "helper_path": "bin/ken-frontend-production-release",
+                "helper_blob_sha": "ad56d39488c749a29486d2a842d713bbd838fa7d",
+                "helper_sha256": "8a611e251c69ee0af1f66043d508695461decf271cc32b76dbe224833a17f183",
+                "contract_sha256": "d5ebeb58afb5f5e24bc1b6a6e74934ee3a22ae337b103a085d2df9a5776db63c",
+            },
+        }
+        payloads = {
+            name: (ga_root / row["path"]).read_bytes()
+            for name, row in manifest["task6_final"]["artifacts"].items()
+        }
+
+        transport.validate_manifest_schema(manifest)
+        transport.verify_task6_final_artifacts(manifest, payloads)
+        transport.verify_task6_final_repository(manifest, repo_root)
+
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_root = Path(directory)
+            for name, row in manifest["task6_final"]["artifacts"].items():
+                target = fixture_root / "infra/github-actions" / row["path"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(payloads[name])
+            helper_target = fixture_root / "infra/github-actions/bin/ken-frontend-production-release"
+            helper_target.write_bytes((ga_root / "bin/ken-frontend-production-release").read_bytes())
+
+            def git(*arguments):
+                return subprocess.run(
+                    ["git", "-C", str(fixture_root), *arguments],
+                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                ).stdout.strip()
+
+            git("init", "-q")
+            git("config", "user.name", "Task7 Fixture")
+            git("config", "user.email", "task7-fixture@example.invalid")
+            git("add", "infra/github-actions")
+            git("commit", "-q", "-m", "task7 stable base")
+            fixture_base = git("rev-parse", "HEAD")
+            helper_target.write_bytes(b"tampered receipt helper\n")
+            broker_target = fixture_root / "infra/github-actions/bin/ken-op-broker"
+            broker_target.write_bytes(broker_target.read_bytes() + b"\n# final binding fixture\n")
+            git("add", "infra/github-actions")
+            git("commit", "-q", "-m", "task6 final binding")
+
+            tampered_helper = copy.deepcopy(manifest)
+            final = tampered_helper["task6_final"]
+            final["commit_sha"] = git("rev-parse", "HEAD")
+            final["tree_sha"] = git("rev-parse", "HEAD^{tree}")
+            final["task7_base_commit_sha"] = fixture_base
+            for row in final["artifacts"].values():
+                target = fixture_root / "infra/github-actions" / row["path"]
+                data = target.read_bytes()
+                row["git_blob_sha"] = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+                row["sha256"] = hashlib.sha256(data).hexdigest()
+            with self.assertRaises(transport.TransportReject):
+                transport.verify_task6_final_repository(tampered_helper, fixture_root)
+
+        for key in ("commit_sha", "tree_sha", "task7_base_commit_sha"):
+            wrong_type = copy.deepcopy(manifest)
+            wrong_type["task6_final"][key] = True
+            with self.assertRaises(transport.TransportReject):
+                transport.validate_manifest_schema(wrong_type)
+
+        missing = copy.deepcopy(manifest)
+        del missing["task6_final"]["tree_sha"]
+        with self.assertRaises(transport.TransportReject):
+            transport.validate_manifest_schema(missing)
+
+        recursive = copy.deepcopy(manifest)
+        recursive["task6_final"]["action_transport_manifest_sha256"] = "f" * 64
+        with self.assertRaises(transport.TransportReject):
+            transport.validate_manifest_schema(recursive)
+
+        for key in ("enabled", "installation_authorized", "live_execution_authorized"):
+            false_ready = copy.deepcopy(manifest)
+            false_ready[key] = True
+            with self.assertRaises(transport.TransportReject):
+                transport.validate_manifest_schema(false_ready)
+
+        wrong_path = copy.deepcopy(manifest)
+        wrong_path["task6_final"]["artifacts"]["broker"]["path"] = "bin/caller-selected"
+        with self.assertRaises(transport.TransportReject):
+            transport.validate_manifest_schema(wrong_path)
+
+        wrong_receipt = copy.deepcopy(manifest)
+        wrong_receipt["task6_final"]["receipt_helper_provenance"]["helper_sha256"] = "0" * 64
+        with self.assertRaises(transport.TransportReject):
+            transport.validate_manifest_schema(wrong_receipt)
+
+        for key in ("commit_sha", "tree_sha"):
+            wrong_git = copy.deepcopy(manifest)
+            wrong_git["task6_final"][key] = "0" * 40
+            with self.assertRaises(transport.TransportReject):
+                transport.verify_task6_final_repository(wrong_git, repo_root)
+
+        wrong_base = copy.deepcopy(manifest)
+        wrong_base["task6_final"]["task7_base_commit_sha"] = "0" * 40
+        with self.assertRaises(transport.TransportReject):
+            transport.verify_task6_final_repository(wrong_base, repo_root)
+
+        wrong_blob = copy.deepcopy(manifest)
+        wrong_blob["task6_final"]["artifacts"]["broker"]["git_blob_sha"] = "0" * 40
+        with self.assertRaises(transport.TransportReject):
+            transport.verify_task6_final_artifacts(wrong_blob, payloads)
+        with self.assertRaises(transport.TransportReject):
+            transport.verify_task6_final_repository(wrong_blob, repo_root)
+
+        wrong_hash = copy.deepcopy(manifest)
+        wrong_hash["task6_final"]["artifacts"]["client"]["sha256"] = "0" * 64
+        with self.assertRaises(transport.TransportReject):
+            transport.verify_task6_final_artifacts(wrong_hash, payloads)
+
+        recursive_policy = payloads["policy"] + b"\naction_transport_manifest_sha256: " + b"f" * 64 + b"\n"
+        recursive_payloads = dict(payloads, policy=recursive_policy)
+        recursive_bytes = copy.deepcopy(manifest)
+        row = recursive_bytes["task6_final"]["artifacts"]["policy"]
+        row["git_blob_sha"] = hashlib.sha1(
+            f"blob {len(recursive_policy)}\0".encode() + recursive_policy
+        ).hexdigest()
+        row["sha256"] = hashlib.sha256(recursive_policy).hexdigest()
+        with self.assertRaises(transport.TransportReject):
+            transport.verify_task6_final_artifacts(recursive_bytes, recursive_payloads)
+
+        recursive_flow_policy = (
+            payloads["policy"] + b"\nrecursive: {action_transport_manifest_sha256: " + b"e" * 64 + b"}\n"
+        )
+        recursive_flow_payloads = dict(payloads, policy=recursive_flow_policy)
+        recursive_flow = copy.deepcopy(manifest)
+        row = recursive_flow["task6_final"]["artifacts"]["policy"]
+        row["git_blob_sha"] = hashlib.sha1(
+            f"blob {len(recursive_flow_policy)}\0".encode() + recursive_flow_policy
+        ).hexdigest()
+        row["sha256"] = hashlib.sha256(recursive_flow_policy).hexdigest()
+        with self.assertRaises(transport.TransportReject):
+            transport.verify_task6_final_artifacts(recursive_flow, recursive_flow_payloads)
+
+        with tempfile.TemporaryDirectory() as directory:
+            duplicate = Path(directory) / "candidate.yaml"
+            duplicate.write_text(yaml.safe_dump(manifest, sort_keys=False) + "\ntask6_final: {}\n")
+            with self.assertRaises(transport.TransportReject):
+                transport.strict_yaml(duplicate)
+
 
 suite = unittest.defaultTestLoader.loadTestsFromTestCase(TransportTests)
 result = unittest.TextTestRunner(verbosity=2).run(suite)
