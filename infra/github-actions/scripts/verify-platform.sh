@@ -524,6 +524,31 @@ def run_json(command, payload=None):
         raise VerificationError(f"read-only command returned invalid JSON: {command[0]}") from error
 
 
+def gh_paginated(gh_bin, endpoint, collection):
+    collected = []
+    expected_total = None
+    separator = "&" if "?" in endpoint else "?"
+    for page in range(1, 101):
+        response = run_json([gh_bin, "api", f"{endpoint}{separator}per_page=100&page={page}", "--method", "GET"])
+        items = response.get(collection)
+        if not isinstance(items, list) or len(items) > 100:
+            raise VerificationError(f"GitHub pagination returned invalid {collection} page")
+        page_total = response.get("total_count")
+        if page_total is not None:
+            if not isinstance(page_total, int) or page_total < 0 or (expected_total is not None and page_total != expected_total):
+                raise VerificationError(f"GitHub pagination returned inconsistent {collection} total")
+            expected_total = page_total
+        collected.extend(items)
+        if expected_total is not None:
+            if len(collected) == expected_total:
+                return collected
+            if len(collected) > expected_total or len(items) < 100:
+                raise VerificationError(f"GitHub pagination returned incomplete {collection} inventory")
+        elif len(items) < 100:
+            return collected
+    raise VerificationError(f"GitHub pagination exceeded the reviewed limit for {collection}")
+
+
 def ssh_verify(ssh_bin, host, guest, payload):
     command = [
         ssh_bin, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
@@ -601,27 +626,29 @@ def run_live(platform, args):
         raise VerificationError("host must be root@167.235.8.250")
     gh_bin = command_path("gh", "KEN_RUNNER_GH_BIN")
     ssh_bin = command_path("ssh", "KEN_RUNNER_SSH_BIN")
-    group_response = run_json([gh_bin, "api", f"orgs/{platform['organization']}/actions/runner-groups?per_page=100", "--method", "GET"])
-    groups = {item.get("name"): item for item in group_response.get("runner_groups", [])}
+    group_items = gh_paginated(gh_bin, f"orgs/{platform['organization']}/actions/runner-groups", "runner_groups")
+    groups = {item.get("name"): item for item in group_items}
+    if len(groups) != len(group_items):
+        raise VerificationError("live runner groups contain duplicate names")
     for key in ("ci", "deploy"):
         desired_group = platform["groups"][key]
         actual_group = groups.get(desired_group["name"])
         if actual_group is None or actual_group.get("visibility") != "selected" or actual_group.get("allows_public_repositories") is not False:
             raise VerificationError(f"live runner group mismatch: {key}")
-        repositories = run_json([gh_bin, "api", f"orgs/{platform['organization']}/actions/runner-groups/{actual_group['id']}/repositories", "--method", "GET"])
-        if sorted(item.get("id") for item in repositories.get("repositories", [])) != sorted(item["repository_id"] for item in desired_group["repositories"]):
+        repositories = gh_paginated(gh_bin, f"orgs/{platform['organization']}/actions/runner-groups/{actual_group['id']}/repositories", "repositories")
+        if sorted(item.get("id") for item in repositories) != sorted(item["repository_id"] for item in desired_group["repositories"]):
             raise VerificationError(f"live runner group repository drift: {key}")
-        members = run_json([gh_bin, "api", f"orgs/{platform['organization']}/actions/runner-groups/{actual_group['id']}/runners?per_page=100", "--method", "GET"])
-        actual_names = {item.get("name") for item in members.get("runners", [])}
+        members = gh_paginated(gh_bin, f"orgs/{platform['organization']}/actions/runner-groups/{actual_group['id']}/runners", "runners")
+        actual_names = {item.get("name") for item in members}
         expected_names = {runner["name"] for runner in platform["runners"] if runner["enabled"] and runner["runner_group"] == key}
         if actual_names != expected_names:
             raise VerificationError(f"live runner group membership drift: {key}")
-    github = run_json([gh_bin, "api", f"orgs/{platform['organization']}/actions/runners?per_page=100", "--method", "GET"])
+    github = gh_paginated(gh_bin, f"orgs/{platform['organization']}/actions/runners", "runners")
     desired = {runner["name"]: runner for runner in platform["runners"] if runner["enabled"]}
     disabled = {runner["name"] for runner in platform["runners"] if not runner["enabled"]}
     actual = {
         runner.get("name"): runner
-        for runner in github.get("runners", [])
+        for runner in github
         if str(runner.get("name", "")).startswith(("ken-ci-", "ken-deploy-"))
     }
     if disabled & set(actual) or set(actual) != set(desired):

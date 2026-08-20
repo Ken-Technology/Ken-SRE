@@ -587,11 +587,25 @@ with tempfile.TemporaryDirectory() as temporary:
     })
     command_log = live_root / "commands.jsonl"
     state_path = live_root / "state.json"
+    repository_catalog_path = live_root / "repository-catalog.json"
+    write_json(repository_catalog_path, {
+        item["name"]: {
+            "id": item["repository_id"],
+            "name": item["name"],
+            "full_name": f"Ken-Technology/{item['name']}",
+            "private": True,
+            "visibility": "private",
+            "archived": False,
+            "owner": {"login": "Ken-Technology"},
+        }
+        for item in platform["groups"]["ci"]["repositories"]
+    })
     write_json(state_path, {"groups": {}, "repositories": {}, "runners": {}, "guests": {}})
     fake_gh = live_root / "gh"
     fake_gh.write_text(r'''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 state_path = Path(os.environ["KEN_FAKE_LIVE_STATE"])
 log_path = Path(os.environ["KEN_FAKE_COMMAND_LOG"])
 args = sys.argv[1:]
@@ -602,8 +616,10 @@ if args[:2] == ["api", "user"]:
     raise SystemExit
 method = "GET"
 if "--method" in args: method = args[args.index("--method") + 1]
-endpoint = next((arg for arg in args[1:] if arg.startswith("orgs/")), "")
+endpoint = next((arg for arg in args[1:] if arg.startswith(("orgs/", "repos/"))), "")
 clean_endpoint = endpoint.split("?",1)[0]
+query = parse_qs(urlsplit("/" + endpoint).query)
+page = int(query.get("page", ["1"])[0])
 if clean_endpoint.endswith("actions/runner-groups") and method == "GET":
     print(json.dumps({"runner_groups": list(state["groups"].values())}))
 elif clean_endpoint.endswith("actions/runner-groups") and method == "POST":
@@ -625,9 +641,24 @@ elif clean_endpoint.endswith("/repositories") and method == "GET" and "runner-gr
     print(json.dumps({"repositories":[{"id":value} for value in state["repositories"][group["name"]]]}))
 elif clean_endpoint.endswith("/runners") and method == "GET" and "runner-groups" in clean_endpoint:
     group_id = int(clean_endpoint.split("/")[4])
-    print(json.dumps({"runners":[value for value in state["runners"].values() if value.get("runner_group_id") == group_id]}))
+    values = [value for value in state["runners"].values() if value.get("runner_group_id") == group_id]
+    print(json.dumps({"total_count":len(values),"runners":values if page == 1 else []}))
 elif clean_endpoint.endswith("actions/runners") and method == "GET":
-    print(json.dumps({"runners":list(state["runners"].values())}))
+    values = list(state["runners"].values())
+    if os.environ.get("KEN_FAKE_GH_DISABLED_RUNNER_ON_PAGE_2") == "1":
+        unrelated = [{"name":f"unrelated-runner-{index:03d}","status":"offline","busy":False,"labels":[]} for index in range(100-len(values))]
+        disabled = {"name":"ken-ci-standard-09","status":"online","busy":False,"labels":["self-hosted","linux","x64","ken-ci","standard"]}
+        pages = {1: values + unrelated, 2: [disabled]}
+        print(json.dumps({"total_count":101,"runners":pages.get(page, [])}))
+    else:
+        print(json.dumps({"total_count":len(values),"runners":values if page == 1 else []}))
+elif clean_endpoint.startswith("repos/Ken-Technology/") and method == "GET":
+    name = clean_endpoint.rsplit("/", 1)[-1]
+    catalog = json.loads(Path(os.environ["KEN_FAKE_REPOSITORY_CATALOG"]).read_text())
+    repository = catalog[name]
+    if os.environ.get("KEN_FAKE_GH_STALE_REPOSITORY") == name:
+        repository = {**repository, "private":False, "visibility":"public", "archived":True}
+    print(json.dumps(repository))
 elif clean_endpoint.endswith("registration-token") and method == "POST":
     print(json.dumps({"token":"short-lived-registration-token","expires_at":"2099-01-01T00:00:00Z"}))
 elif clean_endpoint.endswith("remove-token") and method == "POST":
@@ -658,6 +689,9 @@ if mode == "probe":
     print(json.dumps(state["guests"].get(name, {"status":"absent","name":name})))
 elif mode == "apply":
     if payload.get("registration_token") != "short-lived-registration-token": raise SystemExit(65)
+    if name == "ken-ci-standard-01" and os.environ.get("KEN_FAKE_SSH_ECHO_REGISTRATION_TOKEN") == "1":
+        print(f"remote config failure argv: --token {payload['registration_token']}", file=sys.stderr)
+        raise SystemExit(69)
     fail_stage = os.environ.get("KEN_FAKE_SSH_FAIL_APPLY_STAGE")
     if name == "ken-ci-standard-01" and fail_stage in {"before-download", "before-config"}:
         state["guests"][name] = {"status":"partial","stage":fail_stage,"transaction_id":payload["transaction_id"]}
@@ -687,9 +721,16 @@ else:
         "KEN_RUNNER_SSH_BIN": str(fake_ssh),
         "KEN_FAKE_LIVE_STATE": str(state_path),
         "KEN_FAKE_COMMAND_LOG": str(command_log),
+        "KEN_FAKE_REPOSITORY_CATALOG": str(repository_catalog_path),
         "KEN_RUNNER_JOURNAL_DIR": str(live_root / "journals"),
     }
     approved_command = ["bash", str(register), "--org", "Ken-Technology", "--all", "--approval-evidence", str(approval_path)]
+    stale_repository_name = platform["groups"]["ci"]["repositories"][0]["name"]
+    stale_log_start = len(command_log.read_text().splitlines()) if command_log.exists() else 0
+    stale_repository = call(approved_command, env={**live_env, "KEN_FAKE_GH_STALE_REPOSITORY": stale_repository_name})
+    stale_records = [json.loads(line) for line in command_log.read_text().splitlines()[stale_log_start:]]
+    check(stale_repository.returncode != 0 and "fresh repository" in stale_repository.stderr.lower() and any(f"repos/Ken-Technology/{stale_repository_name}" in " ".join(record.get("args", [])) for record in stale_records if record.get("tool") == "gh") and not any("repositories/" in " ".join(record.get("args", [])) and "PUT" in record.get("args", []) for record in stale_records if record.get("tool") == "gh"), "live linking freshly resolves repository ID/privacy/archive state before any PUT", stale_repository)
+    check(json.loads(state_path.read_text()) == {"groups": {}, "repositories": {}, "runners": {}, "guests": {}}, "fresh repository refusal rolls back the transaction-created group")
     live_first = call(approved_command, env=live_env)
     check(live_first.returncode == 0 and "REGISTERED_RUNNERS=12" in live_first.stdout and "REGISTRATION_MODE=live-guarded" in live_first.stdout, "approved guarded transport converges exact live runner set", live_first)
     if live_first.returncode != 0:
@@ -706,6 +747,10 @@ else:
     check(len(deploy_apply_records) == 2 and all(expected_deploy_slices <= set(record["payload"]["units"]) for record in deploy_apply_records), "guarded live install carries every reviewed deploy aggregate/child slice")
     verified_live = call(["bash", str(verify), "runners", "--approval-evidence", str(approval_path)], env=live_env)
     check(verified_live.returncode == 0 and "RUNNERS_OK=12" in verified_live.stdout and "VERIFY_MODE=live-read-only" in verified_live.stdout, "approved live verifier uses read-only gh/SSH transport", verified_live)
+    pagination_log_start = len(command_log.read_text().splitlines())
+    hidden_disabled = call(["bash", str(verify), "runners", "--approval-evidence", str(approval_path)], env={**live_env, "KEN_FAKE_GH_DISABLED_RUNNER_ON_PAGE_2": "1"})
+    pagination_records = [json.loads(line) for line in command_log.read_text().splitlines()[pagination_log_start:]]
+    check(hidden_disabled.returncode != 0 and "exact 10 CI + 2 deploy" in hidden_disabled.stderr and any("page=2" in " ".join(record.get("args", [])) for record in pagination_records if record.get("tool") == "gh"), "live verifier paginates and rejects a disabled runner on page two", hidden_disabled)
 
     write_json(state_path, {"groups": {}, "repositories": {}, "runners": {}, "guests": {}})
     failed_live = call(approved_command, env={**live_env, "KEN_RUNNER_TEST_FAIL_AFTER_LIVE": "ken-ci-standard-01"})
@@ -718,6 +763,11 @@ else:
 
     register_text = register.read_text()
     check('config.is_symlink() or (config.exists() and not config.is_file())' in register_text and 'elif config.is_file()' in register_text, "remote rollback skips an absent config.sh and refuses an unsafe one")
+    check('subprocess.run(command, check=True' not in register_text and 'stdout=subprocess.DEVNULL' in register_text and 'stderr=subprocess.DEVNULL' in register_text, "remote config failure cannot serialize token-bearing argv or child output")
+    write_json(state_path, {"groups": {}, "repositories": {}, "runners": {}, "guests": {}})
+    token_failure = call(approved_command, env={**live_env, "KEN_FAKE_SSH_ECHO_REGISTRATION_TOKEN": "1"})
+    token_failure_output = token_failure.stdout + token_failure.stderr
+    check(token_failure.returncode != 0 and "short-lived-registration-token" not in token_failure_output, "SSH failure propagation redacts a registration token echoed by the remote process", token_failure)
     for failure_stage in ("before-download", "before-config"):
         write_json(state_path, {"groups": {}, "repositories": {}, "runners": {}, "guests": {}})
         partial_failure = call(approved_command, env={**live_env, "KEN_FAKE_SSH_FAIL_APPLY_STAGE": failure_stage})

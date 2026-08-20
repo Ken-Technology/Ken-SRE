@@ -825,8 +825,20 @@ if mode == "apply":
         "--labels", ",".join(expected["labels"]), "--work", expected["work_root"],
         "--disableupdate",
     ]
-    subprocess.run(command, check=True, env={"PATH": "/usr/bin:/bin", "HOME": expected["home"]})
+    try:
+        config_result = subprocess.run(
+            command,
+            check=False,
+            env={"PATH": "/usr/bin:/bin", "HOME": expected["home"]},
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as error:
+        token = ""
+        raise SystemExit(f"runner configuration execution failed: {type(error).__name__}")
     token = ""
+    if config_result.returncode != 0:
+        raise SystemExit(f"runner configuration failed: exit {config_result.returncode}")
     runner_root = Path(expected["runner_root"])
     for path in runner_root.rglob("*"):
         if path.is_symlink():
@@ -873,9 +885,15 @@ if mode == "rollback":
     token = request.pop("removal_token", "")
     rollback_failures = []
 
-    def cleanup_command(label, argv, env=None):
+    def cleanup_command(label, argv, env=None, suppress_output=False):
         try:
-            result = subprocess.run(argv, check=False, env=env)
+            result = subprocess.run(
+                argv,
+                check=False,
+                env=env,
+                stdout=subprocess.DEVNULL if suppress_output else None,
+                stderr=subprocess.DEVNULL if suppress_output else None,
+            )
         except OSError as error:
             rollback_failures.append(f"{label}:exec-{type(error).__name__}")
             return
@@ -893,6 +911,7 @@ if mode == "rollback":
             "remove-registration",
             ["runuser", "-u", user, "--", str(config), "remove", "--unattended", "--token", token],
             {"PATH": "/usr/bin:/bin", "HOME": expected["home"]},
+            True,
         )
     token = ""
     for unit_name in marker_record.get("created_units", []):
@@ -1010,7 +1029,8 @@ def run_command_json(command, *, input_value=None):
         capture_output=True,
     )
     if result.returncode != 0:
-        raise ContractError(f"command failed without accepted state: {command[0]} exit {result.returncode}: {result.stderr.strip()[:300]}")
+        detail = "" if input_value is not None else f": {result.stderr.strip()[:300]}"
+        raise ContractError(f"command failed without accepted state: {command[0]} exit {result.returncode}{detail}")
     try:
         return json.loads(result.stdout) if result.stdout.strip() else {}
     except json.JSONDecodeError as error:
@@ -1022,6 +1042,47 @@ def gh_api(gh_bin, endpoint, method="GET", fields=None):
     for key, value in (fields or {}).items():
         command.extend(["-F", f"{key}={str(value).lower() if isinstance(value, bool) else value}"])
     return run_command_json(command)
+
+
+def gh_paginated(gh_bin, endpoint, collection):
+    collected = []
+    expected_total = None
+    separator = "&" if "?" in endpoint else "?"
+    for page in range(1, 101):
+        response = gh_api(gh_bin, f"{endpoint}{separator}per_page=100&page={page}")
+        items = response.get(collection)
+        if not isinstance(items, list) or len(items) > 100:
+            raise ContractError(f"GitHub pagination returned invalid {collection} page")
+        page_total = response.get("total_count")
+        if page_total is not None:
+            if not isinstance(page_total, int) or page_total < 0 or (expected_total is not None and page_total != expected_total):
+                raise ContractError(f"GitHub pagination returned inconsistent {collection} total")
+            expected_total = page_total
+        collected.extend(items)
+        if expected_total is not None:
+            if len(collected) == expected_total:
+                return collected
+            if len(collected) > expected_total or len(items) < 100:
+                raise ContractError(f"GitHub pagination returned incomplete {collection} inventory")
+        elif len(items) < 100:
+            return collected
+    raise ContractError(f"GitHub pagination exceeded the reviewed limit for {collection}")
+
+
+def resolve_repository_for_link(gh_bin, organization, desired):
+    name = desired["name"]
+    actual = gh_api(gh_bin, f"repos/{organization}/{name}")
+    if (
+        actual.get("id") != desired["repository_id"]
+        or actual.get("name") != name
+        or actual.get("full_name") != f"{organization}/{name}"
+        or actual.get("private") is not True
+        or actual.get("visibility") != "private"
+        or actual.get("archived") is not False
+        or actual.get("owner", {}).get("login") != organization
+    ):
+        raise ContractError(f"fresh repository ID/privacy/archive resolution failed: {name}")
+    return actual["id"]
 
 
 def ssh_runner(ssh_bin, host, guest, mode, payload):
@@ -1105,8 +1166,7 @@ def run_live(platform, ga_root, args):
     created_groups = []
     created_runners = []
     try:
-        group_response = gh_api(gh_bin, f"orgs/{args.org}/actions/runner-groups?per_page=100")
-        groups_by_name = {item.get("name"): item for item in group_response.get("runner_groups", [])}
+        groups_by_name = {item.get("name"): item for item in gh_paginated(gh_bin, f"orgs/{args.org}/actions/runner-groups", "runner_groups")}
         group_ids = {}
         for key in ("ci", "deploy"):
             desired = platform["groups"][key]
@@ -1120,26 +1180,29 @@ def run_live(platform, ga_root, args):
                 created_groups.append(actual["id"])
                 journal.record("group-created", key=key, group_id=actual["id"])
                 for repository in desired["repositories"]:
-                    gh_api(gh_bin, f"orgs/{args.org}/actions/runner-groups/{actual['id']}/repositories/{repository['repository_id']}", "PUT")
+                    repository_id = resolve_repository_for_link(gh_bin, args.org, repository)
+                    gh_api(gh_bin, f"orgs/{args.org}/actions/runner-groups/{actual['id']}/repositories/{repository_id}", "PUT")
             elif actual.get("visibility") != "selected" or actual.get("allows_public_repositories") is not False:
                 raise ContractError(f"runner group identity drift: {key}")
-            repositories = gh_api(gh_bin, f"orgs/{args.org}/actions/runner-groups/{actual['id']}/repositories")
-            actual_ids = sorted(item.get("id") for item in repositories.get("repositories", []))
+            repositories = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runner-groups/{actual['id']}/repositories", "repositories")
+            actual_ids = sorted(item.get("id") for item in repositories)
             expected_ids = sorted(item["repository_id"] for item in desired["repositories"])
             if actual_ids != expected_ids:
                 raise ContractError(f"runner group repository drift: {key}")
             group_ids[key] = actual["id"]
 
-        github_response = gh_api(gh_bin, f"orgs/{args.org}/actions/runners?per_page=100")
-        github_by_name = {item.get("name"): item for item in github_response.get("runners", [])}
+        github_runners = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runners", "runners")
+        github_by_name = {item.get("name"): item for item in github_runners}
+        if len(github_by_name) != len(github_runners):
+            raise ContractError("GitHub runner inventory contains duplicate names")
         expected_group_members = {
             key: {runner["name"] for runner in platform["runners"] if runner["enabled"] and runner["runner_group"] == key}
             for key in ("ci", "deploy")
         }
         actual_group_members = {}
         for key in ("ci", "deploy"):
-            response = gh_api(gh_bin, f"orgs/{args.org}/actions/runner-groups/{group_ids[key]}/runners?per_page=100")
-            names = [item.get("name") for item in response.get("runners", [])]
+            response = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runner-groups/{group_ids[key]}/runners", "runners")
+            names = [item.get("name") for item in response]
             if None in names or len(names) != len(set(names)) or not set(names) <= expected_group_members[key]:
                 raise ContractError(f"runner group membership drift: {key}")
             actual_group_members[key] = set(names)
@@ -1197,24 +1260,24 @@ def run_live(platform, ga_root, args):
                 raise ContractError(f"runner install did not return exact success: {runner['name']}")
             registered = None
             for attempt in range(12):
-                refreshed = gh_api(gh_bin, f"orgs/{args.org}/actions/runners?per_page=100")
-                registered = next((item for item in refreshed.get("runners", []) if item.get("name") == runner["name"]), None)
+                refreshed = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runners", "runners")
+                registered = next((item for item in refreshed if item.get("name") == runner["name"]), None)
                 if registered is not None and registered.get("status") == "online" and registered.get("busy") is False:
                     break
                 if os.environ.get("KEN_RUNNER_COMMAND_TEST") != "1":
                     time.sleep(5)
             if registered is None or registered.get("status") != "online" or registered.get("busy") is not False or set(runner_labels_from_api(registered)) != set(runner["labels"]) or len(runner_labels_from_api(registered)) != len(runner["labels"]):
                 raise ContractError(f"GitHub runner did not reach exact online state: {runner['name']}")
-            group_runners = gh_api(gh_bin, f"orgs/{args.org}/actions/runner-groups/{group_ids[runner['runner_group']]}/runners?per_page=100")
-            if runner["name"] not in {item.get("name") for item in group_runners.get("runners", [])}:
+            group_runners = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runner-groups/{group_ids[runner['runner_group']]}/runners", "runners")
+            if runner["name"] not in {item.get("name") for item in group_runners}:
                 raise ContractError(f"GitHub runner did not join exact runner group: {runner['name']}")
             journal.record("runner-created", name=runner["name"], vm=runner["vm"])
             changed = True
             if os.environ.get("KEN_RUNNER_TEST_FAIL_AFTER_LIVE") == runner["name"]:
                 raise ContractError(f"injected live failure after {runner['name']}")
         for key in ("ci", "deploy"):
-            response = gh_api(gh_bin, f"orgs/{args.org}/actions/runner-groups/{group_ids[key]}/runners?per_page=100")
-            if {item.get("name") for item in response.get("runners", [])} != expected_group_members[key]:
+            response = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runner-groups/{group_ids[key]}/runners", "runners")
+            if {item.get("name") for item in response} != expected_group_members[key]:
                 raise ContractError(f"runner group membership did not converge exactly: {key}")
         journal.record("complete", created=len(created_runners))
         journal.finish()
