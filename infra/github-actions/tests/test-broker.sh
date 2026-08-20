@@ -58,13 +58,10 @@ require_files() {
   return "${missing}"
 }
 
-reject_unsupported_units() {
+reject_unreviewed_units() {
   local path unexpected=0
   for path in \
-    "${SYSTEMD}/ken-op-executor@.service" \
-    "${SYSTEMD}/ken-frontend-production-builder@.service" \
-    "${SYSTEMD}/ken-frontend-source-map-uploader@.service" \
-    "${SYSTEMD}/ken-frontend-deploy-executor@.service"; do
+    "${SYSTEMD}/ken-op-executor@.service"; do
     if [[ -e "${path}" || -L "${path}" ]]; then
       printf 'unsupported unit is still claimed: %s\n' "${path#"${ROOT}/"}" >&2
       unexpected=1
@@ -75,7 +72,7 @@ reject_unsupported_units() {
 
 echo '== Task 6 owned files =='
 run_check 'all supported broker runtime files exist' require_files
-run_check 'unsupported transaction and frontend phase units are absent' reject_unsupported_units
+run_check 'no unreviewed generic executor unit is present' reject_unreviewed_units
 run_check 'authority generator did not create an unexpected root output' test ! -e "${ROOT}/--help"
 run_check 'Task 6 tree contains no generated Python caches' bash -c '! find "$1" -type d -name __pycache__ -print -quit | grep -q . && ! find "$1" -type f -name "*.pyc" -print -quit | grep -q .' _ "${GA_ROOT}"
 
@@ -161,6 +158,7 @@ for text in (lock_text, policy_text):
 lock = yaml.load(lock_text, Loader=StrictLoader)
 policy = yaml.load(policy_text, Loader=StrictLoader)
 assert lock["schema_version"] == 1
+assert lock["lock_version"] == "2026-08-20.4+task7-f672e261e4d11cf0c46b5133145676190341aab8"
 assert lock["plan_sha256"] == "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658"
 required = {"1password-cli", "python", "pyyaml", "pyjwt", "cryptography", "ca-certificates", "git", "systemd", "buildkit", "node", "pnpm", "zip-safety"}
 components = {x["id"]: x for x in lock["components"]}
@@ -197,28 +195,37 @@ assert lock["compatibility"]["installation_readiness"] == "verification-required
 assert lock["compatibility"]["blocking_conditions"] == []
 assert lock["compatibility"]["live_verification"] == "task4-owned-runtime-verify-receipt"
 assert lock["verification"]["known_answer_status"] == "required-by-task4-runtime-verify"
-assert contract["deferred_execution_transport"] == {
-    "status": "unavailable",
-    "binding": "executor.systemd_transaction_transport_sha256",
+bindings = yaml.load((root / "action-transport.lock.yaml").read_text(), Loader=StrictLoader)["task6_bindings"]
+artifacts = yaml.load((root / "action-transport.lock.yaml").read_text(), Loader=StrictLoader)["artifacts"]
+assert contract["execution_transport"] == {
+    "status": "bound-reviewed-task7",
+    "reviewed_commit_sha": "f672e261e4d11cf0c46b5133145676190341aab8",
+    "coordinator": "/usr/local/libexec/ken-actions/ken-actions-deploy-transaction",
+    "coordinator_sha256": artifacts["coordinator"]["sha256"],
     "transaction_slices": ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"],
-    "frontend_bindings": ["production_build.phase_transport_sha256", "production_build.deploy_contract_sha256"],
-    "trusted_generation_bindings": [
-        "trusted_generation.transport.dependency_acquisition_sha256",
-        "trusted_generation.transport.generated_paths_manifest_sha256",
-        "trusted_generation.transport.commit_input_contract_sha256",
-        "trusted_generation.transport.cgroup_contract_sha256",
-        "trusted_generation.transport.phase_transport_sha256",
-    ],
+    "units": {
+        "ordinary_slot_1": artifacts["ordinary_slot_1"]["sha256"],
+        "ordinary_slot_2": artifacts["ordinary_slot_2"]["sha256"],
+        "frontend_builder": artifacts["frontend_builder"]["sha256"],
+        "frontend_uploader": artifacts["frontend_uploader"]["sha256"],
+        "frontend_deploy": artifacts["frontend_deploy"]["sha256"],
+    },
+    "bindings": bindings,
+    "live_execution_authorized": False,
+    "external_readiness": "policy-deferred-bindings",
 }
 assert all(principal["slice"] is None for principal in contract["principals"][3:])
 installed = {item["path"]: item for item in lock["installed_files"]}
-for unsupported in (
-    "/etc/systemd/system/ken-op-executor@.service",
-    "/etc/systemd/system/ken-frontend-production-builder@.service",
-    "/etc/systemd/system/ken-frontend-source-map-uploader@.service",
-    "/etc/systemd/system/ken-frontend-deploy-executor@.service",
-):
-    assert unsupported not in installed
+assert "/etc/systemd/system/ken-op-executor@.service" not in installed
+transport_installed = {
+    "/usr/local/libexec/ken-actions/ken-actions-deploy-transaction": artifacts["coordinator"]["sha256"],
+    "/etc/systemd/system/ken-actions-deploy-transaction-1.service": artifacts["ordinary_slot_1"]["sha256"],
+    "/etc/systemd/system/ken-actions-deploy-transaction-2.service": artifacts["ordinary_slot_2"]["sha256"],
+    "/etc/systemd/system/ken-frontend-production-builder@.service": artifacts["frontend_builder"]["sha256"],
+    "/etc/systemd/system/ken-frontend-source-map-uploader@.service": artifacts["frontend_uploader"]["sha256"],
+    "/etc/systemd/system/ken-frontend-deploy-executor@.service": artifacts["frontend_deploy"]["sha256"],
+}
+assert {path: installed[path]["sha256"] for path in transport_installed} == transport_installed
 for item in installed.values():
     if item["source"].startswith("repo:") or item["source"].startswith("repo-hard-copy:"):
         relative = item["source"].split(":", 1)[1]
@@ -281,15 +288,16 @@ assert generation["dependency_acquisition"] == "before-credentials"
 assert generation["phase_order"] == ["generate", "push"] and generation["phase_overlap"] == "forbidden"
 assert generation["verified_commit_input"] == "root-coordinator-sealed-read-only"
 assert generation["transaction_slices"] == ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"]
-transport = generation["transport"]
-assert transport == {
+generation_transport = generation["transport"]
+assert generation_transport == {
     "wrapper": "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync",
     "wrapper_sha256": installed["/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync"]["sha256"],
-    "dependency_acquisition_sha256": None,
-    "generated_paths_manifest_sha256": None,
-    "commit_input_contract_sha256": None,
-    "cgroup_contract_sha256": None,
-    "phase_transport_sha256": None,
+    "dependency_acquisition_sha256": bindings["trusted_generation_dependency_acquisition_sha256"],
+    "generated_paths_manifest_sha256": bindings["trusted_generation_generated_paths_manifest_sha256"],
+    "commit_input_contract_sha256": bindings["trusted_generation_commit_input_contract_sha256"],
+    "cgroup_contract_sha256": bindings["trusted_generation_cgroup_contract_sha256"],
+    "phase_transport_sha256": bindings["trusted_generation_phase_transport_sha256"],
+    "live_runtime_sha256": None,
 }
 generate, push = generation["phases"]["generate"], generation["phases"]["push"]
 assert generate["identity"] == {"name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102}
@@ -308,11 +316,21 @@ assert not set(generate["descriptor_set"]) & set(push["descriptor_set"])
 assert not set(generate["template"]["fields"]) & set(push["template"]["fields"])
 assert all(x["result_contract"] == "stable-code-only" for x in actions.values())
 assert all(x["enabled"] is False and x["deferred_bindings"] for x in actions.values())
-assert all("executor.systemd_transaction_transport_sha256" in x["deferred_bindings"] and x["executor"]["systemd_transaction_transport_sha256"] is None for x in actions.values() if x["input_mode"] != "trusted_generation")
-assert actions["ken-frontend-production-release"]["blocked_reason_code"] == "frontend_task7_pins_phase_transport_deploy_required"
-assert actions["ken-vexa-mcp-auth-production-deploy"]["blocked_reason_code"] == "vexa_host_key_runtime_identity_and_transaction_transport_required"
-assert actions["ken-website-beehiiv-production-sync"]["blocked_reason_code"] == "beehiiv_sync_generation_and_transaction_transport_required"
-assert actions["ken-website-production-deploy"]["blocked_reason_code"] == "website_host_key_runtime_identity_and_transaction_transport_required"
+ordinary_transport = bindings["ordinary_systemd_transaction_transport_sha256"]
+assert all(x["executor"]["systemd_transaction_transport_sha256"] == ordinary_transport for x in actions.values() if x["input_mode"] != "trusted_generation")
+assert actions["ken-frontend-production-release"]["executor"]["operation_binding_sha256"] == bindings["frontend_operation_binding_sha256"]
+assert actions["ken-frontend-production-release"]["production_build"]["phase_transport_sha256"] == bindings["frontend_phase_transport_sha256"]
+assert actions["ken-frontend-production-release"]["production_build"]["deploy_contract_sha256"] == bindings["frontend_deploy_contract_sha256"]
+assert actions["ken-frontend-production-release"]["production_build"]["deploy_target_authority_sha256"] is None
+assert actions["ken-frontend-production-release"]["production_build"]["live_runtime_sha256"] is None
+assert actions["ken-frontend-production-release"]["deferred_bindings"] == ["runner.id", "runner.group_id", "runner.listener_generation", "production_build.variables_manifest_sha256", "production_build.deploy_target_authority_sha256", "production_build.live_runtime_sha256"]
+assert actions["ken-vexa-mcp-auth-production-deploy"]["deferred_bindings"] == ["runner.id", "runner.group_id", "runner.listener_generation", "executor.known_hosts_sha256"]
+assert actions["ken-website-beehiiv-production-sync"]["deferred_bindings"] == ["runner.id", "runner.group_id", "runner.listener_generation", "trusted_generation.transport.live_runtime_sha256"]
+assert actions["ken-website-production-deploy"]["deferred_bindings"] == ["runner.id", "runner.group_id", "runner.listener_generation", "executor.known_hosts_sha256"]
+assert actions["ken-frontend-production-release"]["blocked_reason_code"] == "frontend_live_runtime_variables_and_target_authority_required"
+assert actions["ken-vexa-mcp-auth-production-deploy"]["blocked_reason_code"] == "vexa_host_key_and_runtime_identity_required"
+assert actions["ken-website-beehiiv-production-sync"]["blocked_reason_code"] == "beehiiv_live_runtime_required"
+assert actions["ken-website-production-deploy"]["blocked_reason_code"] == "website_host_key_and_runtime_identity_required"
 assert actions["ken-website-production-deploy"]["template"]["fields"] == ["WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"]
 for action in actions.values():
     execution = action["trusted_generation"]["transport"] if action["input_mode"] == "trusted_generation" else action["executor"]
@@ -339,6 +357,7 @@ import errno
 import hashlib
 import importlib.machinery
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -371,8 +390,28 @@ broker = load("ken_op_broker_test", "ken-op-broker")
 downloader = load("ken_artifact_download_test", "ken-actions-artifact-download")
 frontend = load("ken_frontend_release_test", "ken-frontend-production-release")
 uploader = load("ken_frontend_sourcemap_test", "ken-frontend-source-map-upload")
+op_exec = load("ken_op_exec_test", "ken-op-exec")
 
 class ProtocolTests(unittest.TestCase):
+    def test_runner_uses_fixed_connect_timeout_then_blocking_receive(self):
+        self.assertEqual(op_exec.BROKER_CONNECT_TIMEOUT_SECONDS, 10)
+        source = inspect.getsource(op_exec.invoke)
+        self.assertIn("client.settimeout(BROKER_CONNECT_TIMEOUT_SECONDS)", source)
+        self.assertIn("client.settimeout(None)", source)
+        self.assertNotRegex(source, r"getenv|environ|args.*timeout")
+        class DeadBroker:
+            def __init__(self): self.timeouts = []; self.sent = 0
+            def settimeout(self, value): self.timeouts.append(value)
+            def connect(self, path): self.path = path
+            def sendmsg(self, packet, ancillary): self.sent += 1
+            def recv(self, maximum): raise ConnectionResetError("broker died")
+            def close(self): pass
+        dead = DeadBroker()
+        with mock.patch.object(op_exec.socket, "socket", return_value=dead), self.assertRaises(ConnectionResetError):
+            op_exec.invoke("ken-website-beehiiv-production-sync", "token", "jwt", None, None)
+        self.assertEqual(dead.timeouts, [10, None])
+        self.assertEqual(dead.sent, 1)
+
     def test_frontend_source_authority_is_broker_rooted_and_rejects_object_alias(self):
         self.assertEqual(
             broker.FRONTEND_RECEIPT_CONTRACT_SHA256,
@@ -567,20 +606,103 @@ class ProtocolTests(unittest.TestCase):
         changed = copy.deepcopy(original); changed["runtime_contract"]["firewall_phase_interface"]["frontend_phase_ownership"]["ghcr-write"]["uid"] = 22202; mutations.append(changed)
         changed = copy.deepcopy(original); changed["runtime_contract"]["firewall_phase_interface"]["frontend_phase_ownership"]["build-offline"]["targets"] = ["package-read"]; mutations.append(changed)
         changed = copy.deepcopy(original); changed["runtime_contract"]["firewall_phase_interface"]["frontend_phase_ownership"]["posthog-upload"]["extra"] = True; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["runtime_contract"]["execution_transport"]["status"] = "unavailable"; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["runtime_contract"]["execution_transport"]["coordinator_sha256"] = "0" * 64; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["installed_files"] = [row for row in changed["installed_files"] if row["path"] != "/usr/local/libexec/ken-actions/ken-actions-deploy-transaction"]; mutations.append(changed)
+        changed = copy.deepcopy(original); next(row for row in changed["installed_files"] if row["path"] == "/etc/systemd/system/ken-actions-deploy-transaction-1.service")["sha256"] = "0" * 64; mutations.append(changed)
         with tempfile.TemporaryDirectory() as directory:
             for index, value in enumerate(mutations):
                 target = Path(directory) / f"mutated-{index}.yaml"; target.write_text(yaml.safe_dump(value, sort_keys=False))
                 with self.subTest(index=index), self.assertRaises(broker.Reject): broker.verify_runtime_lock(target)
 
-    def test_production_build_fails_with_specific_deferred_transport_code(self):
+    def test_all_fixed_modes_route_only_through_reviewed_task7_dispatch(self):
         claims = broker.synthetic_claims_for_action(self.action, 2_000_000_000)
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            broker, "dispatch_reviewed_transport", return_value="succeeded"
+        ) as dispatch:
+            root = Path(directory)
+            for action in self.policy.actions.values():
+                with self.subTest(action=action.action_id):
+                    self.assertEqual(
+                        broker.execute_fixed_action_live(action, root, root, claims, -1, (22003, 22003)),
+                        "succeeded",
+                    )
+            self.assertEqual(dispatch.call_count, len(self.policy.actions))
+            for call in dispatch.call_args_list:
+                self.assertEqual(call.args[1:], (root, root, claims, -1, (22003, 22003)))
+        source = inspect.getsource(broker.execute_fixed_action_live)
+        self.assertIn("dispatch_reviewed_transport", source)
+        self.assertNotIn("os.fork", source)
+        self.assertNotIn("drop_privileges", source)
+        self.assertNotIn("subprocess.run", source)
+
+    def test_transport_request_is_exact_root_owned_and_policy_bound(self):
+        action = self.policy.actions["ken-vexa-mcp-auth-production-deploy"]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with self.assertRaises(broker.Reject) as ctx:
-                broker.execute_fixed_action_live(self.action, root, root, claims, -1, (22201, 22201))
-        self.assertEqual(ctx.exception.code, "production_build_transport_unavailable")
+            state = root / "state"
+            policy_copy = root / "policy.yaml"
+            policy_copy.write_bytes(policy_path.read_bytes())
+            os.chmod(policy_copy, 0o444)
+            artifact = root / "artifact"
+            rendered = root / "rendered"
+            artifact.write_bytes(b"authenticated-artifact")
+            rendered.write_bytes(b"SERVER_HOST=concealed\n")
+            os.chmod(artifact, 0o400)
+            os.chmod(rendered, 0o400)
+            with mock.patch.object(broker, "new_request_id", return_value="9" * 64):
+                request_id, request_dir = broker.publish_transport_request(
+                    action, action.repository.source_commit_sha, policy_copy, state,
+                    {"artifact": artifact, "rendered": rendered},
+                )
+            self.assertEqual(request_id, "9" * 64)
+            self.assertEqual(request_dir, state / "requests" / request_id)
+            self.assertEqual(stat.S_IMODE(request_dir.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((request_dir / ".ken-actions-request").stat().st_mode), 0o600)
+            request = json.loads((request_dir / "request.json").read_text())
+            self.assertEqual(request, {
+                "version": 1, "request_id": request_id, "action_id": action.action_id,
+                "policy_sha256": hashlib.sha256(policy_copy.read_bytes()).hexdigest(),
+                "source_sha": action.repository.source_commit_sha,
+                "descriptors": ["artifact", "rendered"],
+            })
+            self.assertEqual(set(path.name for path in (request_dir / "descriptors").iterdir()), {"artifact", "rendered"})
+            for name in ("artifact", "rendered"):
+                target = request_dir / "descriptors" / name
+                self.assertFalse(target.is_symlink())
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o400)
+                self.assertEqual(target.stat().st_nlink, 1)
+            with self.assertRaises(broker.Reject):
+                broker.publish_transport_request(
+                    action, action.repository.source_commit_sha, policy_copy, state,
+                    {"artifact": artifact, "rendered": rendered, "client-unit": artifact},
+                )
 
-    def test_beehiiv_trusted_generation_is_not_source_and_refuses_without_transport(self):
+    def test_dispatch_has_no_outer_timeout_or_cross_slot_recovery(self):
+        action = self.policy.actions["ken-website-beehiiv-production-sync"]
+        claims = broker.synthetic_claims_for_action(action, 2_000_000_000)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            status_root = state / "transport-status"
+            status_root.mkdir(parents=True, mode=0o700)
+            status_path = status_root / ("8" * 64 + ".json")
+            status_path.write_text('{"reason_code":"transport_failed","status":"failed","version":1}')
+            os.chmod(status_path, 0o600)
+            credential_fd = os.open("/dev/null", os.O_RDONLY)
+            with mock.patch.object(broker, "publish_transport_request", return_value=("8" * 64, state / "requests" / ("8" * 64))), mock.patch.object(
+                broker.subprocess, "run", return_value=subprocess.CompletedProcess(["coordinator"], 78)
+            ) as run, mock.patch.object(broker, "recover_reviewed_transport") as recover:
+                with self.assertRaises(broker.Reject) as ctx:
+                    broker.dispatch_reviewed_transport(
+                        action, root, root, claims, credential_fd, (22003, 22003),
+                        policy_path=root / "policy", state_root=state, transport_path=root / "coordinator",
+                    )
+            self.assertEqual(ctx.exception.code, "executor_failed")
+            self.assertNotIn("timeout", run.call_args.kwargs)
+            recover.assert_not_called()
+
+    def test_beehiiv_trusted_generation_is_not_source_and_keeps_live_runtime_deferred(self):
         action = self.policy.actions["ken-website-beehiiv-production-sync"]
         generation = action.raw["trusted_generation"]
         generate, push = generation["phases"]["generate"], generation["phases"]["push"]
@@ -596,11 +718,8 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(set(generate["descriptor_set"]).isdisjoint(push["descriptor_set"]))
         self.assertTrue(set(generate["template"]["fields"]).isdisjoint(push["template"]["fields"]))
         self.assertNotEqual(generate["network_profile"], push["network_profile"])
-        with tempfile.TemporaryDirectory() as directory:
-            claims = broker.synthetic_claims_for_action(action, 2_000_000_000)
-            with self.assertRaises(broker.Reject) as ctx:
-                broker.execute_fixed_action_live(action, Path(directory), Path(directory), claims, -1, (22102, 22102))
-        self.assertEqual(ctx.exception.code, "trusted_generation_transport_unavailable")
+        self.assertIsNone(generation["transport"]["live_runtime_sha256"])
+        self.assertIn("trusted_generation.transport.live_runtime_sha256", action.raw["deferred_bindings"])
 
     def test_beehiiv_phase_schema_rejects_credential_identity_network_and_transport_overlap(self):
         raw = yaml.safe_load(policy_path.read_text())
@@ -618,7 +737,7 @@ class ProtocolTests(unittest.TestCase):
                 "deploy_key_to_generator": lambda action: action["trusted_generation"]["phases"]["generate"]["descriptor_set"].append("DEPLOY_SSH_KEY"),
                 "beehiiv_key_to_pusher": lambda action: action["trusted_generation"]["phases"]["push"]["descriptor_set"].append("BEEHIIV_API_KEY"),
                 "phase_overlap": lambda action: action["trusted_generation"].__setitem__("phase_overlap", "allowed"),
-                "transport_not_deferred": lambda action: action["deferred_bindings"].remove("trusted_generation.transport.phase_transport_sha256"),
+                "transport_redeferred_without_clearing": lambda action: action["deferred_bindings"].append("trusted_generation.transport.phase_transport_sha256"),
                 "uid_bool": lambda action: action["trusted_generation"]["phases"]["generate"]["identity"].__setitem__("uid", True),
                 "action_code_false": lambda action: action.__setitem__("executes_repository_code", False),
                 "action_code_string": lambda action: action.__setitem__("executes_repository_code", "ambiguous"),
@@ -650,11 +769,18 @@ class ProtocolTests(unittest.TestCase):
                 target.write_text(yaml.safe_dump(value, sort_keys=False))
                 with self.subTest(push_profile=profile), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
             for field in ("dependency_acquisition_sha256", "generated_paths_manifest_sha256", "commit_input_contract_sha256", "cgroup_contract_sha256", "phase_transport_sha256"):
-                for scalar in (False, 0, 1.0, "", "not-a-hash", "a" * 64):
+                for scalar in (False, 0, 1.0, "", "not-a-hash"):
                     value = copy.deepcopy(raw)
                     value["actions"][index]["trusted_generation"]["transport"][field] = scalar
                     target.write_text(yaml.safe_dump(value, sort_keys=False))
                     with self.subTest(field=field, scalar=scalar), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
+            value = copy.deepcopy(raw)
+            action = value["actions"][index]
+            action["trusted_generation"]["transport"]["live_runtime_sha256"] = "a" * 64
+            action["deferred_bindings"].remove("trusted_generation.transport.live_runtime_sha256")
+            target.write_text(yaml.safe_dump(value, sort_keys=False))
+            with self.assertRaises(broker.Reject):
+                broker.load_policy(target, allow_nonroot=True)
 
     def test_frontend_policy_receipt_firewall_and_hash_schema_mutations_fail_closed(self):
         raw = yaml.safe_load(policy_path.read_text())
@@ -680,14 +806,36 @@ class ProtocolTests(unittest.TestCase):
                 target.write_text(yaml.safe_dump(value, sort_keys=False))
                 with self.subTest(name=name), self.assertRaises(broker.Reject):
                     broker.load_policy(target, allow_nonroot=True)
+            value = copy.deepcopy(raw)
+            action = value["actions"][index]
+            action["production_build"]["live_runtime_sha256"] = "a" * 64
+            action["deferred_bindings"].remove("production_build.live_runtime_sha256")
+            target.write_text(yaml.safe_dump(value, sort_keys=False))
+            with self.assertRaises(broker.Reject):
+                broker.load_policy(target, allow_nonroot=True)
 
     def test_website_wrapper_parses_only_reviewed_ssh_fields(self):
-        argv = ["--broker-action", "ken-website-production-deploy", "--input-fd", "3", "--rendered-fd", "4"]
+        argv = ["--broker-action", "ken-website-production-deploy", "--operation", "deploy", "--input-fd", "3", "--rendered-fd", "4"]
         with mock.patch.object(broker, "_read_executor_fd", return_value=b"ignored"), mock.patch.object(
             broker, "_parse_rendered_fields", side_effect=broker.Reject("schema-probe")
         ) as parse_fields:
             self.assertEqual(broker.fixed_wrapper_main("ken-website-production-deploy", argv), 1)
         self.assertEqual(parse_fields.call_args.args[1], ("WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"))
+
+    def test_task7_operation_argument_splits_deploy_and_health_authority(self):
+        base = ["--broker-action", "ken-vexa-mcp-auth-production-deploy", "--input-fd", "3", "--rendered-fd", "4"]
+        with mock.patch.object(broker, "_read_executor_fd", side_effect=AssertionError("health read credentials")), mock.patch.object(
+            broker, "_fixed_health_request", side_effect=[
+                (200, {}, b'{"resource":"https://mcp.recordings.ken.so/mcp"}'),
+                (401, {"WWW-Authenticate": "Bearer resource_metadata=reviewed"}, b""),
+            ]
+        ) as health, mock.patch.object(broker, "_run_output_free") as deploy:
+            self.assertEqual(broker.fixed_wrapper_main(base[1], [*base, "--operation", "health"]), 0)
+        self.assertEqual(health.call_count, 2)
+        deploy.assert_not_called()
+        for operation in ("separation", "unknown"):
+            with self.subTest(operation=operation):
+                self.assertEqual(broker.fixed_wrapper_main(base[1], [*base, "--operation", operation]), 1)
 
     def test_peer_identity_binds_uid_pid_start_cgroup_and_executable(self):
         peer = broker.PeerIdentity(uid=21014, gid=21014, pid=42, start_time=99, cgroup="/ken-actions-deploy.slice/ken-actions-deploy-listeners.slice/ken-runner@ken-deploy-production-01.service", executable="/usr/local/bin/ken-op-exec")
@@ -874,7 +1022,7 @@ class ProtocolTests(unittest.TestCase):
             if action["executor"].get("operation_binding_sha256") is None:
                 broker.OPERATION_BINDINGS[selected_action] = {"fixture": "fully-bound-operation"}
                 action["executor"]["operation_binding_sha256"] = broker._operation_binding_sha256(selected_action)
-            action["executor"]["systemd_transaction_transport_sha256"] = "f" * 64
+            action["executor"]["systemd_transaction_transport_sha256"] = broker.TASK7_BINDING_SHA256["ordinary_systemd_transaction_transport_sha256"]
             if "known_hosts_sha256" in action["executor"]:
                 action["executor"]["known_hosts_sha256"] = "c" * 64
             action["deferred_bindings"] = []
@@ -916,7 +1064,13 @@ class ProtocolTests(unittest.TestCase):
             claims=broker.synthetic_claims_for_action(action,int(time.time())); fixture=Fixture(action,claims)
             credential=Path(td)/"credential"; credential.write_bytes(b"fixture-token"); os.chmod(credential,0o600); credential_fd=os.open(credential,os.O_RDONLY)
             packet=json.dumps({"version":1,"action_id":action.action_id,"oidc_jwt":"a.b.c","github_token":"ghs-fixture"},separators=(",",":")).encode()
-            for _ in range(2):
+            socket_type=socket.SOCK_SEQPACKET if sys.platform.startswith("linux") else socket.SOCK_DGRAM
+            client,server=socket.socketpair(socket.AF_UNIX,socket_type)
+            client.send(packet); client.close()
+            disconnected = broker.process_connection(server,policy,"production",Path(td)/"state",credential_fd,fixture,peer=self._peer(action),revalidate=lambda value:value)
+            server.close()
+            self.assertEqual(disconnected["status"], "succeeded")
+            for _ in range(1):
                 socket_type=socket.SOCK_SEQPACKET if sys.platform.startswith("linux") else socket.SOCK_DGRAM
                 client,server=socket.socketpair(socket.AF_UNIX,socket_type)
                 client.send(packet); broker.handle_connection(server,policy,"production",Path(td)/"state",credential_fd,fixture,peer=self._peer(action),revalidate=lambda value:value)
@@ -1776,26 +1930,35 @@ PY
 
 run_check 'supported systemd units encode credentials, sockets, gates, limits, and hardening' \
   python3 - "${SYSTEMD}" <<'PY'
+import hashlib
 import sys
 from pathlib import Path
+
+import yaml
 root = Path(sys.argv[1])
 broker = (root / "ken-op-broker@.service").read_text()
 sock = (root / "ken-op-broker@.socket").read_text()
 ci_override = (root / "ken-op-broker@ci.service.d/override.conf").read_text()
 for token in ("LoadCredentialEncrypted=op-service-account-token:", "RuntimeDirectory=ken-op-broker/%i", "StateDirectory=ken-op-broker/%i", "Slice=ken-actions-deploy-brokers.slice", "NoNewPrivileges=yes", "ProtectSystem=strict", "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_KILL CAP_SETGID CAP_SETUID"):
     assert token in broker, token
+write_paths = [line for line in broker.splitlines() if line.startswith("ReadWritePaths=")]
+assert write_paths == ["ReadWritePaths=/run/ken-op-broker/%i /var/lib/ken-op-broker/%i /var/cache/ken-op-broker/%i /run/ken-actions-deploy"]
+assert broker.count("/run/ken-actions-deploy") == 1
+runtime_directories = [line for line in broker.splitlines() if line.startswith("RuntimeDirectory=")]
+assert runtime_directories == ["RuntimeDirectory=ken-op-broker/%i ken-actions-deploy"]
+assert "RuntimeDirectoryMode=0700" in broker and "RuntimeDirectoryPreserve=yes" in broker
 assert "ProtectProc=default" in broker and "Slice=system.slice" in ci_override
 assert "ListenSequentialPacket=/run/ken-op-broker/%i.sock" in sock
 assert "SocketMode=0660" in sock and "Backlog=16" in sock and "Accept=no" in sock
 assert "Requires=" in broker and "ken-actions-guest-firewall.service" in broker and "ken-actions-guest-runtime-verify.service" in broker
 assert "After=" in broker and "ken-actions-guest-firewall.service" in broker and "ken-actions-guest-runtime-verify.service" in broker
-for unsupported in (
-    "ken-op-executor@.service",
-    "ken-frontend-production-builder@.service",
-    "ken-frontend-source-map-uploader@.service",
-    "ken-frontend-deploy-executor@.service",
-):
-    assert not (root / unsupported).exists()
+assert not (root / "ken-op-executor@.service").exists()
+transport = yaml.safe_load((root.parent / "inventory/action-transport.lock.yaml").read_text())
+for row in transport["artifacts"].values():
+    if row["path"].startswith("systemd/"):
+        unit = root / Path(row["path"]).name
+        assert unit.is_file() and not unit.is_symlink()
+        assert hashlib.sha256(unit.read_bytes()).hexdigest() == row["sha256"]
 PY
 
 run_check 'claimed runtime has no invented plural transaction slice' \

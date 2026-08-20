@@ -22,6 +22,7 @@ ACTION_CLASSES = {
 }
 ARTIFACT_ACTIONS = frozenset({"ken-vexa-mcp-auth-production-deploy", "ken-website-production-deploy"})
 MAX_RESPONSE = 4096
+BROKER_CONNECT_TIMEOUT_SECONDS = 10
 
 
 class ClientError(Exception):
@@ -88,12 +89,13 @@ def invoke(action_id: str, github_token: str, oidc_jwt: str, artifact_id: int | 
     if len(packet) > 65536:
         raise ClientError("request_too_large")
     client = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-    client.settimeout(10)
+    client.settimeout(BROKER_CONNECT_TIMEOUT_SECONDS)
     client.connect(f"/run/ken-op-broker/{trust_class}.sock")
     ancillary = []
     if artifact_fd is not None:
         ancillary = [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [artifact_fd]))]
     client.sendmsg([packet], ancillary)
+    client.settimeout(None)
     for key in tuple(request):
         if key.endswith("token") or key == "oidc_jwt": request[key] = ""
     data = client.recv(MAX_RESPONSE + 1)

@@ -1,5 +1,5 @@
 schema_version: 1
-lock_version: 2026-08-20.3
+lock_version: 2026-08-20.4+task7-f672e261e4d11cf0c46b5133145676190341aab8
 plan_sha256: 75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658
 target:
   os: ubuntu-24.04
@@ -50,12 +50,30 @@ runtime_contract:
       frontend-deploy: {uid: 22203, targets: [frontend-deploy]}
       frontend-public-health: {uid: 22203, targets: [frontend-public-health]}
   startup_gates: [ken-actions-guest-firewall.service, ken-actions-guest-runtime-verify.service]
-  deferred_execution_transport:
-    status: unavailable
-    binding: executor.systemd_transaction_transport_sha256
+  execution_transport:
+    status: bound-reviewed-task7
+    reviewed_commit_sha: f672e261e4d11cf0c46b5133145676190341aab8
+    coordinator: /usr/local/libexec/ken-actions/ken-actions-deploy-transaction
+    coordinator_sha256: 7ed2f64598f396db94bb137df31bdca65d786daec23270f90188bbead9c50075
     transaction_slices: [ken-actions-deploy-transaction-1.slice, ken-actions-deploy-transaction-2.slice]
-    frontend_bindings: [production_build.phase_transport_sha256, production_build.deploy_contract_sha256]
-    trusted_generation_bindings: [trusted_generation.transport.dependency_acquisition_sha256, trusted_generation.transport.generated_paths_manifest_sha256, trusted_generation.transport.commit_input_contract_sha256, trusted_generation.transport.cgroup_contract_sha256, trusted_generation.transport.phase_transport_sha256]
+    units:
+      ordinary_slot_1: 8934f845a0ea882a26f3b6699f6a865662febbb736ec5816897504186b9faa24
+      ordinary_slot_2: d137931523ec039b51f1b2428bf9e0c485b2ce688e5efca06b8678ba55f91ba1
+      frontend_builder: 434e76ae73a386c290bb16f3f45df48cfc892b738d8fec2c32ed1bcda3cc3c3e
+      frontend_uploader: 0e67084dc290d659581e250c5ba78d33f5c1b3ac42bb0aacbb9d3557d97d0ce0
+      frontend_deploy: dac86637f7f99ec71087585052250fbc4e32fc73cc585ac3370998c96fde78fd
+    bindings:
+      ordinary_systemd_transaction_transport_sha256: 8ca19b81c31edcc47a0676f3c5ded567894ec0ea3ea5b7870ca7f4adf4d82f9d
+      frontend_operation_binding_sha256: 7c488ccd4a4e91c053c5b36f0ced8b8629d56cc5fb86883a805c9f3619b9a2b7
+      frontend_phase_transport_sha256: 796a76abeb0b1c22bf151e57963960cc0ed96c62fe14e57ea82ef907056098ea
+      frontend_deploy_contract_sha256: 96d676de15919d38b622ef7f12cf1493f570764db1dda84700f5f1524fb1f974
+      trusted_generation_dependency_acquisition_sha256: dcd386771149140e68e19a2c44989ea3e268c7171afd32fa38db166541ae6933
+      trusted_generation_generated_paths_manifest_sha256: 08720cf30192a6daf13056fd150cece9c4308ff13adad1861b9f2db6deea3ec9
+      trusted_generation_commit_input_contract_sha256: d2d81004d9076702ddc01e37cb0d8f189008f033cd7b03871eacf1d8d4e484df
+      trusted_generation_cgroup_contract_sha256: 9c01ecb1ada3ae65f0f157698accf56cc56cbafadd078589bf3df7d4893cf854
+      trusted_generation_phase_transport_sha256: 6e0945130af419de14091f5afc06d404a919319f7dc2bcee7cf40489561ec12b
+    live_execution_authorized: false
+    external_readiness: policy-deferred-bindings
 components:
 - id: 1password-cli
   version: 2.39.0
@@ -588,17 +606,41 @@ installed_files:
   - ken-deploy
   source: component:oci-image-tools
 - path: /usr/local/bin/ken-op-exec
-  sha256: 69fb3d164e9b85c6be4671d488a4e46509b60d559f98d39bb21552f998b0d038
+  sha256: 2b55d1e7687929d12edec6fe220ed84274b0d2f465f562960239064c82a1922a
   hosts:
   - ken-ci
   - ken-deploy
   source: repo:bin/ken-op-exec
 - path: /usr/local/bin/ken-op-broker
-  sha256: ecd921f6a6f9771b91fef6ebf23a82351bcf8a767455dafefddb92a7311fbbe6
+  sha256: 211f11be2df8b085cc5ebd5815fb3d8fd10209ae34010961113cad351a481ff9
   hosts:
   - ken-ci
   - ken-deploy
   source: repo:bin/ken-op-broker
+- path: /usr/local/libexec/ken-actions/ken-actions-deploy-transaction
+  sha256: 7ed2f64598f396db94bb137df31bdca65d786daec23270f90188bbead9c50075
+  hosts: [ken-deploy]
+  source: repo:bin/ken-actions-deploy-transaction
+- path: /etc/systemd/system/ken-actions-deploy-transaction-1.service
+  sha256: 8934f845a0ea882a26f3b6699f6a865662febbb736ec5816897504186b9faa24
+  hosts: [ken-deploy]
+  source: repo:systemd/ken-actions-deploy-transaction-1.service
+- path: /etc/systemd/system/ken-actions-deploy-transaction-2.service
+  sha256: d137931523ec039b51f1b2428bf9e0c485b2ce688e5efca06b8678ba55f91ba1
+  hosts: [ken-deploy]
+  source: repo:systemd/ken-actions-deploy-transaction-2.service
+- path: /etc/systemd/system/ken-frontend-production-builder@.service
+  sha256: 434e76ae73a386c290bb16f3f45df48cfc892b738d8fec2c32ed1bcda3cc3c3e
+  hosts: [ken-deploy]
+  source: repo:systemd/ken-frontend-production-builder@.service
+- path: /etc/systemd/system/ken-frontend-source-map-uploader@.service
+  sha256: 0e67084dc290d659581e250c5ba78d33f5c1b3ac42bb0aacbb9d3557d97d0ce0
+  hosts: [ken-deploy]
+  source: repo:systemd/ken-frontend-source-map-uploader@.service
+- path: /etc/systemd/system/ken-frontend-deploy-executor@.service
+  sha256: dac86637f7f99ec71087585052250fbc4e32fc73cc585ac3370998c96fde78fd
+  hosts: [ken-deploy]
+  source: repo:systemd/ken-frontend-deploy-executor@.service
 - path: /usr/local/bin/ken-actions-artifact-download
   sha256: 835b8b965452268558c46a62bab1af647ccabb676c27f226c7d19e4d771972a1
   hosts:
@@ -639,13 +681,13 @@ installed_files:
   hosts: [ken-ci, ken-deploy]
   source: repo:bin/runtime-known-answer.py
 - path: /etc/ken-op-broker/op-broker-policy.yaml
-  sha256: 4b9ae1aad60554b7ec6cff19147e9626922113e9a5019f3a36f11437d7f511e9
+  sha256: 954c62d37b725b9669a0178a7dfa97b971419bc8f42a020da11469b45d4f4c62
   hosts:
   - ken-ci
   - ken-deploy
   source: repo:inventory/op-broker-policy.yaml
 - path: /etc/systemd/system/ken-op-broker@.service
-  sha256: 2f4682f9af3a91d5cee9bcfcc8a6eba76a77061edd87b4d5be4c6abfce8b3c9d
+  sha256: dbc0f8da004054a28e9a4675cd6d10d5f17d73b2ca932b022dea632394cf7989
   hosts:
   - ken-ci
   - ken-deploy
