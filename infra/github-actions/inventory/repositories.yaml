@@ -6297,6 +6297,8 @@ repositories:
         target_field: SERVER_HOST
         field_type: string
         consumer: ken-deploy-production
+        disposition: broker-action
+        delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-vexa-mcp-auth-production-deploy
       - environment_name: SERVER_PORT
@@ -6309,6 +6311,8 @@ repositories:
         target_field: SERVER_PORT
         field_type: string
         consumer: ken-deploy-production
+        disposition: broker-action
+        delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-vexa-mcp-auth-production-deploy
       - environment_name: SERVER_SSH_KEY
@@ -6321,6 +6325,8 @@ repositories:
         target_field: SERVER_SSH_KEY
         field_type: concealed
         consumer: ken-deploy-production
+        disposition: broker-action
+        delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-vexa-mcp-auth-production-deploy
       artifacts: []
@@ -6415,6 +6421,8 @@ repositories:
         target_field: DEPLOY_SSH_KEY
         field_type: concealed
         consumer: ken-deploy-production
+        disposition: broker-action
+        delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-website-beehiiv-production-sync
       - environment_name: BEEHIIV_API_KEY
@@ -6427,6 +6435,8 @@ repositories:
         target_field: BEEHIIV_API_KEY
         field_type: concealed
         consumer: ken-deploy-production
+        disposition: broker-action
+        delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-website-beehiiv-production-sync
       - environment_name: BEEHIIV_PUBLICATION_ID
@@ -6439,6 +6449,8 @@ repositories:
         target_field: BEEHIIV_PUBLICATION_ID
         field_type: string
         consumer: ken-deploy-production
+        disposition: broker-action
+        delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-website-beehiiv-production-sync
       artifacts: []
@@ -6546,25 +6558,27 @@ repositories:
         source_vault: ken-website
         source_item: posthog
         source_field: project_token
-        target_vault: Ken Deploy Production
-        target_item: ken-website
+        target_vault: not-applicable
+        target_item: GitHub Actions variables:ken-website
         target_field: NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
         field_type: string
         consumer: ken-deploy-production
-        migration_action: copy-direct-onepassword-reference
-        broker_action_id: ken-website-production-deploy
+        disposition: github-variable
+        delivery: github-actions-variable
+        migration_action: move-to-variable
       - environment_name: POSTHOG_PERSONAL_API_KEY
         source_reference: op://ken-website/posthog/personal_api_key
         source_vault: ken-website
         source_item: posthog
         source_field: personal_api_key
-        target_vault: Ken Deploy Production
-        target_item: ken-website
+        target_vault: not-applicable
+        target_item: obsolete-reference
         target_field: POSTHOG_PERSONAL_API_KEY
         field_type: concealed
         consumer: ken-deploy-production
-        migration_action: copy-direct-onepassword-reference
-        broker_action_id: ken-website-production-deploy
+        disposition: obsolete-unused
+        delivery: none
+        migration_action: remove-unused-reference-after-rg-proof
       - environment_name: WEBSITE_HOST
         source_reference: op://ken-website/deploy-ssh/host
         source_vault: ken-website
@@ -6575,6 +6589,8 @@ repositories:
         target_field: WEBSITE_HOST
         field_type: string
         consumer: ken-deploy-production
+        disposition: broker-action
+        delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-website-production-deploy
       - environment_name: WEBSITE_PORT
@@ -6587,6 +6603,8 @@ repositories:
         target_field: WEBSITE_PORT
         field_type: string
         consumer: ken-deploy-production
+        disposition: broker-action
+        delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-website-production-deploy
       - environment_name: WEBSITE_SSH_KEY
@@ -6599,6 +6617,8 @@ repositories:
         target_field: WEBSITE_SSH_KEY
         field_type: concealed
         consumer: ken-deploy-production
+        disposition: broker-action
+        delivery: onepassword-broker
         migration_action: copy-direct-onepassword-reference
         broker_action_id: ken-website-production-deploy
       artifacts: []
@@ -6629,4 +6649,4 @@ repositories:
       - COMBINED_BUILD_AND_DEPLOY
       - SCHEDULED_LONG_LIVED_SECRET
       - OP_BOOTSTRAP_TOKEN
-input_hash: 23d0727625ec235b6c5425604ffb8d069aa40eccbd0dffe79ba9f0d7efb03ec2
+input_hash: def6f53d8fd5b9c2b2f9bb1f08cbd9d6ba62cb216f78f62793c55bf10f62a7ad

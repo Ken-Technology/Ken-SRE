@@ -144,8 +144,6 @@ FIXED_BROKER_ACTION_POLICIES: dict[str, dict[str, Any]] = {
         "network_profile": "github-source-website-production-ssh-and-public-health",
         "required_fields": frozenset(
             {
-                ("ken-website", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "string"),
-                ("ken-website", "POSTHOG_PERSONAL_API_KEY", "concealed"),
                 ("ken-website", "WEBSITE_HOST", "string"),
                 ("ken-website", "WEBSITE_PORT", "string"),
                 ("ken-website", "WEBSITE_SSH_KEY", "concealed"),
@@ -735,18 +733,9 @@ def apply_direct_onepassword_mapping(
     mapping_id = str(mapping.get("mapping_id") or "").strip()
     if not mapping_id:
         raise ValueError("direct 1Password mapping requires mapping_id")
-    broker_action_id = str(mapping.get("broker_action_id") or "").strip()
-    if not broker_action_id:
-        raise ValueError("direct 1Password mapping requires broker_action_id")
     for field in ("source_vault", "source_item", "source_field"):
         if mapping.get(field) != reference.get(field):
             raise ValueError(f"direct 1Password mapping source mismatch: {field}")
-    if mapping.get("target_vault") not in {
-        "Ken CI Runtime",
-        "Ken Deploy Nonproduction",
-        "Ken Deploy Production",
-    }:
-        raise ValueError("direct 1Password mapping requires an approved target vault")
     if not all(mapping.get(field) for field in ("target_item", "target_field")):
         raise ValueError("direct 1Password mapping requires exact target item and field")
     if mapping.get("field_type") not in {"concealed", "string"}:
@@ -764,37 +753,83 @@ def apply_direct_onepassword_mapping(
         "retirement_steps",
     ):
         _nonempty_steps(mapping.get(field), field)
-    broker_actions = [
-        action
-        for action in evidence.get("broker_actions") or []
-        if isinstance(action, dict) and action.get("action_id") == broker_action_id
-    ]
-    if len(broker_actions) != 1:
-        raise ValueError("direct 1Password mapping requires one fixed broker action")
-    broker_action = broker_actions[0]
-    if broker_action.get("mode") != "fixed_secret_action":
-        raise ValueError("direct 1Password reference requires fixed_secret_action mode")
-    for field in ("repository", "workflow", "job", "runner_class", "target_vault"):
+    disposition = mapping.get("disposition")
+    delivery = mapping.get("delivery")
+    migration_action = mapping.get("migration_action")
+    broker_action_id = str(mapping.get("broker_action_id") or "").strip()
+    if disposition == "broker-action":
+        if delivery != "onepassword-broker" or migration_action != "copy-direct-onepassword-reference":
+            raise ValueError("invalid direct 1Password broker disposition")
+        if mapping.get("target_vault") not in {
+            "Ken CI Runtime", "Ken Deploy Nonproduction", "Ken Deploy Production"
+        }:
+            raise ValueError("direct 1Password mapping requires an approved target vault")
+        if not broker_action_id:
+            raise ValueError("direct 1Password mapping requires broker_action_id")
+        broker_actions = [
+            action
+            for action in evidence.get("broker_actions") or []
+            if isinstance(action, dict) and action.get("action_id") == broker_action_id
+        ]
+        if len(broker_actions) != 1:
+            raise ValueError("direct 1Password mapping requires one fixed broker action")
+        broker_action = broker_actions[0]
+        if broker_action.get("mode") != "fixed_secret_action":
+            raise ValueError("direct 1Password reference requires fixed_secret_action mode")
+        for field in ("repository", "workflow", "job", "runner_class", "target_vault"):
+            expected = {
+                "repository": repository,
+                "workflow": workflow,
+                "job": job,
+                "runner_class": mapping.get("consumer"),
+                "target_vault": mapping.get("target_vault"),
+            }[field]
+            if broker_action.get(field) != expected:
+                raise ValueError("direct 1Password broker action trust boundary mismatch")
+        exact_field = {
+            "target_item": mapping["target_item"],
+            "target_field": mapping["target_field"],
+            "field_type": mapping["field_type"],
+        }
+        if exact_field not in (broker_action.get("required_fields") or []):
+            raise ValueError("direct 1Password broker action is missing its exact field")
+    elif disposition == "github-variable":
         expected = {
-            "repository": repository,
-            "workflow": workflow,
-            "job": job,
-            "runner_class": mapping.get("consumer"),
-            "target_vault": mapping.get("target_vault"),
-        }[field]
-        if broker_action.get(field) != expected:
-            raise ValueError("direct 1Password broker action trust boundary mismatch")
-    exact_field = {
-        "target_item": mapping["target_item"],
-        "target_field": mapping["target_field"],
-        "field_type": mapping["field_type"],
-    }
-    if exact_field not in (broker_action.get("required_fields") or []):
-        raise ValueError("direct 1Password broker action is missing its exact field")
-    return {
+            "repository": "ken-website",
+            "workflow": ".github/workflows/deploy.yml",
+            "job": "deploy",
+            "environment_name": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+            "target_vault": "not-applicable",
+            "target_item": "GitHub Actions variables:ken-website",
+            "target_field": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+            "field_type": "string",
+            "consumer": "ken-deploy-production",
+            "delivery": "github-actions-variable",
+            "migration_action": "move-to-variable",
+        }
+        if broker_action_id or any(mapping.get(key) != value for key, value in expected.items()):
+            raise ValueError("invalid direct GitHub variable disposition")
+    elif disposition == "obsolete-unused":
+        expected = {
+            "repository": "ken-website",
+            "workflow": ".github/workflows/deploy.yml",
+            "job": "deploy",
+            "environment_name": "POSTHOG_PERSONAL_API_KEY",
+            "target_vault": "not-applicable",
+            "target_item": "obsolete-reference",
+            "target_field": "POSTHOG_PERSONAL_API_KEY",
+            "field_type": "concealed",
+            "consumer": "ken-deploy-production",
+            "delivery": "none",
+            "migration_action": "remove-unused-reference-after-rg-proof",
+        }
+        if broker_action_id or any(mapping.get(key) != value for key, value in expected.items()):
+            raise ValueError("invalid obsolete direct reference disposition")
+    else:
+        raise ValueError("unsupported direct 1Password disposition")
+    result = {
         "reference_class": "direct-onepassword",
         "mapping_id": mapping_id,
-        "broker_action_id": broker_action_id,
         "repository": repository,
         "workflow": workflow,
         "job": job,
@@ -810,13 +845,18 @@ def apply_direct_onepassword_mapping(
         "target_field": mapping["target_field"],
         "field_type": mapping["field_type"],
         "consumer": mapping["consumer"],
-        "migration_action": "copy-direct-onepassword-reference",
+        "disposition": disposition,
+        "delivery": delivery,
+        "migration_action": migration_action,
         "source_to_target_steps": list(mapping["source_to_target_steps"]),
         "broker_cutover_steps": list(mapping["broker_cutover_steps"]),
         "live_verification_steps": list(mapping["live_verification_steps"]),
         "retirement_steps": list(mapping["retirement_steps"]),
         "rotation_required": False,
     }
+    if broker_action_id:
+        result["broker_action_id"] = broker_action_id
+    return result
 
 
 def _reject_value_bearing_evidence(value: Any, path: str = "evidence") -> None:
@@ -1517,14 +1557,54 @@ def validate_authority_evidence(evidence: Any) -> None:
         variable_ids.add(row["migration_id"])
 
     direct_ids: set[str] = set()
+    direct_specials: dict[str, dict[str, Any]] = {}
     for mapping in root["direct_onepassword_mappings"]:
-        row = _authority_object(mapping, {"mapping_id", "broker_action_id", "repository", "workflow", "job", "environment_name", "source_reference", "source_vault", "source_item", "source_field", "target_vault", "target_item", "target_field", "field_type", "consumer", "source_to_target_steps", "broker_cutover_steps", "live_verification_steps", "retirement_steps"})
+        row = _authority_object(
+            mapping,
+            {"mapping_id", "repository", "workflow", "job", "environment_name", "source_reference", "source_vault", "source_item", "source_field", "target_vault", "target_item", "target_field", "field_type", "consumer", "disposition", "delivery", "migration_action", "source_to_target_steps", "broker_cutover_steps", "live_verification_steps", "retirement_steps"},
+            {"broker_action_id"},
+        )
         for key, value in row.items():
             if key.endswith("_steps"): _authority_string_list(value)
             else: _authority_type(value, str)
+        disposition_contract = {
+            "broker-action": ("onepassword-broker", "copy-direct-onepassword-reference", True),
+            "github-variable": ("github-actions-variable", "move-to-variable", False),
+            "obsolete-unused": ("none", "remove-unused-reference-after-rg-proof", False),
+        }.get(row["disposition"])
+        if (disposition_contract is None
+                or (row["delivery"], row["migration_action"]) != disposition_contract[:2]
+                or ("broker_action_id" in row) is not disposition_contract[2]):
+            raise ValueError("invalid direct 1Password disposition")
         if row["mapping_id"] in direct_ids:
             raise ValueError("duplicate direct 1Password mapping id")
         direct_ids.add(row["mapping_id"])
+        if row["disposition"] != "broker-action":
+            if row["environment_name"] in direct_specials:
+                raise ValueError("invalid direct PostHog disposition contract")
+            direct_specials[row["environment_name"]] = row
+    expected_direct_specials = {
+        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN": {
+            "repository": "ken-website", "workflow": ".github/workflows/deploy.yml", "job": "deploy",
+            "source_reference": "op://ken-website/posthog/project_token", "target_vault": "not-applicable",
+            "target_item": "GitHub Actions variables:ken-website", "target_field": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
+            "field_type": "string", "consumer": "ken-deploy-production", "disposition": "github-variable",
+            "delivery": "github-actions-variable", "migration_action": "move-to-variable",
+        },
+        "POSTHOG_PERSONAL_API_KEY": {
+            "repository": "ken-website", "workflow": ".github/workflows/deploy.yml", "job": "deploy",
+            "source_reference": "op://ken-website/posthog/personal_api_key", "target_vault": "not-applicable",
+            "target_item": "obsolete-reference", "target_field": "POSTHOG_PERSONAL_API_KEY",
+            "field_type": "concealed", "consumer": "ken-deploy-production", "disposition": "obsolete-unused",
+            "delivery": "none", "migration_action": "remove-unused-reference-after-rg-proof",
+        },
+    }
+    if root["broker_actions"] and set(direct_specials) != set(expected_direct_specials):
+        raise ValueError("invalid direct PostHog disposition contract")
+    if root["broker_actions"]:
+        for name, expected in expected_direct_specials.items():
+            if any(direct_specials[name].get(key) != value for key, value in expected.items()):
+                raise ValueError("invalid direct PostHog disposition contract")
 
     action_ids: set[str] = set()
     for action in root["broker_actions"]:
@@ -1551,7 +1631,7 @@ def validate_authority_evidence(evidence: Any) -> None:
         {str(action["action_id"]): action for action in root["broker_actions"]},
     )
     for mapping in root["direct_onepassword_mappings"]:
-        if mapping["broker_action_id"] not in action_ids:
+        if mapping.get("broker_action_id") is not None and mapping["broker_action_id"] not in action_ids:
             raise ValueError("invalid direct broker action cross-reference")
     for annotation in root["unresolved_annotations"]:
         if annotation.get("broker_action_id") not in {None, *action_ids}:
@@ -3379,7 +3459,8 @@ def build_secret_handoff(
             "field_type": entry["field_type"],
             "authority_status": entry["authority_status"],
             "migration_action": entry["migration_action"],
-            "broker_action_id": entry["broker_action_id"],
+            "disposition": entry["disposition"],
+            "delivery": entry["delivery"],
             "consumer": entry["consumer"],
             "handoff_group": (
                 f"direct-op/{entry['repository']}/{Path(entry['workflow']).stem}/"
@@ -3401,10 +3482,18 @@ def build_secret_handoff(
             "revocation_steps": [
                 f"Retain {entry['source_reference']} until its owner confirms no other consumer remains; no source-vault access is granted to {entry['consumer']}."
             ],
-            "user_only_actions": [
-                f"Copy {entry['source_reference']} into the exact target field through task6-temporary-migration-writer without placing a value in chat."
-            ],
+            "user_only_actions": (
+                [f"Copy {entry['source_reference']} into the exact target field through task6-temporary-migration-writer without placing a value in chat."]
+                if entry["disposition"] == "broker-action"
+                else [
+                    "Create the reviewed ken-website GitHub Actions variable without creating or updating a 1Password target and without placing its value in chat."
+                    if entry["disposition"] == "github-variable"
+                    else "Confirm repository-wide unused-reference proof before removal; do not copy the obsolete field into 1Password, a variable, or the broker."
+                ]
+            ),
         }
+        if entry.get("broker_action_id"):
+            row["broker_action_id"] = entry["broker_action_id"]
         for field in (
             "source_to_target_steps",
             "broker_or_workflow_cutover_steps",
@@ -3758,8 +3847,13 @@ def generate_from_inputs(
                                 "target_field": entry["target_field"],
                                 "field_type": entry["field_type"],
                                 "consumer": entry["consumer"],
+                                "disposition": entry["disposition"],
+                                "delivery": entry["delivery"],
                                 "migration_action": entry["migration_action"],
-                                "broker_action_id": entry["broker_action_id"],
+                                **(
+                                    {"broker_action_id": entry["broker_action_id"]}
+                                    if entry.get("broker_action_id") else {}
+                                ),
                             }
                             for entry in job_direct_entries
                         ],

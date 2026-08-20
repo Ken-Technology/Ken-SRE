@@ -183,7 +183,7 @@ class DirectOnePasswordReferenceTests(unittest.TestCase):
             "deploy",
             "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
             "op://ken-website/posthog/project_token",
-            "Ken Deploy Production",
+            "not-applicable",
         ),
         (
             "ken-website",
@@ -191,7 +191,7 @@ class DirectOnePasswordReferenceTests(unittest.TestCase):
             "deploy",
             "POSTHOG_PERSONAL_API_KEY",
             "op://ken-website/posthog/personal_api_key",
-            "Ken Deploy Production",
+            "not-applicable",
         ),
         (
             "ken-website",
@@ -363,6 +363,7 @@ jobs:
         repositories = yaml.safe_load((inventory / "repositories.yaml").read_text())
         secrets = yaml.safe_load((inventory / "secrets.yaml").read_text())
         handoff = yaml.safe_load((inventory / "secret-handoff.yaml").read_text())
+        input_manifest = yaml.safe_load((inventory / "input-manifest.yaml").read_text())
 
         parsed = {
             (
@@ -408,7 +409,11 @@ jobs:
         self.assertEqual(direct_handoff, parsed)
         self.assertEqual(handoff["counts"]["direct_onepassword_rows"], 11)
         self.assertEqual(
-            {row["broker_action_id"] for row in secrets["direct_onepassword_entries"]},
+            {name: sum(row["disposition"] == name for row in secrets["direct_onepassword_entries"]) for name in ("broker-action", "github-variable", "obsolete-unused")},
+            {"broker-action": 9, "github-variable": 1, "obsolete-unused": 1},
+        )
+        self.assertEqual(
+            {row.get("broker_action_id") for row in secrets["direct_onepassword_entries"] if row.get("broker_action_id")},
             {
                 "ken-vexa-mcp-auth-production-deploy",
                 "ken-website-beehiiv-production-sync",
@@ -417,6 +422,18 @@ jobs:
         )
         self.assertEqual(
             secrets["broker_actions"], handoff["broker_actions"]
+        )
+        self.assertEqual(input_manifest["collected_at"], "2026-08-19T20:13:15Z")
+        self.assertEqual(input_manifest["input_hash"], "def6f53d8fd5b9c2b2f9bb1f08cbd9d6ba62cb216f78f62793c55bf10f62a7ad")
+        manifest_without_derived_hash = dict(input_manifest)
+        manifest_without_derived_hash.pop("input_hash")
+        self.assertEqual(
+            hashlib.sha256(json.dumps(manifest_without_derived_hash, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "5d73440957bf2bd071d6bc68ae0d72d249587de9b0d189db910f0d13d03c1d07",
+        )
+        self.assertEqual(
+            hashlib.sha256((inventory / "runners.yaml").read_bytes()).hexdigest(),
+            "0adb0e1915ec63b796b5b755daaa5ddbda49bbea4079472e5d2ea985d9740351",
         )
 
     def test_unregistered_direct_reference_fails_closed(self):
@@ -454,17 +471,48 @@ jobs:
         self.assertEqual(actual, self.EXPECTED_CHECKED_REFERENCES)
         self.assertEqual(len(mappings), 11)
         for row in mappings:
-            self.assertEqual(row["consumer"], "ken-deploy-production")
-            self.assertIn(row["broker_action_id"], {
-                "ken-vexa-mcp-auth-production-deploy",
-                "ken-website-beehiiv-production-sync",
-                "ken-website-production-deploy",
-            })
+            if row["disposition"] == "broker-action":
+                self.assertEqual(row["delivery"], "onepassword-broker")
+                self.assertEqual(row["consumer"], "ken-deploy-production")
+                self.assertIn(row["broker_action_id"], {
+                    "ken-vexa-mcp-auth-production-deploy",
+                    "ken-website-beehiiv-production-sync",
+                    "ken-website-production-deploy",
+                })
+            else:
+                self.assertNotIn("broker_action_id", row)
+                self.assertEqual(row["target_vault"], "not-applicable")
             self.assertIn(row["field_type"], {"concealed", "string"})
             self.assertTrue(row["source_to_target_steps"])
             self.assertTrue(row["broker_cutover_steps"])
             self.assertTrue(row["live_verification_steps"])
             self.assertTrue(row["retirement_steps"])
+
+        by_name = {row["environment_name"]: row for row in mappings}
+        self.assertEqual(
+            {
+                key: by_name["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"][key]
+                for key in ("disposition", "delivery", "migration_action", "consumer")
+            },
+            {
+                "disposition": "github-variable",
+                "delivery": "github-actions-variable",
+                "migration_action": "move-to-variable",
+                "consumer": "ken-deploy-production",
+            },
+        )
+        self.assertEqual(
+            {
+                key: by_name["POSTHOG_PERSONAL_API_KEY"][key]
+                for key in ("disposition", "delivery", "migration_action", "consumer")
+            },
+            {
+                "disposition": "obsolete-unused",
+                "delivery": "none",
+                "migration_action": "remove-unused-reference-after-rg-proof",
+                "consumer": "ken-deploy-production",
+            },
+        )
 
     def test_direct_rows_bind_to_three_fixed_output_free_broker_actions(self):
         import build_task6_authority_evidence as builder
@@ -1048,7 +1096,7 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
         mappings = [
             copy.deepcopy(row)
             for row in built["direct_onepassword_mappings"]
-            if row["broker_action_id"] == action["action_id"]
+            if row.get("broker_action_id") == action["action_id"]
         ]
         action["required_fields"].append(
             {
@@ -1074,6 +1122,45 @@ class StrictAuthorityEvidenceSchemaTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ValueError, "required fields mismatch"):
             aw.validate_authority_mapping_coverage(evidence, [], direct_entries)
+
+    def test_website_action_has_only_ssh_fields_and_rejects_stale_posthog_mapping(self):
+        import build_task6_authority_evidence as builder
+
+        evidence = builder.build_evidence()
+        action = next(
+            row
+            for row in evidence["broker_actions"]
+            if row["action_id"] == "ken-website-production-deploy"
+        )
+        self.assertEqual(
+            [row["target_field"] for row in action["required_fields"]],
+            ["WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"],
+        )
+        stale = copy.deepcopy(evidence)
+        stale_action = next(
+            row
+            for row in stale["broker_actions"]
+            if row["action_id"] == "ken-website-production-deploy"
+        )
+        stale_action["required_fields"][:0] = [
+            {"target_item": "ken-website", "target_field": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "field_type": "string"},
+            {"target_item": "ken-website", "target_field": "POSTHOG_PERSONAL_API_KEY", "field_type": "concealed"},
+        ]
+        with self.assertRaisesRegex(ValueError, "fixed broker action contract"):
+            aw.validate_authority_evidence(stale)
+
+        duplicate = copy.deepcopy(evidence)
+        duplicate_mapping = copy.deepcopy(
+            next(
+                row
+                for row in duplicate["direct_onepassword_mappings"]
+                if row["environment_name"] == "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"
+            )
+        )
+        duplicate_mapping["mapping_id"] += "-duplicate"
+        duplicate["direct_onepassword_mappings"].append(duplicate_mapping)
+        with self.assertRaisesRegex(ValueError, "direct PostHog disposition contract"):
+            aw.validate_authority_evidence(duplicate)
 
     def test_frontend_action_phase_and_variable_mismatches_fail_full_generation(self):
         import build_task6_authority_evidence as builder

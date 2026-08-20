@@ -1,26 +1,17 @@
 schema_version: 1
-lock_version: 2026-08-20.1
+lock_version: 2026-08-20.2
 plan_sha256: fa04630e96b13acc47419f790631acd8d595850affe937d665ff3216ed193b51
 target:
   os: ubuntu-24.04
   architecture: amd64
 compatibility:
-  artifact_class: integration-evidence-not-guest-consumable
+  artifact_class: immutable-guest-install-contract
   payload_manifest_sha256: 43a8d166b82c08197de6a975f4d14485c8bdae2da524db19f6f1ed1c7da8225f
   payload_count: 31
   corrupt_payloads_allowed: false
-  installation_readiness: blocked
-  blocking_conditions:
-  - offline-guest-known-answer-not-run
-  - offline-dependency-closure
-  - both-guest-op-contract
-  - frontend-phase-transport
-  - frontend-deploy-contract
-  - frontend-variables-manifest
-  - direct-known-hosts
-  - beehiiv-operation-redesign
-  - ordinary-systemd-transaction-transport
-  live_verification: pending-offline-ubuntu-guest
+  installation_readiness: verification-required-by-task4
+  blocking_conditions: []
+  live_verification: task4-owned-runtime-verify-receipt
   task4_consumer_contract:
     required_guests: [ken-ci, ken-deploy]
     bind_exact_lock_sha256: true
@@ -36,12 +27,12 @@ runtime_contract:
   - {guest: ken-ci, name: ken-op-net-ci, uid: 22001, gid: 22001, slice: system.slice, network_profile: github-control-ci}
   - {guest: ken-deploy, name: ken-op-net-nonprod, uid: 22002, gid: 22002, slice: ken-actions-deploy-brokers.slice, network_profile: github-control-nonproduction}
   - {guest: ken-deploy, name: ken-op-net-prod, uid: 22003, gid: 22003, slice: ken-actions-deploy-brokers.slice, network_profile: github-control-production}
-  - {guest: ken-deploy, name: ken-vexa-deploy, uid: 22101, gid: 22101, slice: ken-actions-deploy-transactions.slice, network_profile: vexa-production-fixed-target}
-  - {guest: ken-deploy, name: ken-beehiiv-sync, uid: 22102, gid: 22102, slice: ken-actions-deploy-transactions.slice, network_profile: beehiiv-and-github-fixed-targets}
-  - {guest: ken-deploy, name: ken-website-deploy, uid: 22103, gid: 22103, slice: ken-actions-deploy-transactions.slice, network_profile: website-production-fixed-target}
-  - {guest: ken-deploy, name: ken-fe-builder, uid: 22201, gid: 22201, slice: ken-actions-deploy-builder.slice, network_profile: frontend-production-digest-deploy}
-  - {guest: ken-deploy, name: ken-fe-uploader, uid: 22202, gid: 22202, slice: ken-actions-deploy-uploader.slice, network_profile: frontend-production-digest-deploy}
-  - {guest: ken-deploy, name: ken-fe-deploy, uid: 22203, gid: 22203, slice: ken-actions-deploy-executor.slice, network_profile: frontend-production-digest-deploy}
+  - {guest: ken-deploy, name: ken-vexa-deploy, uid: 22101, gid: 22101, slice: null, network_profile: vexa-production-fixed-target}
+  - {guest: ken-deploy, name: ken-beehiiv-sync, uid: 22102, gid: 22102, slice: null, network_profile: beehiiv-and-github-fixed-targets}
+  - {guest: ken-deploy, name: ken-website-deploy, uid: 22103, gid: 22103, slice: null, network_profile: website-production-fixed-target}
+  - {guest: ken-deploy, name: ken-fe-builder, uid: 22201, gid: 22201, slice: null, network_profile: frontend-production-digest-deploy}
+  - {guest: ken-deploy, name: ken-fe-uploader, uid: 22202, gid: 22202, slice: null, network_profile: frontend-production-digest-deploy}
+  - {guest: ken-deploy, name: ken-fe-deploy, uid: 22203, gid: 22203, slice: null, network_profile: frontend-production-digest-deploy}
   subordinate_ids:
   - {guest: ken-deploy, name: ken-fe-builder, uid: 22201, subuid_start: 300000, subuid_count: 65536, subgid_start: 300000, subgid_count: 65536}
   firewall_phase_interface:
@@ -50,6 +41,11 @@ runtime_contract:
     profile_authority: inventory/op-broker-policy.yaml
     caller_supplied_targets: forbidden
   startup_gates: [ken-actions-guest-firewall.service, ken-actions-guest-runtime-verify.service]
+  deferred_execution_transport:
+    status: unavailable
+    binding: executor.systemd_transaction_transport_sha256
+    transaction_slices: [ken-actions-deploy-transaction-1.slice, ken-actions-deploy-transaction-2.slice]
+    frontend_bindings: [production_build.phase_transport_sha256, production_build.deploy_contract_sha256]
 components:
 - id: 1password-cli
   version: 2.39.0
@@ -588,7 +584,7 @@ installed_files:
   - ken-deploy
   source: repo:bin/ken-op-exec
 - path: /usr/local/bin/ken-op-broker
-  sha256: 42d6f7f501195a7d675b726a349d092d0ecf07b2870e407deff779dbe7ca9429
+  sha256: 699e33a3d078c4eaebcec2ab68fe0d9b5421dbffd20307df3f51787a74fa107e
   hosts:
   - ken-ci
   - ken-deploy
@@ -633,7 +629,7 @@ installed_files:
   hosts: [ken-ci, ken-deploy]
   source: repo:bin/runtime-known-answer.py
 - path: /etc/ken-op-broker/op-broker-policy.yaml
-  sha256: 58fd8d1c818ad08f325251c5ef14983d8c3b86aa642521bf433f22ba770c2e32
+  sha256: d111b36d43cfe1ff1a49eb07e166dc472c734e1d233b4d9e75faca5e5d2baff3
   hosts:
   - ken-ci
   - ken-deploy
@@ -650,29 +646,9 @@ installed_files:
   - ken-ci
   - ken-deploy
   source: repo:systemd/ken-op-broker@.socket
-- path: /etc/systemd/system/ken-op-executor@.service
-  sha256: e63449b85dff9ef88a8926af091d56b36c06e0a1005f1a3f94e8572d7aa290b8
-  hosts:
-  - ken-deploy
-  source: repo:systemd/ken-op-executor@.service
-- path: /etc/systemd/system/ken-frontend-production-builder@.service
-  sha256: 5f9fa8acff0a130a6882e4f36596d4026dbb95004970d50f02f1aa05d71e5cd2
-  hosts:
-  - ken-deploy
-  source: repo:systemd/ken-frontend-production-builder@.service
-- path: /etc/systemd/system/ken-frontend-source-map-uploader@.service
-  sha256: 92c8beb31fce5318b4ada650954032d06c99c45d2b82ee309534fcf6cf472d74
-  hosts:
-  - ken-deploy
-  source: repo:systemd/ken-frontend-source-map-uploader@.service
-- path: /etc/systemd/system/ken-frontend-deploy-executor@.service
-  sha256: 34247d7a403d7813fcbbc8e1bd84e8d02a85c1f0f0abdda1d52d112dd7baded6
-  hosts:
-  - ken-deploy
-  source: repo:systemd/ken-frontend-deploy-executor@.service
 verification:
   payload_manifest_command: sha256sum -c PAYLOADS.sha256
   network_disabled_install: true
   signed_index_fingerprint: F6ECB3762474EDA9D21B7022871920D1991BC93C
-  known_answer_status: source-pinned-live-not-run
+  known_answer_status: required-by-task4-runtime-verify
   quarantined_payloads_included: false

@@ -49,11 +49,7 @@ require_files() {
     "${BIN}/runtime-known-answer.py" \
     "${SYSTEMD}/ken-op-broker@.service" \
     "${SYSTEMD}/ken-op-broker@.socket" \
-    "${SYSTEMD}/ken-op-broker@ci.service.d/override.conf" \
-    "${SYSTEMD}/ken-op-executor@.service" \
-    "${SYSTEMD}/ken-frontend-production-builder@.service" \
-    "${SYSTEMD}/ken-frontend-source-map-uploader@.service" \
-    "${SYSTEMD}/ken-frontend-deploy-executor@.service"; do
+    "${SYSTEMD}/ken-op-broker@ci.service.d/override.conf"; do
     if [[ ! -f "${path}" || -L "${path}" ]]; then
       printf 'missing or symlinked: %s\n' "${path#"${ROOT}/"}" >&2
       missing=1
@@ -62,8 +58,25 @@ require_files() {
   return "${missing}"
 }
 
+reject_unsupported_units() {
+  local path unexpected=0
+  for path in \
+    "${SYSTEMD}/ken-op-executor@.service" \
+    "${SYSTEMD}/ken-frontend-production-builder@.service" \
+    "${SYSTEMD}/ken-frontend-source-map-uploader@.service" \
+    "${SYSTEMD}/ken-frontend-deploy-executor@.service"; do
+    if [[ -e "${path}" || -L "${path}" ]]; then
+      printf 'unsupported unit is still claimed: %s\n' "${path#"${ROOT}/"}" >&2
+      unexpected=1
+    fi
+  done
+  return "${unexpected}"
+}
+
 echo '== Task 6 owned files =='
-run_check 'all broker runtime files and phase units exist' require_files
+run_check 'all supported broker runtime files exist' require_files
+run_check 'unsupported transaction and frontend phase units are absent' reject_unsupported_units
+run_check 'authority generator did not create an unexpected root output' test ! -e "${ROOT}/--help"
 run_check 'Task 6 tree contains no generated Python caches' bash -c '! find "$1" -type d -name __pycache__ -print -quit | grep -q . && ! find "$1" -type f -name "*.pyc" -print -quit | grep -q .' _ "${GA_ROOT}"
 
 echo '== immutable inventory and strict broker policy =='
@@ -77,8 +90,8 @@ import yaml
 
 root = Path(sys.argv[1])
 expected = {
-    "secrets.yaml": "810fae4897b1cba892e715927df2c0d34d1d231515be1ad89c59604e713e4e25",
-    "secret-handoff.yaml": "9b6179a207182a2b9e8d3f174bb2633869c29e155ad8664064fd859547bf3f96",
+    "secrets.yaml": "c6e9fc47524beac0d122772ac050d22cd581798367cab3fc43793a7805e81cad",
+    "secret-handoff.yaml": "d2606b99d58cf487915bac8928e1ab4e2e193511287a38d54fb311c0b09edb59",
 }
 for name, digest in expected.items():
     actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
@@ -92,6 +105,19 @@ assert handoff["counts"]["rows"] == 308
 assert handoff["counts"]["github_field_rows"] == 297
 assert handoff["counts"]["direct_onepassword_rows"] == 11
 assert len(handoff["rows"]) == 308
+direct = {row["environment_name"]: row for row in secrets["direct_onepassword_entries"] if row["repository"] == "ken-website" and row["workflow"] == ".github/workflows/deploy.yml"}
+assert direct["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"]["disposition"] == "github-variable"
+assert direct["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"]["delivery"] == "github-actions-variable"
+assert direct["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"]["migration_action"] == "move-to-variable"
+assert direct["POSTHOG_PERSONAL_API_KEY"]["disposition"] == "obsolete-unused"
+assert direct["POSTHOG_PERSONAL_API_KEY"]["delivery"] == "none"
+assert direct["POSTHOG_PERSONAL_API_KEY"]["migration_action"] == "remove-unused-reference-after-rg-proof"
+assert all("broker_action_id" not in direct[name] for name in ("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "POSTHOG_PERSONAL_API_KEY"))
+website = next(row for row in secrets["broker_actions"] if row["action_id"] == "ken-website-production-deploy")
+assert [row["target_field"] for row in website["required_fields"]] == ["WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"]
+handoff_direct = {row["environment_name"]: row for row in handoff["rows"] if row.get("reference_class") == "direct-onepassword" and row["repository"] == "ken-website" and row["workflow"] == ".github/workflows/deploy.yml"}
+assert handoff_direct["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"]["delivery"] == "github-actions-variable"
+assert handoff_direct["POSTHOG_PERSONAL_API_KEY"]["delivery"] == "none"
 PY
 
 run_check 'runtime lock and policy use strict schemas, exact hashes, and no placeholders' \
@@ -153,7 +179,26 @@ contract=lock["runtime_contract"]
 assert contract["op_path"] == "/usr/local/bin/op" and contract["guest_payload_count"] == 30
 assert contract["remote_build_inputs"] == ["node-build-base"] and len(contract["principals"]) == 9
 assert contract["subordinate_ids"] == [{"guest":"ken-deploy","name":"ken-fe-builder","uid":22201,"subuid_start":300000,"subuid_count":65536,"subgid_start":300000,"subgid_count":65536}]
+assert lock["compatibility"]["artifact_class"] == "immutable-guest-install-contract"
+assert lock["compatibility"]["installation_readiness"] == "verification-required-by-task4"
+assert lock["compatibility"]["blocking_conditions"] == []
+assert lock["compatibility"]["live_verification"] == "task4-owned-runtime-verify-receipt"
+assert lock["verification"]["known_answer_status"] == "required-by-task4-runtime-verify"
+assert contract["deferred_execution_transport"] == {
+    "status": "unavailable",
+    "binding": "executor.systemd_transaction_transport_sha256",
+    "transaction_slices": ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"],
+    "frontend_bindings": ["production_build.phase_transport_sha256", "production_build.deploy_contract_sha256"],
+}
+assert all(principal["slice"] is None for principal in contract["principals"][3:])
 installed = {item["path"]: item for item in lock["installed_files"]}
+for unsupported in (
+    "/etc/systemd/system/ken-op-executor@.service",
+    "/etc/systemd/system/ken-frontend-production-builder@.service",
+    "/etc/systemd/system/ken-frontend-source-map-uploader@.service",
+    "/etc/systemd/system/ken-frontend-deploy-executor@.service",
+):
+    assert unsupported not in installed
 for item in installed.values():
     if item["source"].startswith("repo:") or item["source"].startswith("repo-hard-copy:"):
         relative = item["source"].split(":", 1)[1]
@@ -177,6 +222,7 @@ assert actions["ken-frontend-production-release"]["blocked_reason_code"] == "fro
 assert actions["ken-vexa-mcp-auth-production-deploy"]["blocked_reason_code"] == "vexa_host_key_runtime_identity_and_transaction_transport_required"
 assert actions["ken-website-beehiiv-production-sync"]["blocked_reason_code"] == "beehiiv_sync_generation_and_transaction_transport_required"
 assert actions["ken-website-production-deploy"]["blocked_reason_code"] == "website_host_key_runtime_identity_and_transaction_transport_required"
+assert actions["ken-website-production-deploy"]["template"]["fields"] == ["WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"]
 for action in actions.values():
     wrapper = action["executor"]["wrapper"]
     assert installed[wrapper]["sha256"] == action["executor"]["wrapper_sha256"]
@@ -348,22 +394,59 @@ class ProtocolTests(unittest.TestCase):
                 else: action["runner"]["authority_escape"] = True
                 target.write_text(yaml.safe_dump(value, sort_keys=False))
                 with self.subTest(mutate=mutate), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
+            for schema_version in (True, 1.0):
+                value = copy.deepcopy(raw); value["schema_version"] = schema_version
+                target.write_text(yaml.safe_dump(value, sort_keys=False))
+                with self.subTest(schema_version=schema_version), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
+            scalar_mutations = {
+                "runner_uid_bool": lambda value: value["actions"][0]["runner"].__setitem__("uid", True),
+                "executor_timeout_bool": lambda value: value["actions"][0]["executor"].__setitem__("timeout_seconds", True),
+                "class_uid_bool": lambda value: value["classes"]["production"].__setitem__("broker_network_uid", True),
+            }
+            for name, mutate in scalar_mutations.items():
+                value = copy.deepcopy(raw); mutate(value)
+                target.write_text(yaml.safe_dump(value, sort_keys=False))
+                with self.subTest(mutate=name), self.assertRaises(broker.Reject): broker.load_policy(target, allow_nonroot=True)
         for source in ("a: &x 1\nb: *x\n", "a: !!str value\n"):
             with self.subTest(source=source), self.assertRaises(broker.Reject): broker._strict_yaml(source)
 
-    def test_historical_lock_is_never_accepted_as_guest_ready(self):
+    def test_immutable_install_contract_is_accepted_and_runtime_observations_are_rejected(self):
         lock_path = policy_path.parent / "broker-runtime.lock.yaml"
         broker.verify_runtime_lock(lock_path)
-        with self.assertRaises(broker.Reject): broker.verify_runtime_lock(lock_path, require_ready=True)
         original = yaml.safe_load(lock_path.read_text())
         mutations = []
         changed = copy.deepcopy(original); changed["components"][0]["payload_sha256"] = "0" * 64; mutations.append(changed)
         changed = copy.deepcopy(original); changed["components"][-1].pop("delivery_class"); mutations.append(changed)
         changed = copy.deepcopy(original); changed["runtime_contract"]["subordinate_ids"][0]["subuid_start"] = 22000; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["compatibility"]["artifact_class"] = "integration-evidence-not-guest-consumable"; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["compatibility"]["installation_readiness"] = "blocked"; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["compatibility"]["live_verification"] = "pending-offline-ubuntu-guest"; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["compatibility"]["live_verification"] = "passed-offline-ubuntu-guests"; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["verification"]["known_answer_status"] = "source-pinned-live-not-run"; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["verification"]["known_answer_status"] = "passed-on-both-offline-guests"; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["schema_version"] = True; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["schema_version"] = 1.0; mutations.append(changed)
+        changed = copy.deepcopy(original); changed["compatibility"]["task4_consumer_contract"]["bind_exact_lock_sha256"] = 1; mutations.append(changed)
         with tempfile.TemporaryDirectory() as directory:
             for index, value in enumerate(mutations):
                 target = Path(directory) / f"mutated-{index}.yaml"; target.write_text(yaml.safe_dump(value, sort_keys=False))
                 with self.subTest(index=index), self.assertRaises(broker.Reject): broker.verify_runtime_lock(target)
+
+    def test_production_build_fails_with_specific_deferred_transport_code(self):
+        claims = broker.synthetic_claims_for_action(self.action, 2_000_000_000)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaises(broker.Reject) as ctx:
+                broker.execute_fixed_action_live(self.action, root, root, claims, -1, (22201, 22201))
+        self.assertEqual(ctx.exception.code, "production_build_transport_unavailable")
+
+    def test_website_wrapper_parses_only_reviewed_ssh_fields(self):
+        argv = ["--broker-action", "ken-website-production-deploy", "--input-fd", "3", "--rendered-fd", "4"]
+        with mock.patch.object(broker, "_read_executor_fd", return_value=b"ignored"), mock.patch.object(
+            broker, "_parse_rendered_fields", side_effect=broker.Reject("schema-probe")
+        ) as parse_fields:
+            self.assertEqual(broker.fixed_wrapper_main("ken-website-production-deploy", argv), 1)
+        self.assertEqual(parse_fields.call_args.args[1], ("WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"))
 
     def test_peer_identity_binds_uid_pid_start_cgroup_and_executable(self):
         peer = broker.PeerIdentity(uid=21014, gid=21014, pid=42, start_time=99, cgroup="/ken-actions-deploy.slice/ken-actions-deploy-listeners.slice/ken-runner@ken-deploy-production-01.service", executable="/usr/local/bin/ken-op-exec")
@@ -746,36 +829,33 @@ assert all(x in text for x in required)
 assert not re.search(r"--token|OP_SERVICE_ACCOUNT_TOKEN=\$|echo .*token|set -x|source ", text, re.I)
 PY
 
-run_check 'systemd units encode credentials, sockets, slices, UIDs, limits, and hardening' \
+run_check 'supported systemd units encode credentials, sockets, gates, limits, and hardening' \
   python3 - "${SYSTEMD}" <<'PY'
 import sys
 from pathlib import Path
 root = Path(sys.argv[1])
 broker = (root / "ken-op-broker@.service").read_text()
 sock = (root / "ken-op-broker@.socket").read_text()
-builder = (root / "ken-frontend-production-builder@.service").read_text()
-uploader = (root / "ken-frontend-source-map-uploader@.service").read_text()
-executor = (root / "ken-frontend-deploy-executor@.service").read_text()
-ordinary = (root / "ken-op-executor@.service").read_text()
 ci_override = (root / "ken-op-broker@ci.service.d/override.conf").read_text()
 for token in ("LoadCredentialEncrypted=op-service-account-token:", "RuntimeDirectory=ken-op-broker/%i", "StateDirectory=ken-op-broker/%i", "Slice=ken-actions-deploy-brokers.slice", "NoNewPrivileges=yes", "ProtectSystem=strict", "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_KILL CAP_SETGID CAP_SETUID"):
     assert token in broker, token
 assert "ProtectProc=default" in broker and "Slice=system.slice" in ci_override
 assert "ListenSequentialPacket=/run/ken-op-broker/%i.sock" in sock
 assert "SocketMode=0660" in sock and "Backlog=16" in sock and "Accept=no" in sock
-assert "Slice=ken-actions-deploy-builder.slice" in builder and "MemoryMax=8G" in builder and "CPUQuota=300%" in builder and "TasksMax=1024" in builder
-assert "Slice=ken-actions-deploy-uploader.slice" in uploader and "MemoryMax=512M" in uploader and "CPUQuota=50%" in uploader
-assert "Slice=ken-actions-deploy-executor.slice" in executor and "MemoryMax=1G" in executor and "CPUQuota=100%" in executor
-assert "Slice=ken-actions-deploy-transactions.slice" in ordinary
-assert "execute-transaction --transaction-id %i" in ordinary and "ken-action-%i" not in ordinary
-for text in (broker, builder, uploader, executor, ordinary):
-    assert "Requires=" in text and "ken-actions-guest-firewall.service" in text and "ken-actions-guest-runtime-verify.service" in text
-    assert "After=" in text and "ken-actions-guest-firewall.service" in text and "ken-actions-guest-runtime-verify.service" in text
-for text in (builder, uploader, executor, ordinary):
-    assert "NoNewPrivileges=yes" in text
-    assert "Environment=OP_SERVICE_ACCOUNT_TOKEN" not in text
-    assert "LoadCredential" not in text
+assert "Requires=" in broker and "ken-actions-guest-firewall.service" in broker and "ken-actions-guest-runtime-verify.service" in broker
+assert "After=" in broker and "ken-actions-guest-firewall.service" in broker and "ken-actions-guest-runtime-verify.service" in broker
+for unsupported in (
+    "ken-op-executor@.service",
+    "ken-frontend-production-builder@.service",
+    "ken-frontend-source-map-uploader@.service",
+    "ken-frontend-deploy-executor@.service",
+):
+    assert not (root / unsupported).exists()
 PY
+
+run_check 'claimed runtime has no invented plural transaction slice' \
+  bash -c '! rg -n "ken-actions-deploy-transactions\\.slice" "$1" "$2" "$3" "$4"' _ \
+    "${INV}/broker-runtime.lock.yaml" "${INV}/op-broker-policy.yaml" "${BIN}/ken-op-broker" "${SYSTEMD}"
 
 echo '== secret and placeholder scans =='
 run_check 'Task 6 owned files contain no credential-shaped values or unresolved prose' \

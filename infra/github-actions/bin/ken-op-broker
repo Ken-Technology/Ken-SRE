@@ -78,8 +78,6 @@ TEMPLATE_CONTENT = {
         "BEEHIIV_PUBLICATION_ID=op://Ken%20Deploy%20Production/ken-website/BEEHIIV_PUBLICATION_ID\n"
     ),
     "ken-website-production-deploy": (
-        "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN=op://Ken%20Deploy%20Production/ken-website/NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN\n"
-        "POSTHOG_PERSONAL_API_KEY=op://Ken%20Deploy%20Production/ken-website/POSTHOG_PERSONAL_API_KEY\n"
         "WEBSITE_HOST=op://Ken%20Deploy%20Production/ken-website/WEBSITE_HOST\n"
         "WEBSITE_PORT=op://Ken%20Deploy%20Production/ken-website/WEBSITE_PORT\n"
         "WEBSITE_SSH_KEY=op://Ken%20Deploy%20Production/ken-website/WEBSITE_SSH_KEY\n"
@@ -230,6 +228,11 @@ def _require_exact_keys(value: Mapping[str, Any], required: set[str], optional: 
         raise Reject(code)
 
 
+def _require_exact_int_fields(value: Mapping[str, Any], fields: tuple[str, ...], code: str, *, minimum: int = 0) -> None:
+    if any(type(value.get(field)) is not int or value[field] < minimum for field in fields):
+        raise Reject(code)
+
+
 def _file_is_root_owned_readonly(path: Path) -> bool:
     st = path.stat()
     return stat.S_ISREG(st.st_mode) and st.st_uid == 0 and not (st.st_mode & 0o022)
@@ -240,7 +243,7 @@ def _security_binding_missing(action: Mapping[str, Any]) -> list[str]:
     missing: list[str] = []
     runner = action["runner"]
     for field in ("id", "group_id", "listener_generation"):
-        if not isinstance(runner.get(field), int) or runner[field] <= 0:
+        if type(runner.get(field)) is not int or runner[field] <= 0:
             missing.append(f"runner.{field}")
     for scope in ("template", "executor"):
         item = action.get(scope)
@@ -277,6 +280,12 @@ def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -
     if raw["credentials"]["command"] != ["/usr/local/bin/op", "inject"]:
         raise Reject("policy_credentials_command_invalid")
     _require_exact_keys(raw["deploy_leases"], {"ordinary_slots", "writer_preference", "production_build_holds_both", "recovery"}, set(), "policy_lease_schema_invalid")
+    _require_exact_int_fields(raw["protocol"], ("packet_bytes_max", "oidc_token_bytes_max", "github_token_bytes_max", "first_packet_timeout_seconds", "socket_backlog"), "policy_protocol_schema_invalid", minimum=1)
+    _require_exact_int_fields(raw["jwks"], ("connect_timeout_seconds", "read_timeout_seconds", "response_bytes_max", "freshness_min_seconds", "freshness_max_seconds", "clock_skew_seconds", "token_lifetime_max_seconds"), "policy_jwks_schema_invalid", minimum=0)
+    _require_exact_int_fields(raw["github_api"], ("response_bytes_max",), "policy_github_schema_invalid", minimum=1)
+    _require_exact_int_fields(raw["deploy_leases"], ("ordinary_slots",), "policy_lease_schema_invalid", minimum=1)
+    if type(raw["deploy_leases"]["production_build_holds_both"]) is not bool:
+        raise Reject("policy_lease_schema_invalid")
     firewall = raw["firewall_phase_interface"]
     _require_exact_keys(firewall, {"command", "arguments", "target_authority", "activation", "teardown", "profiles"}, set(), "policy_firewall_schema_invalid")
     if (firewall["command"] != ["/usr/local/libexec/ken-actions-guest-firewall", "phase"]
@@ -289,23 +298,32 @@ def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -
         raise Reject("policy_firewall_profiles_invalid")
     for class_name, class_record in raw["classes"].items():
         _require_exact_keys(class_record, {"audience", "broker_network_uid", "broker_network_gid", "vault", "active_connections_max"}, set(), "policy_class_schema_invalid")
+        _require_exact_int_fields(class_record, ("broker_network_uid", "broker_network_gid", "active_connections_max"), "policy_class_schema_invalid", minimum=1)
         if class_record["audience"] != f"https://ken.so/actions/op-broker/{class_name}":
             raise Reject("policy_class_audience_invalid")
     _require_exact_keys(record["repository"], {"owner", "owner_id", "name", "id", "visibility", "default_branch", "ref", "protected", "source_commit_sha", "workflow_ref", "workflow_blob_sha"}, {"dockerfile_blob_sha", "lockfile_blob_sha"}, "policy_repository_schema_invalid")
     _require_exact_keys(record["oidc"], {"audience", "subject", "event_names", "environment", "ref_type", "reusable_workflow"}, set(), "policy_oidc_schema_invalid")
     _require_exact_keys(record["job"], {"id", "name", "permissions"}, set(), "policy_job_schema_invalid")
     _require_exact_keys(record["runner"], {"name", "uid", "gid", "id", "group_id", "group_name", "labels", "cgroup", "executable", "listener_generation"}, set(), "policy_runner_schema_invalid")
+    _require_exact_int_fields(record["repository"], ("owner_id", "id"), "policy_repository_schema_invalid", minimum=1)
+    if type(record["repository"]["protected"]) is not bool or type(record["oidc"]["reusable_workflow"]) is not bool:
+        raise Reject("policy_repository_schema_invalid")
+    _require_exact_int_fields(record["runner"], ("uid", "gid"), "policy_runner_schema_invalid", minimum=1)
+    _require_exact_int_fields(record["runner"], ("id", "group_id", "listener_generation"), "policy_runner_schema_invalid", minimum=0)
     if record.get("template"):
         _require_exact_keys(record["template"], {"path", "sha256", "vault", "item", "fields"}, set(), "policy_template_schema_invalid")
     _require_exact_keys(record["executor"], {"name", "uid", "gid", "wrapper", "wrapper_sha256", "operation_binding_sha256", "systemd_transaction_transport_sha256", "timeout_seconds", "network_profile"}, {"target_profile", "known_hosts_path", "known_hosts_sha256"}, "policy_executor_schema_invalid")
+    _require_exact_int_fields(record["executor"], ("uid", "gid", "timeout_seconds"), "policy_executor_schema_invalid", minimum=1)
     if record["executor"]["network_profile"] not in raw["firewall_phase_interface"]["profiles"]:
         raise Reject("policy_executor_network_profile_invalid")
     if ("known_hosts_path" in record["executor"]) != ("known_hosts_sha256" in record["executor"]):
         raise Reject("policy_executor_known_hosts_invalid")
     if record.get("limits"):
         _require_exact_keys(record["limits"], {"fetch_seconds", "pack_bytes", "objects", "files", "blob_bytes", "materialized_bytes"}, set(), "policy_limits_schema_invalid")
+        _require_exact_int_fields(record["limits"], ("fetch_seconds", "pack_bytes", "objects", "files", "blob_bytes", "materialized_bytes"), "policy_limits_schema_invalid", minimum=1)
     if record.get("artifact_input"):
         _require_exact_keys(record["artifact_input"], {"name_prefix", "sha_suffix", "max_archive_bytes", "max_entries", "max_extracted_bytes", "manifest_path"}, set(), "policy_artifact_schema_invalid")
+        _require_exact_int_fields(record["artifact_input"], ("max_archive_bytes", "max_entries", "max_extracted_bytes"), "policy_artifact_schema_invalid", minimum=1)
         if record["input_mode"] != "artifact" or record["artifact_input"]["sha_suffix"] is not True or record["artifact_input"]["manifest_path"] != "manifest.json":
             raise Reject("policy_artifact_invalid")
     if record.get("production_build"):
@@ -314,6 +332,13 @@ def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -
         _require_exact_keys(build["builder"], {"slice", "cpu_quota", "memory_max", "memory_swap_max", "tasks_max", "disk_max_bytes", "timeout_seconds"}, set(), "policy_build_limits_invalid")
         _require_exact_keys(build["uploader"], {"slice", "cpu_quota", "memory_max", "memory_swap_max", "tasks_max"}, set(), "policy_build_limits_invalid")
         _require_exact_keys(build["deploy"], {"slice", "cpu_quota", "memory_max", "memory_swap_max", "tasks_max"}, set(), "policy_build_limits_invalid")
+        _require_exact_int_fields(build, ("builder_uid", "builder_gid", "uploader_uid", "uploader_gid", "deploy_uid", "deploy_gid"), "policy_build_schema_invalid", minimum=1)
+        for field in ("executes_repository_code_with_secret", "transformed_embedding_residual_accepted"):
+            if type(build[field]) is not bool:
+                raise Reject("policy_build_schema_invalid")
+        _require_exact_int_fields(build["builder"], ("tasks_max", "disk_max_bytes", "timeout_seconds"), "policy_build_limits_invalid", minimum=1)
+        _require_exact_int_fields(build["uploader"], ("tasks_max",), "policy_build_limits_invalid", minimum=1)
+        _require_exact_int_fields(build["deploy"], ("tasks_max",), "policy_build_limits_invalid", minimum=1)
     if record["oidc"]["audience"] != raw["classes"][record["trust_class"]]["audience"]:
         raise Reject("policy_action_audience_invalid")
 
@@ -331,7 +356,7 @@ def load_policy(path: str | Path, *, allow_nonroot: bool = False) -> Policy:
         "deploy_leases", "firewall_phase_interface", "classes", "actions",
     }
     _require_exact_keys(raw, required_root, set(), "policy_schema_invalid")
-    if raw["schema_version"] != 1 or raw["issuer"] != "https://token.actions.githubusercontent.com":
+    if type(raw["schema_version"]) is not int or raw["schema_version"] != 1 or raw["issuer"] != "https://token.actions.githubusercontent.com":
         raise Reject("policy_schema_invalid")
     if raw["organization"] != {"login": "Ken-Technology", "id": 270069411}:
         raise Reject("policy_organization_invalid")
@@ -362,7 +387,7 @@ def load_policy(path: str | Path, *, allow_nonroot: bool = False) -> Policy:
             raise Reject("policy_source_not_deployable")
         if (record["input_mode"] == "artifact") != ("artifact_input" in record):
             raise Reject("policy_artifact_invalid")
-        if record["enabled"] not in (True, False) or not isinstance(record["deferred_bindings"], list) or len(record["deferred_bindings"]) != len(set(record["deferred_bindings"])):
+        if type(record["enabled"]) is not bool or not isinstance(record["deferred_bindings"], list) or len(record["deferred_bindings"]) != len(set(record["deferred_bindings"])):
             raise Reject("policy_binding_schema_invalid")
         repo = record["repository"]
         if repo.get("owner") != "Ken-Technology" or repo.get("owner_id") != 270069411 or repo.get("visibility") != "private":
@@ -389,11 +414,11 @@ def load_policy(path: str | Path, *, allow_nonroot: bool = False) -> Policy:
             raise Reject("policy_operation_binding_invalid")
         runner_raw = record["runner"]
         runner = RunnerIdentity(
-            name=runner_raw["name"], uid=int(runner_raw["uid"]), gid=int(runner_raw["gid"]),
-            id=int(runner_raw["id"]), group_id=int(runner_raw["group_id"]),
+            name=runner_raw["name"], uid=runner_raw["uid"], gid=runner_raw["gid"],
+            id=runner_raw["id"], group_id=runner_raw["group_id"],
             group_name=runner_raw["group_name"], labels=tuple(runner_raw["labels"]),
             cgroup=runner_raw["cgroup"], executable=runner_raw["executable"],
-            listener_generation=int(runner_raw["listener_generation"]),
+            listener_generation=runner_raw["listener_generation"],
         )
         missing = _security_binding_missing(record)
         if missing:
@@ -996,6 +1021,8 @@ def materialize_source_commit_live(token: str, claims: Mapping[str, Any], action
 
 
 def execute_fixed_action_live(action: Action, request_dir: Path, input_path: Path, claims: Mapping[str, Any], credential_fd: int, network_identity: tuple[int, int]) -> str:
+    if action.input_mode == "production_build":
+        raise Reject("production_build_transport_unavailable")
     template = action.raw.get("template")
     if template is None:
         raise Reject("action_template_unavailable")
@@ -1139,7 +1166,7 @@ def fixed_wrapper_main(action_id: str, argv: Sequence[str]) -> int:
             raise Reject("wrapper_action_unbound")
         fields_by_action = {
             "ken-vexa-mcp-auth-production-deploy": ("SERVER_HOST", "SERVER_PORT", "SERVER_SSH_KEY"),
-            "ken-website-production-deploy": ("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "POSTHOG_PERSONAL_API_KEY", "WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"),
+            "ken-website-production-deploy": ("WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"),
         }
         fields = _parse_rendered_fields(_read_executor_fd(args.rendered_fd, 65536), fields_by_action[action_id])
         host_field, port_field, key_field = {
@@ -1525,9 +1552,10 @@ class JwksCache:
         return {"keys": [json.loads(entry["jwk"])]}
 
 
-def verify_runtime_lock(path: Path, *, require_ready: bool = False) -> None:
+def verify_runtime_lock(path: Path) -> None:
     raw = _strict_yaml(path.read_text())
-    if set(raw) != {"schema_version", "lock_version", "plan_sha256", "target", "compatibility", "runtime_contract", "components", "provenance_payloads", "installed_files", "verification"} or raw["schema_version"] != 1:
+    if (set(raw) != {"schema_version", "lock_version", "plan_sha256", "target", "compatibility", "runtime_contract", "components", "provenance_payloads", "installed_files", "verification"}
+            or type(raw["schema_version"]) is not int or raw["schema_version"] != 1):
         raise Reject("runtime_lock_schema_invalid")
     if raw["plan_sha256"] != "fa04630e96b13acc47419f790631acd8d595850affe937d665ff3216ed193b51":
         raise Reject("runtime_lock_plan_invalid")
@@ -1536,25 +1564,26 @@ def verify_runtime_lock(path: Path, *, require_ready: bool = False) -> None:
         raise Reject("runtime_lock_target_invalid")
     _require_exact_keys(raw["compatibility"], {"artifact_class", "payload_manifest_sha256", "payload_count", "corrupt_payloads_allowed", "installation_readiness", "blocking_conditions", "live_verification", "task4_consumer_contract"}, set(), "runtime_lock_compatibility_invalid")
     compatibility = raw["compatibility"]
-    expected_blockers = {
-        "offline-guest-known-answer-not-run", "offline-dependency-closure", "both-guest-op-contract",
-        "frontend-phase-transport", "frontend-deploy-contract", "frontend-variables-manifest",
-        "direct-known-hosts", "beehiiv-operation-redesign", "ordinary-systemd-transaction-transport",
-    }
     task4 = compatibility["task4_consumer_contract"]
     _require_exact_keys(task4, {"required_guests", "bind_exact_lock_sha256", "install_network_disabled", "dependency_closure_from_signed_indexes", "guest_image_manifest_required", "offline_hash_import_abi_checks_required"}, set(), "runtime_lock_compatibility_invalid")
     if task4 != {"required_guests":["ken-ci","ken-deploy"],"bind_exact_lock_sha256":True,"install_network_disabled":True,"dependency_closure_from_signed_indexes":True,"guest_image_manifest_required":True,"offline_hash_import_abi_checks_required":True}:
         raise Reject("runtime_lock_compatibility_invalid")
-    historical = (compatibility["artifact_class"] == "integration-evidence-not-guest-consumable" and compatibility["installation_readiness"] == "blocked"
-                  and set(compatibility["blocking_conditions"]) == expected_blockers and compatibility["live_verification"] == "pending-offline-ubuntu-guest")
-    ready = (compatibility["artifact_class"] == "guest-consumable" and compatibility["installation_readiness"] == "ready"
-             and compatibility["blocking_conditions"] == [] and compatibility["live_verification"] == "passed-offline-ubuntu-guests")
-    if (not SHA256.fullmatch(str(compatibility["payload_manifest_sha256"])) or compatibility["payload_count"] != 31
-            or compatibility["corrupt_payloads_allowed"] is not False or not (historical or ready) or (require_ready and not ready)):
+    for field in ("bind_exact_lock_sha256", "install_network_disabled", "dependency_closure_from_signed_indexes", "guest_image_manifest_required", "offline_hash_import_abi_checks_required"):
+        if type(task4[field]) is not bool:
+            raise Reject("runtime_lock_compatibility_invalid")
+    immutable_install_contract = (
+        compatibility["artifact_class"] == "immutable-guest-install-contract"
+        and compatibility["installation_readiness"] == "verification-required-by-task4"
+        and compatibility["blocking_conditions"] == []
+        and compatibility["live_verification"] == "task4-owned-runtime-verify-receipt"
+    )
+    if (not SHA256.fullmatch(str(compatibility["payload_manifest_sha256"]))
+            or type(compatibility["payload_count"]) is not int or compatibility["payload_count"] != 31
+            or compatibility["corrupt_payloads_allowed"] is not False or not immutable_install_contract):
         raise Reject("runtime_lock_compatibility_invalid")
     contract = raw["runtime_contract"]
-    _require_exact_keys(contract, {"op_path", "guest_payload_count", "remote_build_inputs", "principals", "subordinate_ids", "firewall_phase_interface", "startup_gates"}, set(), "runtime_lock_contract_invalid")
-    if (contract["op_path"] != "/usr/local/bin/op" or contract["guest_payload_count"] != 30
+    _require_exact_keys(contract, {"op_path", "guest_payload_count", "remote_build_inputs", "principals", "subordinate_ids", "firewall_phase_interface", "startup_gates", "deferred_execution_transport"}, set(), "runtime_lock_contract_invalid")
+    if (contract["op_path"] != "/usr/local/bin/op" or type(contract["guest_payload_count"]) is not int or contract["guest_payload_count"] != 30
             or contract["remote_build_inputs"] != ["node-build-base"]
             or contract["startup_gates"] != ["ken-actions-guest-firewall.service", "ken-actions-guest-runtime-verify.service"]):
         raise Reject("runtime_lock_contract_invalid")
@@ -1562,16 +1591,17 @@ def verify_runtime_lock(path: Path, *, require_ready: bool = False) -> None:
         ("ken-ci", "ken-op-net-ci", 22001, 22001, "system.slice", "github-control-ci"),
         ("ken-deploy", "ken-op-net-nonprod", 22002, 22002, "ken-actions-deploy-brokers.slice", "github-control-nonproduction"),
         ("ken-deploy", "ken-op-net-prod", 22003, 22003, "ken-actions-deploy-brokers.slice", "github-control-production"),
-        ("ken-deploy", "ken-vexa-deploy", 22101, 22101, "ken-actions-deploy-transactions.slice", "vexa-production-fixed-target"),
-        ("ken-deploy", "ken-beehiiv-sync", 22102, 22102, "ken-actions-deploy-transactions.slice", "beehiiv-and-github-fixed-targets"),
-        ("ken-deploy", "ken-website-deploy", 22103, 22103, "ken-actions-deploy-transactions.slice", "website-production-fixed-target"),
-        ("ken-deploy", "ken-fe-builder", 22201, 22201, "ken-actions-deploy-builder.slice", "frontend-production-digest-deploy"),
-        ("ken-deploy", "ken-fe-uploader", 22202, 22202, "ken-actions-deploy-uploader.slice", "frontend-production-digest-deploy"),
-        ("ken-deploy", "ken-fe-deploy", 22203, 22203, "ken-actions-deploy-executor.slice", "frontend-production-digest-deploy"),
+        ("ken-deploy", "ken-vexa-deploy", 22101, 22101, None, "vexa-production-fixed-target"),
+        ("ken-deploy", "ken-beehiiv-sync", 22102, 22102, None, "beehiiv-and-github-fixed-targets"),
+        ("ken-deploy", "ken-website-deploy", 22103, 22103, None, "website-production-fixed-target"),
+        ("ken-deploy", "ken-fe-builder", 22201, 22201, None, "frontend-production-digest-deploy"),
+        ("ken-deploy", "ken-fe-uploader", 22202, 22202, None, "frontend-production-digest-deploy"),
+        ("ken-deploy", "ken-fe-deploy", 22203, 22203, None, "frontend-production-digest-deploy"),
     }
     principals = set()
     for principal in contract["principals"]:
         _require_exact_keys(principal, {"guest", "name", "uid", "gid", "slice", "network_profile"}, set(), "runtime_lock_principal_invalid")
+        _require_exact_int_fields(principal, ("uid", "gid"), "runtime_lock_principal_invalid", minimum=1)
         principals.add((principal["guest"], principal["name"], principal["uid"], principal["gid"], principal["slice"], principal["network_profile"]))
     if principals != expected_principals or len(contract["principals"]) != len(expected_principals):
         raise Reject("runtime_lock_principal_invalid")
@@ -1579,6 +1609,7 @@ def verify_runtime_lock(path: Path, *, require_ready: bool = False) -> None:
     expected_subordinate = {"guest":"ken-deploy", "name":"ken-fe-builder", "uid":22201, "subuid_start":300000, "subuid_count":65536, "subgid_start":300000, "subgid_count":65536}
     if subordinate != [expected_subordinate]:
         raise Reject("runtime_lock_subordinate_id_invalid")
+    _require_exact_int_fields(subordinate[0], ("uid", "subuid_start", "subuid_count", "subgid_start", "subgid_count"), "runtime_lock_subordinate_id_invalid", minimum=1)
     used_ids = {item[2] for item in principals} | {item[3] for item in principals} | set(range(21001, 21015))
     for start_key, count_key in (("subuid_start", "subuid_count"), ("subgid_start", "subgid_count")):
         start, count = expected_subordinate[start_key], expected_subordinate[count_key]
@@ -1588,6 +1619,15 @@ def verify_runtime_lock(path: Path, *, require_ready: bool = False) -> None:
     _require_exact_keys(firewall, {"command", "arguments", "profile_authority", "caller_supplied_targets"}, set(), "runtime_lock_firewall_invalid")
     if firewall != {"command":["/usr/local/libexec/ken-actions-guest-firewall","phase"], "arguments":["--request-id","{request_id}","--profile","{network_profile}","--phase","{phase}","--state","{activate|deactivate}"], "profile_authority":"inventory/op-broker-policy.yaml", "caller_supplied_targets":"forbidden"}:
         raise Reject("runtime_lock_firewall_invalid")
+    deferred_transport = contract["deferred_execution_transport"]
+    _require_exact_keys(deferred_transport, {"status", "binding", "transaction_slices", "frontend_bindings"}, set(), "runtime_lock_transport_invalid")
+    if deferred_transport != {
+        "status": "unavailable",
+        "binding": "executor.systemd_transaction_transport_sha256",
+        "transaction_slices": ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"],
+        "frontend_bindings": ["production_build.phase_transport_sha256", "production_build.deploy_contract_sha256"],
+    }:
+        raise Reject("runtime_lock_transport_invalid")
     if not isinstance(raw["components"], list) or not isinstance(raw["installed_files"], list):
         raise Reject("runtime_lock_schema_invalid")
     ids = set()
@@ -1624,6 +1664,8 @@ def verify_runtime_lock(path: Path, *, require_ready: bool = False) -> None:
     provenance = raw["provenance_payloads"]
     if provenance != [{"id":"ubuntu-archive-keyring","version":"2023.11.28.1","filename":"ubuntu-keyring_2023.11.28.1_all.deb","source_url":"https://archive.ubuntu.com/ubuntu/pool/main/u/ubuntu-keyring/ubuntu-keyring_2023.11.28.1_all.deb","sha256":"36de43b15853ccae0028e9a767613770c704833f82586f28eb262f0311adb8a8","install_on_guest":False,"purpose":"verify-signed-ubuntu-package-indexes-only"}]:
         raise Reject("runtime_lock_provenance_invalid")
+    if type(provenance[0]["install_on_guest"]) is not bool:
+        raise Reject("runtime_lock_provenance_invalid")
     for payload in provenance:
         if payload["filename"] in collected_payloads:
             raise Reject("runtime_lock_payload_invalid")
@@ -1641,9 +1683,18 @@ def verify_runtime_lock(path: Path, *, require_ready: bool = False) -> None:
     required_paths = {"/usr/local/bin/ken-op-exec", "/usr/local/bin/ken-op-broker", "/usr/local/bin/ken-actions-artifact-download", "/usr/local/bin/ken-frontend-production-release", "/usr/local/bin/ken-frontend-source-map-upload", "/usr/local/libexec/ken-actions/ken-vexa-mcp-auth-production-deploy", "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync", "/usr/local/libexec/ken-actions/ken-website-production-deploy", "/usr/local/libexec/ken-actions/ken-frontend-production-release-build", "/usr/local/libexec/ken-actions/runtime-known-answer.py"}
     if not required_paths <= paths:
         raise Reject("runtime_lock_file_set_invalid")
+    unsupported_units = {
+        "/etc/systemd/system/ken-op-executor@.service",
+        "/etc/systemd/system/ken-frontend-production-builder@.service",
+        "/etc/systemd/system/ken-frontend-source-map-uploader@.service",
+        "/etc/systemd/system/ken-frontend-deploy-executor@.service",
+    }
+    if paths & unsupported_units:
+        raise Reject("runtime_lock_file_set_invalid")
     _require_exact_keys(raw["verification"], {"payload_manifest_command", "network_disabled_install", "signed_index_fingerprint", "known_answer_status", "quarantined_payloads_included"}, set(), "runtime_lock_verification_invalid")
-    known_answer_ok = raw["verification"]["known_answer_status"] in ({"source-pinned-live-not-run"} if not require_ready else {"passed-on-both-offline-guests"})
-    if raw["verification"]["network_disabled_install"] is not True or not known_answer_ok or raw["verification"]["quarantined_payloads_included"] is not False:
+    if (raw["verification"]["network_disabled_install"] is not True
+            or raw["verification"]["known_answer_status"] != "required-by-task4-runtime-verify"
+            or raw["verification"]["quarantined_payloads_included"] is not False):
         raise Reject("runtime_lock_verification_invalid")
 
 
@@ -1797,7 +1848,7 @@ def handle_connection(conn: socket.socket, policy: Policy, trust_class: str, sta
 
 def serve(policy_path: Path, runtime_lock: Path, socket_path: Path, state_dir: Path, credential_dir: Path) -> int:
     policy = load_policy(policy_path)
-    verify_runtime_lock(runtime_lock, require_ready=True)
+    verify_runtime_lock(runtime_lock)
     verify_runtime_assets(policy)
     credential_fd = open_credential_source(credential_dir)
     dependencies = LiveDependencies(policy, state_dir)

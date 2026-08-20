@@ -278,6 +278,7 @@ def _direct_onepassword_mapping(
     source_reference: str,
     field_type: str,
     broker_action_id: str | None = None,
+    disposition: str = "broker-action",
 ) -> dict[str, Any]:
     segment = r"[A-Za-z0-9][A-Za-z0-9._ -]*"
     match = re.fullmatch(
@@ -285,13 +286,73 @@ def _direct_onepassword_mapping(
     )
     if not match:
         raise ValueError("direct 1Password mapping requires a fixed source reference")
-    if not broker_action_id:
-        raise ValueError("direct 1Password mapping requires broker_action_id")
     source_vault, source_item, source_field = match.groups()
-    target_vault = PRODUCTION_VAULT
-    target_item = repository
     coordinate = f"{repository}:{workflow}#{job}:{environment_name}"
-    return {
+    if disposition == "broker-action":
+        if not broker_action_id:
+            raise ValueError("direct 1Password mapping requires broker_action_id")
+        target_vault = PRODUCTION_VAULT
+        target_item = repository
+        delivery = "onepassword-broker"
+        migration_action = "copy-direct-onepassword-reference"
+        source_to_target_steps = [
+            f"Use task6-temporary-migration-writer to copy {source_reference} directly into {target_vault}/{target_item}/{environment_name} without displaying the value."
+        ]
+        broker_cutover_steps = [
+            f"Replace the direct {source_reference} env reference in {coordinate} with one request for fixed action {broker_action_id}; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
+            "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover.",
+        ]
+        live_verification_steps = [
+            f"Run {coordinate} and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+        ]
+        retirement_steps = [
+            f"Only after live verification, remove the direct {source_reference} workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+        ]
+    elif disposition == "github-variable":
+        if broker_action_id or (repository, workflow, job, environment_name) != (
+            "ken-website", ".github/workflows/deploy.yml", "deploy", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"
+        ):
+            raise ValueError("invalid direct GitHub variable disposition")
+        target_vault = "not-applicable"
+        target_item = "GitHub Actions variables:ken-website"
+        delivery = "github-actions-variable"
+        migration_action = "move-to-variable"
+        source_to_target_steps = [
+            "Create reviewed repository variable NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN for ken-website through the approved GitHub variable channel; do not create or update a 1Password target."
+        ]
+        broker_cutover_steps = [
+            f"Replace the direct {source_reference} reference in {coordinate} with vars.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN; the broker action and template must not name or render this field."
+        ]
+        live_verification_steps = [
+            "Verify the reviewed variable is present for the website workflow and that the fixed website broker action still selects only WEBSITE_HOST, WEBSITE_PORT, and WEBSITE_SSH_KEY."
+        ]
+        retirement_steps = [
+            f"After the variable cutover is verified, remove the direct {source_reference} workflow reference; retain the source item only until its owner confirms no other consumer remains."
+        ]
+    elif disposition == "obsolete-unused":
+        if broker_action_id or (repository, workflow, job, environment_name) != (
+            "ken-website", ".github/workflows/deploy.yml", "deploy", "POSTHOG_PERSONAL_API_KEY"
+        ):
+            raise ValueError("invalid obsolete direct reference disposition")
+        target_vault = "not-applicable"
+        target_item = "obsolete-reference"
+        delivery = "none"
+        migration_action = "remove-unused-reference-after-rg-proof"
+        source_to_target_steps = [
+            "Do not copy POSTHOG_PERSONAL_API_KEY to 1Password or another runtime channel; preserve only value-blind source-reference evidence until removal."
+        ]
+        broker_cutover_steps = [
+            f"After repository-wide usage proof, remove the unused {source_reference} reference from {coordinate}; the broker action and template must not name or render this field."
+        ]
+        live_verification_steps = [
+            "Verify the website deploy path uses only WEBSITE_HOST, WEBSITE_PORT, and WEBSITE_SSH_KEY and no action, variable, or broker field consumes POSTHOG_PERSONAL_API_KEY."
+        ]
+        retirement_steps = [
+            f"Retire the direct {source_reference} workflow reference after the unused-reference proof; retain or delete the source item only under its owner's separate authority."
+        ]
+    else:
+        raise ValueError("unsupported direct 1Password disposition")
+    result = {
         "mapping_id": f"direct-op-{_slug(coordinate)}",
         "repository": repository,
         "workflow": workflow,
@@ -306,21 +367,17 @@ def _direct_onepassword_mapping(
         "target_field": environment_name,
         "field_type": field_type,
         "consumer": "ken-deploy-production",
-        "broker_action_id": broker_action_id,
-        "source_to_target_steps": [
-            f"Use task6-temporary-migration-writer to copy {source_reference} directly into {target_vault}/{target_item}/{environment_name} without displaying the value."
-        ],
-        "broker_cutover_steps": [
-            f"Replace the direct {source_reference} env reference in {coordinate} with one request for fixed action {broker_action_id}; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
-            "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover.",
-        ],
-        "live_verification_steps": [
-            f"Run {coordinate} and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
-        ],
-        "retirement_steps": [
-            f"Only after live verification, remove the direct {source_reference} workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
-        ],
+        "disposition": disposition,
+        "delivery": delivery,
+        "migration_action": migration_action,
+        "source_to_target_steps": source_to_target_steps,
+        "broker_cutover_steps": broker_cutover_steps,
+        "live_verification_steps": live_verification_steps,
+        "retirement_steps": retirement_steps,
     }
+    if broker_action_id:
+        result["broker_action_id"] = broker_action_id
+    return result
 
 
 def _fixed_secret_broker_action(
@@ -820,8 +877,8 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
         ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "DEPLOY_SSH_KEY", "op://ken-website/blog-sync-deploy/private_key", "concealed", "ken-website-beehiiv-production-sync"),
         ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_API_KEY", "op://ken-website/beehiiv/credential", "concealed", "ken-website-beehiiv-production-sync"),
         ("ken-website", ".github/workflows/beehiiv-sync.yml", "sync", "BEEHIIV_PUBLICATION_ID", "op://ken-website/beehiiv/publication_id", "string", "ken-website-beehiiv-production-sync"),
-        ("ken-website", ".github/workflows/deploy.yml", "deploy", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "op://ken-website/posthog/project_token", "string", "ken-website-production-deploy"),
-        ("ken-website", ".github/workflows/deploy.yml", "deploy", "POSTHOG_PERSONAL_API_KEY", "op://ken-website/posthog/personal_api_key", "concealed", "ken-website-production-deploy"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "op://ken-website/posthog/project_token", "string", None, "github-variable"),
+        ("ken-website", ".github/workflows/deploy.yml", "deploy", "POSTHOG_PERSONAL_API_KEY", "op://ken-website/posthog/personal_api_key", "concealed", None, "obsolete-unused"),
         ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_HOST", "op://ken-website/deploy-ssh/host", "string", "ken-website-production-deploy"),
         ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_PORT", "op://ken-website/deploy-ssh/port", "string", "ken-website-production-deploy"),
         ("ken-website", ".github/workflows/deploy.yml", "deploy", "WEBSITE_SSH_KEY", "op://ken-website/deploy-ssh/private_key", "concealed", "ken-website-production-deploy"),
@@ -865,7 +922,7 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
                 "field_type": row["field_type"],
             }
             for row in direct_onepassword_mappings
-            if row["broker_action_id"] == action_id
+            if row.get("broker_action_id") == action_id
         ]
         broker_actions.append(
             _fixed_secret_broker_action(

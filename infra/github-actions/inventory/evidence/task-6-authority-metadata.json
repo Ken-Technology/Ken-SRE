@@ -311,16 +311,6 @@
       "required_fields": [
         {
           "field_type": "string",
-          "target_field": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
-          "target_item": "ken-website"
-        },
-        {
-          "field_type": "concealed",
-          "target_field": "POSTHOG_PERSONAL_API_KEY",
-          "target_item": "ken-website"
-        },
-        {
-          "field_type": "string",
           "target_field": "WEBSITE_HOST",
           "target_item": "ken-website"
         },
@@ -355,6 +345,8 @@
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "onepassword-broker",
+      "disposition": "broker-action",
       "environment_name": "SERVER_HOST",
       "field_type": "string",
       "job": "deploy",
@@ -362,6 +354,7 @@
         "Run ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_HOST and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
       ],
       "mapping_id": "direct-op-ken-vexa-mcp-auth-github-workflows-deploy-yml-deploy-server-host",
+      "migration_action": "copy-direct-onepassword-reference",
       "repository": "ken-vexa-mcp-auth",
       "retirement_steps": [
         "Only after live verification, remove the direct op://Development/vexa-mcp-auth-deploy-ssh/host workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
@@ -385,6 +378,8 @@
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "onepassword-broker",
+      "disposition": "broker-action",
       "environment_name": "SERVER_PORT",
       "field_type": "string",
       "job": "deploy",
@@ -392,6 +387,7 @@
         "Run ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_PORT and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
       ],
       "mapping_id": "direct-op-ken-vexa-mcp-auth-github-workflows-deploy-yml-deploy-server-port",
+      "migration_action": "copy-direct-onepassword-reference",
       "repository": "ken-vexa-mcp-auth",
       "retirement_steps": [
         "Only after live verification, remove the direct op://Development/vexa-mcp-auth-deploy-ssh/port workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
@@ -415,6 +411,8 @@
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "onepassword-broker",
+      "disposition": "broker-action",
       "environment_name": "SERVER_SSH_KEY",
       "field_type": "concealed",
       "job": "deploy",
@@ -422,6 +420,7 @@
         "Run ken-vexa-mcp-auth:.github/workflows/deploy.yml#deploy:SERVER_SSH_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
       ],
       "mapping_id": "direct-op-ken-vexa-mcp-auth-github-workflows-deploy-yml-deploy-server-ssh-key",
+      "migration_action": "copy-direct-onepassword-reference",
       "repository": "ken-vexa-mcp-auth",
       "retirement_steps": [
         "Only after live verification, remove the direct op://Development/vexa-mcp-auth-deploy-ssh/private_key workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
@@ -445,6 +444,8 @@
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "onepassword-broker",
+      "disposition": "broker-action",
       "environment_name": "BEEHIIV_API_KEY",
       "field_type": "concealed",
       "job": "sync",
@@ -452,6 +453,7 @@
         "Run ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_API_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
       ],
       "mapping_id": "direct-op-ken-website-github-workflows-beehiiv-sync-yml-sync-beehiiv-api-key",
+      "migration_action": "copy-direct-onepassword-reference",
       "repository": "ken-website",
       "retirement_steps": [
         "Only after live verification, remove the direct op://ken-website/beehiiv/credential workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
@@ -475,6 +477,8 @@
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "onepassword-broker",
+      "disposition": "broker-action",
       "environment_name": "BEEHIIV_PUBLICATION_ID",
       "field_type": "string",
       "job": "sync",
@@ -482,6 +486,7 @@
         "Run ken-website:.github/workflows/beehiiv-sync.yml#sync:BEEHIIV_PUBLICATION_ID and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
       ],
       "mapping_id": "direct-op-ken-website-github-workflows-beehiiv-sync-yml-sync-beehiiv-publication-id",
+      "migration_action": "copy-direct-onepassword-reference",
       "repository": "ken-website",
       "retirement_steps": [
         "Only after live verification, remove the direct op://ken-website/beehiiv/publication_id workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
@@ -505,6 +510,8 @@
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "onepassword-broker",
+      "disposition": "broker-action",
       "environment_name": "DEPLOY_SSH_KEY",
       "field_type": "concealed",
       "job": "sync",
@@ -512,6 +519,7 @@
         "Run ken-website:.github/workflows/beehiiv-sync.yml#sync:DEPLOY_SSH_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
       ],
       "mapping_id": "direct-op-ken-website-github-workflows-beehiiv-sync-yml-sync-deploy-ssh-key",
+      "migration_action": "copy-direct-onepassword-reference",
       "repository": "ken-website",
       "retirement_steps": [
         "Only after live verification, remove the direct op://ken-website/blog-sync-deploy/private_key workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
@@ -529,63 +537,65 @@
       "workflow": ".github/workflows/beehiiv-sync.yml"
     },
     {
-      "broker_action_id": "ken-website-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/posthog/project_token env reference in ken-website:.github/workflows/deploy.yml#deploy:NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN with one request for fixed action ken-website-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
-        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+        "Replace the direct op://ken-website/posthog/project_token reference in ken-website:.github/workflows/deploy.yml#deploy:NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN with vars.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN; the broker action and template must not name or render this field."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "github-actions-variable",
+      "disposition": "github-variable",
       "environment_name": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
       "field_type": "string",
       "job": "deploy",
       "live_verification_steps": [
-        "Run ken-website:.github/workflows/deploy.yml#deploy:NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+        "Verify the reviewed variable is present for the website workflow and that the fixed website broker action still selects only WEBSITE_HOST, WEBSITE_PORT, and WEBSITE_SSH_KEY."
       ],
       "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-next-public-posthog-project-token",
+      "migration_action": "move-to-variable",
       "repository": "ken-website",
       "retirement_steps": [
-        "Only after live verification, remove the direct op://ken-website/posthog/project_token workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+        "After the variable cutover is verified, remove the direct op://ken-website/posthog/project_token workflow reference; retain the source item only until its owner confirms no other consumer remains."
       ],
       "source_field": "project_token",
       "source_item": "posthog",
       "source_reference": "op://ken-website/posthog/project_token",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://ken-website/posthog/project_token directly into Ken Deploy Production/ken-website/NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN without displaying the value."
+        "Create reviewed repository variable NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN for ken-website through the approved GitHub variable channel; do not create or update a 1Password target."
       ],
       "source_vault": "ken-website",
       "target_field": "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN",
-      "target_item": "ken-website",
-      "target_vault": "Ken Deploy Production",
+      "target_item": "GitHub Actions variables:ken-website",
+      "target_vault": "not-applicable",
       "workflow": ".github/workflows/deploy.yml"
     },
     {
-      "broker_action_id": "ken-website-production-deploy",
       "broker_cutover_steps": [
-        "Replace the direct op://ken-website/posthog/personal_api_key env reference in ken-website:.github/workflows/deploy.yml#deploy:POSTHOG_PERSONAL_API_KEY with one request for fixed action ken-website-production-deploy; the workflow cannot name or receive a vault field, rendered configuration, file descriptor, or wrapper output.",
-        "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
+        "After repository-wide usage proof, remove the unused op://ken-website/posthog/personal_api_key reference from ken-website:.github/workflows/deploy.yml#deploy:POSTHOG_PERSONAL_API_KEY; the broker action and template must not name or render this field."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "none",
+      "disposition": "obsolete-unused",
       "environment_name": "POSTHOG_PERSONAL_API_KEY",
       "field_type": "concealed",
       "job": "deploy",
       "live_verification_steps": [
-        "Run ken-website:.github/workflows/deploy.yml#deploy:POSTHOG_PERSONAL_API_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
+        "Verify the website deploy path uses only WEBSITE_HOST, WEBSITE_PORT, and WEBSITE_SSH_KEY and no action, variable, or broker field consumes POSTHOG_PERSONAL_API_KEY."
       ],
       "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-posthog-personal-api-key",
+      "migration_action": "remove-unused-reference-after-rg-proof",
       "repository": "ken-website",
       "retirement_steps": [
-        "Only after live verification, remove the direct op://ken-website/posthog/personal_api_key workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
+        "Retire the direct op://ken-website/posthog/personal_api_key workflow reference after the unused-reference proof; retain or delete the source item only under its owner's separate authority."
       ],
       "source_field": "personal_api_key",
       "source_item": "posthog",
       "source_reference": "op://ken-website/posthog/personal_api_key",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://ken-website/posthog/personal_api_key directly into Ken Deploy Production/ken-website/POSTHOG_PERSONAL_API_KEY without displaying the value."
+        "Do not copy POSTHOG_PERSONAL_API_KEY to 1Password or another runtime channel; preserve only value-blind source-reference evidence until removal."
       ],
       "source_vault": "ken-website",
       "target_field": "POSTHOG_PERSONAL_API_KEY",
-      "target_item": "ken-website",
-      "target_vault": "Ken Deploy Production",
+      "target_item": "obsolete-reference",
+      "target_vault": "not-applicable",
       "workflow": ".github/workflows/deploy.yml"
     },
     {
@@ -595,6 +605,8 @@
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "onepassword-broker",
+      "disposition": "broker-action",
       "environment_name": "WEBSITE_HOST",
       "field_type": "string",
       "job": "deploy",
@@ -602,6 +614,7 @@
         "Run ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_HOST and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
       ],
       "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-website-host",
+      "migration_action": "copy-direct-onepassword-reference",
       "repository": "ken-website",
       "retirement_steps": [
         "Only after live verification, remove the direct op://ken-website/deploy-ssh/host workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
@@ -625,6 +638,8 @@
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "onepassword-broker",
+      "disposition": "broker-action",
       "environment_name": "WEBSITE_PORT",
       "field_type": "string",
       "job": "deploy",
@@ -632,6 +647,7 @@
         "Run ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_PORT and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
       ],
       "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-website-port",
+      "migration_action": "copy-direct-onepassword-reference",
       "repository": "ken-website",
       "retirement_steps": [
         "Only after live verification, remove the direct op://ken-website/deploy-ssh/port workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
@@ -655,6 +671,8 @@
         "The production runtime account remains read_items-only to Ken Deploy Production and must not receive access to Development or ken-website after cutover."
       ],
       "consumer": "ken-deploy-production",
+      "delivery": "onepassword-broker",
+      "disposition": "broker-action",
       "environment_name": "WEBSITE_SSH_KEY",
       "field_type": "concealed",
       "job": "deploy",
@@ -662,6 +680,7 @@
         "Run ken-website:.github/workflows/deploy.yml#deploy:WEBSITE_SSH_KEY and verify its real deployment or synchronization side effect succeeds through the production broker without displaying the field."
       ],
       "mapping_id": "direct-op-ken-website-github-workflows-deploy-yml-deploy-website-ssh-key",
+      "migration_action": "copy-direct-onepassword-reference",
       "repository": "ken-website",
       "retirement_steps": [
         "Only after live verification, remove the direct op://ken-website/deploy-ssh/private_key workflow reference and retire its old OP_SERVICE_ACCOUNT_TOKEN dependency; retain the source item until its owner confirms no other consumer remains."
