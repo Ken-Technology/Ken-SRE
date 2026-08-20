@@ -1,6 +1,10 @@
 [Unit]
 Description=Ken rootless Docker daemon for runner %i
+Requires=ken-actions-guest-firewall.service
+Requires=ken-actions-guest-runtime-verify.service
 After=network-online.target
+After=ken-actions-guest-firewall.service
+After=ken-actions-guest-runtime-verify.service
 Wants=network-online.target
 ConditionPathExists=/etc/ken-runners/%i.docker-ready
 

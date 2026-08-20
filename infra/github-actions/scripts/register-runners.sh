@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import grp
 import json
+import math
 import os
 import re
 import shlex
@@ -60,6 +61,203 @@ def read_json(path):
         return json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as error:
         raise ContractError(f"cannot read exact state {path}: {error}") from error
+
+
+def read_strict_json(path, label, *, require_root=False):
+    def reject_duplicate(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ContractError(f"{label} contains duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def reject_constant(value):
+        raise ContractError(f"{label} contains invalid numeric constant: {value}")
+
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as error:
+        if path.is_symlink():
+            raise ContractError(f"{label} is symlinked") from error
+        raise ContractError(f"{label} is missing or unsafe") from error
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ContractError(f"{label} is not a regular file")
+        if stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise ContractError(f"{label} must be mode 0600")
+        if require_root and metadata.st_uid != 0:
+            raise ContractError(f"{label} must be root-owned mode 0600")
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1
+            value = json.load(handle, object_pairs_hook=reject_duplicate, parse_constant=reject_constant)
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ContractError(f"{label} is malformed: {error}") from error
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if not isinstance(value, dict):
+        raise ContractError(f"{label} schema must be an object")
+    return value
+
+
+def authority_paths(ga_root, *, fake_root=None):
+    if fake_root is not None:
+        return (
+            fake_root / "authority/broker-runtime.lock.yaml",
+            fake_root / "authority/guest-image-manifest.yaml",
+        )
+    lock_override = os.environ.get("KEN_RUNNER_RUNTIME_LOCK_FILE")
+    manifest_override = os.environ.get("KEN_RUNNER_GUEST_MANIFEST_FILE")
+    if lock_override or manifest_override:
+        if os.environ.get("KEN_RUNNER_COMMAND_TEST") != "1" or not (lock_override and manifest_override):
+            raise ContractError("runtime authority path overrides are test-only and must be complete")
+        return Path(lock_override), Path(manifest_override)
+    return (
+        ga_root / "inventory/broker-runtime.lock.yaml",
+        ga_root / "inventory/guest-image-manifest.yaml",
+    )
+
+
+def read_authority_file(path, label):
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as error:
+        detail = "symlinked" if path.is_symlink() else "missing or unsafe"
+        raise ContractError(f"{label} is {detail}") from error
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ContractError(f"{label} is not a regular file")
+        if metadata.st_uid not in {0, os.getuid()} or stat.S_IMODE(metadata.st_mode) & 0o022:
+            raise ContractError(f"{label} has unsafe ownership or mode")
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            return handle.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def require_exact_keys(value, expected, label):
+    if not isinstance(value, dict) or set(value) != set(expected):
+        raise ContractError(f"{label} schema mismatch")
+
+
+def require_sha256(value, label):
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ContractError(f"{label} is malformed")
+    return value
+
+
+def validate_artifact_authority(evidence, ga_root, *, fake_root=None):
+    lock_path, manifest_path = authority_paths(ga_root, fake_root=fake_root)
+    lock_bytes = read_authority_file(lock_path, "Task 6 runtime lock")
+    manifest_bytes = read_authority_file(manifest_path, "Task 4 guest image manifest")
+    try:
+        manifest = yaml.load(manifest_bytes, Loader=UniqueLoader)
+    except yaml.YAMLError as error:
+        raise ContractError(f"Task 4 guest image manifest is malformed: {error}") from error
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise ContractError("Task 4 guest image manifest schema mismatch")
+
+    authority = manifest.get("authority")
+    if not isinstance(authority, dict):
+        raise ContractError("Task 4 guest image manifest authority schema mismatch")
+    task6_commit = authority.get("task6_commit")
+    if not isinstance(task6_commit, str) or re.fullmatch(r"[0-9a-f]{40}", task6_commit) is None:
+        raise ContractError("Task 4 guest image manifest Task 6 commit is malformed")
+    lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
+    if authority.get("broker_runtime_lock_sha256") != lock_sha256:
+        raise ContractError("Task 4 manifest runtime lock digest mismatch")
+    require_sha256(authority.get("op_broker_policy_sha256"), "Task 4 manifest broker policy digest")
+
+    readiness = manifest.get("readiness")
+    if not isinstance(readiness, dict) or readiness.get("state") != "ready" or readiness.get("live_apply_allowed") is not True:
+        raise ContractError("Task 4 guest image manifest is not ready for live apply")
+    derived = manifest.get("derived_images")
+    require_exact_keys(derived, {"status", "ci", "deploy"}, "Task 4 derived images")
+    if derived.get("status") != "ready":
+        raise ContractError("Task 4 derived images are not ready")
+    verification = manifest.get("verification")
+    if not isinstance(verification, dict):
+        raise ContractError("Task 4 verification schema mismatch")
+    receipts = verification.get("result_receipts")
+    require_exact_keys(receipts, {"ci", "deploy"}, "Task 4 result receipts")
+
+    derived_sha256 = {}
+    for key, guest, expected_path, expected_size in (
+        ("ci", "ken-ci", "/mnt/data/libvirt/images/ken-ci.qcow2", 750),
+        ("deploy", "ken-deploy", "/mnt/data/libvirt/images/ken-deploy.qcow2", 80),
+    ):
+        image = derived.get(key)
+        receipt = receipts.get(key)
+        require_exact_keys(image, {"path", "sha256", "virtual_size_gib", "receipt_sha256"}, f"Task 4 {guest} derived image")
+        require_exact_keys(receipt, {"path", "sha256"}, f"Task 4 {guest} result receipt")
+        if image.get("path") != expected_path or image.get("virtual_size_gib") != expected_size:
+            raise ContractError(f"Task 4 {guest} derived image contract mismatch")
+        derived_sha256[guest] = require_sha256(image.get("sha256"), f"Task 4 {guest} derived image digest")
+        receipt_sha256 = require_sha256(receipt.get("sha256"), f"Task 4 {guest} result receipt digest")
+        if image.get("receipt_sha256") != receipt_sha256 or not isinstance(receipt.get("path"), str) or not receipt.get("path").startswith("/"):
+            raise ContractError(f"Task 4 {guest} result receipt mismatch")
+
+    artifact = evidence.get("artifact_authority")
+    require_exact_keys(
+        artifact,
+        {"task6_runtime_lock_sha256", "guest_image_manifest_sha256", "derived_images"},
+        "Task 4 artifact authority",
+    )
+    require_exact_keys(artifact.get("derived_images"), {"ken-ci", "ken-deploy"}, "Task 4 evidence derived images")
+    if require_sha256(artifact.get("task6_runtime_lock_sha256"), "Task 4 evidence runtime lock digest") != lock_sha256:
+        raise ContractError("Task 4 evidence runtime lock digest mismatch")
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    if require_sha256(artifact.get("guest_image_manifest_sha256"), "Task 4 evidence guest image manifest digest") != manifest_sha256:
+        raise ContractError("Task 4 evidence guest image manifest digest mismatch")
+    for guest, expected_digest in derived_sha256.items():
+        if require_sha256(artifact["derived_images"].get(guest), f"Task 4 evidence {guest} derived image digest") != expected_digest:
+            raise ContractError(f"Task 4 evidence derived image digest mismatch: {guest}")
+
+
+def validate_task4_evidence(evidence, ga_root, *, fake_root=None):
+    require_exact_keys(
+        evidence,
+        {
+            "schema_version",
+            "approval_phrase",
+            "combined_approval_verified",
+            "host",
+            "host_memory_available_gib",
+            "firewall_generation_verified",
+            "artifact_authority",
+            "vms",
+        },
+        "Task 4 evidence",
+    )
+    if evidence.get("schema_version") != 1:
+        raise ContractError("Task 4 evidence schema mismatch")
+    if evidence.get("approval_phrase") != "Task 4/6 approved and 1Password ready" or evidence.get("combined_approval_verified") is not True:
+        raise ContractError("combined Task 4/6 approval evidence is missing")
+    if evidence.get("host") != "root@167.235.8.250":
+        raise ContractError("Task 4 evidence host mismatch")
+    host_memory = evidence.get("host_memory_available_gib")
+    if isinstance(host_memory, bool) or not isinstance(host_memory, (int, float)) or not math.isfinite(host_memory) or host_memory < 32:
+        raise ContractError("Task 4 host memory evidence is below 32 GiB")
+    if evidence.get("firewall_generation_verified") is not True:
+        raise ContractError("Task 4 isolation evidence is incomplete")
+    vms = evidence.get("vms")
+    require_exact_keys(vms, {"ken-ci", "ken-deploy"}, "Task 4 VM evidence")
+    for name, expected_memory in (("ken-ci", 112), ("ken-deploy", 12)):
+        vm = vms.get(name)
+        require_exact_keys(vm, {"healthy", "isolation_verified", "memory_gib", "memory_health_verified"}, f"Task 4 VM evidence {name}")
+        if vm.get("healthy") is not True or vm.get("isolation_verified") is not True:
+            raise ContractError(f"Task 4 VM evidence mismatch: {name}")
+        if vm.get("memory_gib") != expected_memory or vm.get("memory_health_verified") is not True:
+            raise ContractError(f"Task 4 guest memory evidence is incomplete: {name}")
+    validate_artifact_authority(evidence, ga_root, fake_root=fake_root)
+    return evidence
 
 
 class Transaction:
@@ -247,26 +445,10 @@ def validate_target(args):
         raise ContractError("guest targets must be ken-ci and ken-deploy")
 
 
-def verify_task4_evidence(fake_root):
+def verify_task4_evidence(fake_root, ga_root):
     path = fake_root / "task4-evidence.json"
-    if not path.is_file() or path.is_symlink():
-        raise ContractError("Task 4 evidence is missing")
-    evidence = read_json(path)
-    if evidence.get("approval_phrase") != "Task 4/6 approved and 1Password ready" or evidence.get("combined_approval_verified") is not True:
-        raise ContractError("combined Task 4/6 approval evidence is missing")
-    if evidence.get("host") != "root@167.235.8.250":
-        raise ContractError("Task 4 evidence host mismatch")
-    host_memory = evidence.get("host_memory_available_gib")
-    if not isinstance(host_memory, (int, float)) or host_memory < 32:
-        raise ContractError("Task 4 host memory evidence is below 32 GiB")
-    vms = evidence.get("vms", {})
-    if not all(vms.get(name, {}).get("healthy") is True for name in ("ken-ci", "ken-deploy")):
-        raise ContractError("Task 4 guest health evidence is incomplete")
-    if evidence.get("firewall_generation_verified") is not True or not all(vms.get(name, {}).get("isolation_verified") is True for name in ("ken-ci", "ken-deploy")):
-        raise ContractError("Task 4 isolation evidence is incomplete")
-    for name, expected_memory in (("ken-ci", 112), ("ken-deploy", 12)):
-        if vms.get(name, {}).get("memory_gib") != expected_memory or vms.get(name, {}).get("memory_health_verified") is not True:
-            raise ContractError(f"Task 4 guest memory evidence is incomplete: {name}")
+    evidence = read_strict_json(path, "Task 4 evidence")
+    validate_task4_evidence(evidence, ga_root, fake_root=fake_root)
 
 
 def verify_repository_resolution(platform, fake_root):
@@ -475,7 +657,7 @@ def register_fake(platform, ga_root, fake_root):
     if os.environ.get("KEN_RUNNER_OFFLINE_TEST") != "1":
         raise ContractError("test fake transport requires KEN_RUNNER_OFFLINE_TEST=1")
     fake_root = fake_root.resolve()
-    verify_task4_evidence(fake_root)
+    verify_task4_evidence(fake_root, ga_root)
     verify_repository_resolution(platform, fake_root)
     digest = os.environ.get("KEN_RUNNER_TEST_ARCHIVE_SHA256", "")
     if digest != platform["runner_distribution"]["sha256"]:
@@ -997,28 +1179,16 @@ def command_path(name, override_environment):
     return str(path)
 
 
-def load_live_approval(path_value):
+def load_live_approval(path_value, ga_root):
     if not path_value:
         raise ContractError("live approval evidence is required before gh or SSH")
     path = Path(path_value)
-    if not path.is_file() or path.is_symlink():
-        raise ContractError("live approval evidence is missing or symlinked")
-    if os.environ.get("KEN_RUNNER_COMMAND_TEST") != "1":
-        metadata = path.stat()
-        if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o600:
-            raise ContractError("live approval evidence must be root-owned mode 0600")
-    evidence = read_json(path)
-    if evidence.get("approval_phrase") != "Task 4/6 approved and 1Password ready" or evidence.get("combined_approval_verified") is not True:
-        raise ContractError("combined Task 4/6 approval evidence is missing")
-    if evidence.get("host") != "root@167.235.8.250" or evidence.get("firewall_generation_verified") is not True:
-        raise ContractError("Task 4 live host/firewall evidence mismatch")
-    if evidence.get("host_memory_available_gib", 0) < 32:
-        raise ContractError("Task 4 live host memory evidence is below 32 GiB")
-    for name, memory in (("ken-ci", 112), ("ken-deploy", 12)):
-        vm = evidence.get("vms", {}).get(name, {})
-        if vm.get("healthy") is not True or vm.get("isolation_verified") is not True or vm.get("memory_gib") != memory or vm.get("memory_health_verified") is not True:
-            raise ContractError(f"Task 4 live VM evidence mismatch: {name}")
-    return evidence
+    evidence = read_strict_json(
+        path,
+        "live approval evidence",
+        require_root=os.environ.get("KEN_RUNNER_COMMAND_TEST") != "1",
+    )
+    return validate_task4_evidence(evidence, ga_root)
 
 
 def run_command_json(command, *, input_value=None):
@@ -1163,7 +1333,7 @@ def unique_runner_names(items, context):
 
 
 def run_live(platform, ga_root, args):
-    load_live_approval(args.approval_evidence)
+    load_live_approval(args.approval_evidence, ga_root)
     gh_bin = command_path("gh", "KEN_RUNNER_GH_BIN")
     ssh_bin = command_path("ssh", "KEN_RUNNER_SSH_BIN")
     identity = subprocess.run([gh_bin, "api", "user", "--jq", ".login"], text=True, capture_output=True)

@@ -202,6 +202,20 @@ check(deploy.get("slice_assignments") == expected_assignments, "exact deploy ser
 
 listener = (systemd / "ken-runner@.service").read_text()
 docker_unit = (systemd / "ken-runner-docker@.service").read_text()
+guest_gates = {
+    "ken-actions-guest-firewall.service",
+    "ken-actions-guest-runtime-verify.service",
+}
+for unit_name, unit_text in (("listener", listener), ("rootless Docker", docker_unit)):
+    values = {}
+    for raw in unit_text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", "[")) or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values.setdefault(key, []).extend(value.split())
+    check(guest_gates <= set(values.get("Requires", [])), f"{unit_name} hard-requires both guest gates")
+    check(guest_gates <= set(values.get("After", [])), f"{unit_name} starts after both guest gates")
 for control in ("NoNewPrivileges=true", "PrivateTmp=true", "ProtectSystem=strict", "ProtectHome=read-only", "RestrictSUIDSGID=true", "LockPersonality=true", "Restart=always", "RestartSec=5"):
     check(control in listener, f"listener hardening: {control}")
 check("Slice=ken-runner-%i.slice" not in listener + docker_unit, "templates do not invent instance-marked slices")
@@ -261,22 +275,77 @@ def write_json(path, value):
     path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
 
 
+def write_artifact_authority(base):
+    authority_root = base / "authority"
+    authority_root.mkdir(parents=True, exist_ok=True)
+    runtime_lock = authority_root / "broker-runtime.lock.yaml"
+    runtime_lock.write_text("schema_version: 1\ninstallation_readiness: guest-consumable\n")
+    runtime_lock.chmod(0o600)
+    runtime_lock_sha256 = hashlib.sha256(runtime_lock.read_bytes()).hexdigest()
+    ci_image_sha256 = "1" * 64
+    deploy_image_sha256 = "2" * 64
+    ci_receipt_sha256 = "3" * 64
+    deploy_receipt_sha256 = "4" * 64
+    manifest = {
+        "schema_version": 1,
+        "authority": {
+            "task6_commit": "6609ab6c4f4e6ca9d2e37b75fab36a2fc337de6d",
+            "broker_runtime_lock_sha256": runtime_lock_sha256,
+            "op_broker_policy_sha256": "5" * 64,
+        },
+        "verification": {
+            "result_receipts": {
+                "ci": {"path": "/var/lib/ken-actions/evidence/ken-ci.receipt", "sha256": ci_receipt_sha256},
+                "deploy": {"path": "/var/lib/ken-actions/evidence/ken-deploy.receipt", "sha256": deploy_receipt_sha256},
+            },
+        },
+        "derived_images": {
+            "status": "ready",
+            "ci": {
+                "path": "/mnt/data/libvirt/images/ken-ci.qcow2",
+                "sha256": ci_image_sha256,
+                "virtual_size_gib": 750,
+                "receipt_sha256": ci_receipt_sha256,
+            },
+            "deploy": {
+                "path": "/mnt/data/libvirt/images/ken-deploy.qcow2",
+                "sha256": deploy_image_sha256,
+                "virtual_size_gib": 80,
+                "receipt_sha256": deploy_receipt_sha256,
+            },
+        },
+        "readiness": {"state": "ready", "live_apply_allowed": True},
+    }
+    guest_manifest = authority_root / "guest-image-manifest.yaml"
+    guest_manifest.write_text(yaml.safe_dump(manifest, sort_keys=False))
+    guest_manifest.chmod(0o600)
+    return {
+        "task6_runtime_lock_sha256": runtime_lock_sha256,
+        "guest_image_manifest_sha256": hashlib.sha256(guest_manifest.read_bytes()).hexdigest(),
+        "derived_images": {"ken-ci": ci_image_sha256, "ken-deploy": deploy_image_sha256},
+    }
+
+
 def registration_command(base, *extra):
     return ["bash", str(register), "--org", "Ken-Technology", "--all", "--test-fake-root", str(base), *extra]
 
 
 def prepare_fixture(base):
+    artifact_authority = write_artifact_authority(base)
     write_json(base / "task4-evidence.json", {
+        "schema_version": 1,
         "approval_phrase": "Task 4/6 approved and 1Password ready",
         "combined_approval_verified": True,
         "host": "root@167.235.8.250",
         "host_memory_available_gib": 64,
         "firewall_generation_verified": True,
+        "artifact_authority": artifact_authority,
         "vms": {
             "ken-ci": {"healthy": True, "isolation_verified": True, "memory_gib": 112, "memory_health_verified": True},
             "ken-deploy": {"healthy": True, "isolation_verified": True, "memory_gib": 12, "memory_health_verified": True},
         },
     })
+    (base / "task4-evidence.json").chmod(0o600)
     repositories = [
         {"name": item["name"], "id": item["repository_id"], "visibility": "private", "archived": False}
         for item in platform["groups"]["ci"]["repositories"]
@@ -406,9 +475,14 @@ with tempfile.TemporaryDirectory() as temporary:
         check((guest / "subuids" / f"{runner['name']}.json").is_file() and (guest / "subgids" / f"{runner['name']}.json").is_file(), f"{runner['name']}: subordinate-ID state installed")
         listener = (guest / "units" / f"ken-runner@{runner['name']}.service").read_text()
         check(f"Slice={runner['slice']}" in listener, f"{runner['name']}: listener exact Slice assignment")
+        for dependency in ("ken-actions-guest-firewall.service", "ken-actions-guest-runtime-verify.service"):
+            check(f"Requires={dependency}" in listener and f"After={dependency}" in listener, f"{runner['name']}: listener hard dependency {dependency}")
         docker_unit = guest / "units" / f"ken-runner-docker@{runner['name']}.service"
         if runner["vm"] == "ken-ci":
-            check(docker_unit.is_file() and f"Slice={runner['slice']}" in docker_unit.read_text(), f"{runner['name']}: Docker shares exact concrete slice")
+            docker_text = docker_unit.read_text() if docker_unit.is_file() else ""
+            check(docker_unit.is_file() and f"Slice={runner['slice']}" in docker_text, f"{runner['name']}: Docker shares exact concrete slice")
+            for dependency in ("ken-actions-guest-firewall.service", "ken-actions-guest-runtime-verify.service"):
+                check(f"Requires={dependency}" in docker_text and f"After={dependency}" in docker_text, f"{runner['name']}: Docker hard dependency {dependency}")
         else:
             check(not docker_unit.exists() and "DOCKER_HOST=" not in listener, f"{runner['name']}: deploy listener has no Docker")
 
@@ -478,6 +552,77 @@ with tempfile.TemporaryDirectory() as temporary:
     write_json(missing_approval / "task4-evidence.json", evidence)
     result = call(registration_command(missing_approval), env={"KEN_RUNNER_OFFLINE_TEST": "1", "KEN_RUNNER_TEST_ARCHIVE_SHA256": platform["runner_distribution"]["sha256"]})
     check(result.returncode != 0 and "approval" in result.stderr.lower(), "combined Task 4/6 approval gate cannot be bypassed", result)
+
+for mutation, expected_message in (
+    ("missing-field", "schema"),
+    ("extra-field", "schema"),
+    ("malformed-digest", "malformed"),
+    ("runtime-lock-digest", "runtime lock digest"),
+    ("manifest-digest", "guest image manifest digest"),
+    ("derived-image-digest", "derived image digest"),
+    ("manifest-not-ready", "not ready"),
+):
+    with tempfile.TemporaryDirectory() as temporary:
+        authority_root = Path(temporary)
+        prepare_fixture(authority_root)
+        evidence_path = authority_root / "task4-evidence.json"
+        evidence = json.loads(evidence_path.read_text())
+        if mutation == "missing-field":
+            evidence["artifact_authority"].pop("task6_runtime_lock_sha256")
+        elif mutation == "extra-field":
+            evidence["unexpected"] = True
+        elif mutation == "malformed-digest":
+            evidence["artifact_authority"]["task6_runtime_lock_sha256"] = "ABC"
+        elif mutation == "runtime-lock-digest":
+            evidence["artifact_authority"]["task6_runtime_lock_sha256"] = "a" * 64
+        elif mutation == "manifest-digest":
+            evidence["artifact_authority"]["guest_image_manifest_sha256"] = "b" * 64
+        elif mutation == "derived-image-digest":
+            evidence["artifact_authority"]["derived_images"]["ken-ci"] = "c" * 64
+        elif mutation == "manifest-not-ready":
+            manifest_path = authority_root / "authority/guest-image-manifest.yaml"
+            manifest = yaml.safe_load(manifest_path.read_text())
+            manifest["readiness"] = {"state": "blocked", "live_apply_allowed": False}
+            manifest["derived_images"]["status"] = "blocked"
+            manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+            evidence["artifact_authority"]["guest_image_manifest_sha256"] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        write_json(evidence_path, evidence)
+        evidence_path.chmod(0o600)
+        result = call(registration_command(authority_root), env={"KEN_RUNNER_OFFLINE_TEST": "1", "KEN_RUNNER_TEST_ARCHIVE_SHA256": platform["runner_distribution"]["sha256"]})
+        check(result.returncode != 0 and expected_message in result.stderr.lower(), f"{mutation} evidence mutation fails before registration", result)
+
+with tempfile.TemporaryDirectory() as temporary:
+    unsafe_root = Path(temporary)
+    prepare_fixture(unsafe_root)
+    evidence_path = unsafe_root / "task4-evidence.json"
+    evidence_path.chmod(0o644)
+    unsafe = call(registration_command(unsafe_root), env={"KEN_RUNNER_OFFLINE_TEST": "1", "KEN_RUNNER_TEST_ARCHIVE_SHA256": platform["runner_distribution"]["sha256"]})
+    check(unsafe.returncode != 0 and "mode 0600" in unsafe.stderr.lower(), "unsafe approval evidence mode fails before registration", unsafe)
+    evidence_path.unlink()
+    evidence_path.symlink_to(unsafe_root / "authority/guest-image-manifest.yaml")
+    symlinked = call(registration_command(unsafe_root), env={"KEN_RUNNER_OFFLINE_TEST": "1", "KEN_RUNNER_TEST_ARCHIVE_SHA256": platform["runner_distribution"]["sha256"]})
+    check(symlinked.returncode != 0 and "symlink" in symlinked.stderr.lower(), "symlinked approval evidence fails before registration", symlinked)
+
+with tempfile.TemporaryDirectory() as temporary:
+    duplicate_root = Path(temporary)
+    prepare_fixture(duplicate_root)
+    evidence_path = duplicate_root / "task4-evidence.json"
+    original = evidence_path.read_text().rstrip()
+    evidence_path.write_text(original[:-1] + ',"schema_version":1}\n')
+    evidence_path.chmod(0o600)
+    duplicate = call(registration_command(duplicate_root), env={"KEN_RUNNER_OFFLINE_TEST": "1", "KEN_RUNNER_TEST_ARCHIVE_SHA256": platform["runner_distribution"]["sha256"]})
+    check(duplicate.returncode != 0 and "duplicate json key" in duplicate.stderr.lower(), "duplicate approval evidence JSON key fails before registration", duplicate)
+
+with tempfile.TemporaryDirectory() as temporary:
+    authority_symlink_root = Path(temporary)
+    prepare_fixture(authority_symlink_root)
+    lock_path = authority_symlink_root / "authority/broker-runtime.lock.yaml"
+    lock_copy = authority_symlink_root / "authority/broker-runtime.lock.copy"
+    lock_copy.write_bytes(lock_path.read_bytes())
+    lock_path.unlink()
+    lock_path.symlink_to(lock_copy)
+    authority_symlink = call(registration_command(authority_symlink_root), env={"KEN_RUNNER_OFFLINE_TEST": "1", "KEN_RUNNER_TEST_ARCHIVE_SHA256": platform["runner_distribution"]["sha256"]})
+    check(authority_symlink.returncode != 0 and "runtime lock" in authority_symlink.stderr.lower() and "symlink" in authority_symlink.stderr.lower(), "symlinked runtime authority fails before registration", authority_symlink)
 
 with tempfile.TemporaryDirectory() as temporary:
     bad_hash = Path(temporary)
@@ -574,17 +719,21 @@ with tempfile.TemporaryDirectory() as temporary:
 with tempfile.TemporaryDirectory() as temporary:
     live_root = Path(temporary)
     approval_path = live_root / "approval.json"
+    artifact_authority = write_artifact_authority(live_root)
     write_json(approval_path, {
+        "schema_version": 1,
         "approval_phrase": "Task 4/6 approved and 1Password ready",
         "combined_approval_verified": True,
         "host": "root@167.235.8.250",
         "host_memory_available_gib": 64,
         "firewall_generation_verified": True,
+        "artifact_authority": artifact_authority,
         "vms": {
             "ken-ci": {"healthy": True, "isolation_verified": True, "memory_gib": 112, "memory_health_verified": True},
             "ken-deploy": {"healthy": True, "isolation_verified": True, "memory_gib": 12, "memory_health_verified": True},
         },
     })
+    approval_path.chmod(0o600)
     command_log = live_root / "commands.jsonl"
     state_path = live_root / "state.json"
     repository_catalog_path = live_root / "repository-catalog.json"
@@ -722,6 +871,8 @@ else:
     fake_ssh.chmod(0o700)
     live_env = {
         "KEN_RUNNER_COMMAND_TEST": "1",
+        "KEN_RUNNER_RUNTIME_LOCK_FILE": str(live_root / "authority/broker-runtime.lock.yaml"),
+        "KEN_RUNNER_GUEST_MANIFEST_FILE": str(live_root / "authority/guest-image-manifest.yaml"),
         "KEN_RUNNER_GH_BIN": str(fake_gh),
         "KEN_RUNNER_SSH_BIN": str(fake_ssh),
         "KEN_FAKE_LIVE_STATE": str(state_path),
@@ -804,6 +955,17 @@ else:
     no_approval_env = {**live_env, "KEN_FAKE_COMMAND_LOG": str(no_approval_log)}
     unapproved = call(["bash", str(register), "--org", "Ken-Technology", "--all", "--approval-evidence", str(live_root / "missing.json")], env=no_approval_env)
     check(unapproved.returncode != 0 and "approval" in unapproved.stderr.lower() and not no_approval_log.exists(), "missing live approval refuses before gh or SSH", unapproved)
+
+    mismatched_approval = json.loads(approval_path.read_text())
+    mismatched_approval["artifact_authority"]["derived_images"]["ken-deploy"] = "f" * 64
+    write_json(approval_path, mismatched_approval)
+    approval_path.chmod(0o600)
+    digest_log = live_root / "digest-mismatch.jsonl"
+    digest_refusal = call(approved_command, env={**live_env, "KEN_FAKE_COMMAND_LOG": str(digest_log)})
+    check(digest_refusal.returncode != 0 and "derived image digest" in digest_refusal.stderr.lower() and not digest_log.exists(), "digest mismatch refuses before gh or SSH", digest_refusal)
+    digest_verify_log = live_root / "digest-mismatch-verify.jsonl"
+    digest_verify_refusal = call(["bash", str(verify), "runners", "--approval-evidence", str(approval_path)], env={**live_env, "KEN_FAKE_COMMAND_LOG": str(digest_verify_log)})
+    check(digest_verify_refusal.returncode != 0 and "derived image digest" in digest_verify_refusal.stderr.lower() and not digest_verify_log.exists(), "read-only verifier digest mismatch refuses before gh or SSH", digest_verify_refusal)
 
 if failures:
     print("\n".join(f"RUNNER_BEHAVIOR_FAIL {failure}" for failure in failures))
