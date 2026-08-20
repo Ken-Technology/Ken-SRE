@@ -549,6 +549,13 @@ def gh_paginated(gh_bin, endpoint, collection):
     raise VerificationError(f"GitHub pagination exceeded the reviewed limit for {collection}")
 
 
+def unique_runner_names(items, context):
+    names = [item.get("name") for item in items]
+    if None in names or len(names) != len(set(names)):
+        raise VerificationError(f"{context} contains duplicate or missing runner names")
+    return names
+
+
 def ssh_verify(ssh_bin, host, guest, payload):
     command = [
         ssh_bin, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
@@ -639,17 +646,21 @@ def run_live(platform, args):
         if sorted(item.get("id") for item in repositories) != sorted(item["repository_id"] for item in desired_group["repositories"]):
             raise VerificationError(f"live runner group repository drift: {key}")
         members = gh_paginated(gh_bin, f"orgs/{platform['organization']}/actions/runner-groups/{actual_group['id']}/runners", "runners")
-        actual_names = {item.get("name") for item in members}
+        actual_names = set(unique_runner_names(members, f"live runner group membership: {key}"))
         expected_names = {runner["name"] for runner in platform["runners"] if runner["enabled"] and runner["runner_group"] == key}
         if actual_names != expected_names:
             raise VerificationError(f"live runner group membership drift: {key}")
     github = gh_paginated(gh_bin, f"orgs/{platform['organization']}/actions/runners", "runners")
     desired = {runner["name"]: runner for runner in platform["runners"] if runner["enabled"]}
     disabled = {runner["name"] for runner in platform["runners"] if not runner["enabled"]}
-    actual = {
-        runner.get("name"): runner
-        for runner in github
+    ken_runners = [
+        runner for runner in github
         if str(runner.get("name", "")).startswith(("ken-ci-", "ken-deploy-"))
+    ]
+    unique_runner_names(ken_runners, "live GitHub runner inventory")
+    actual = {
+        runner["name"]: runner
+        for runner in ken_runners
     }
     if disabled & set(actual) or set(actual) != set(desired):
         raise VerificationError("GitHub runner set is not exact 10 CI + 2 deploy")

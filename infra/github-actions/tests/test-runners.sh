@@ -641,7 +641,10 @@ elif clean_endpoint.endswith("/repositories") and method == "GET" and "runner-gr
     print(json.dumps({"repositories":[{"id":value} for value in state["repositories"][group["name"]]]}))
 elif clean_endpoint.endswith("/runners") and method == "GET" and "runner-groups" in clean_endpoint:
     group_id = int(clean_endpoint.split("/")[4])
+    group = next(value for value in state["groups"].values() if value["id"] == group_id)
     values = [value for value in state["runners"].values() if value.get("runner_group_id") == group_id]
+    if os.environ.get("KEN_FAKE_GH_DUPLICATE_GROUP_AT_FINAL") == "1" and group["name"] == "Ken Private CI" and len(state["runners"]) == 12:
+        values = values + [dict(values[0])]
     print(json.dumps({"total_count":len(values),"runners":values if page == 1 else []}))
 elif clean_endpoint.endswith("actions/runners") and method == "GET":
     values = list(state["runners"].values())
@@ -651,6 +654,8 @@ elif clean_endpoint.endswith("actions/runners") and method == "GET":
         pages = {1: values + unrelated, 2: [disabled]}
         print(json.dumps({"total_count":101,"runners":pages.get(page, [])}))
     else:
+        if os.environ.get("KEN_FAKE_GH_DUPLICATE_ORG_AFTER_ADD") == "1" and values:
+            values = values + [dict(values[0])]
         print(json.dumps({"total_count":len(values),"runners":values if page == 1 else []}))
 elif clean_endpoint.startswith("repos/Ken-Technology/") and method == "GET":
     name = clean_endpoint.rsplit("/", 1)[-1]
@@ -731,6 +736,14 @@ else:
     stale_records = [json.loads(line) for line in command_log.read_text().splitlines()[stale_log_start:]]
     check(stale_repository.returncode != 0 and "fresh repository" in stale_repository.stderr.lower() and any(f"repos/Ken-Technology/{stale_repository_name}" in " ".join(record.get("args", [])) for record in stale_records if record.get("tool") == "gh") and not any("repositories/" in " ".join(record.get("args", [])) and "PUT" in record.get("args", []) for record in stale_records if record.get("tool") == "gh"), "live linking freshly resolves repository ID/privacy/archive state before any PUT", stale_repository)
     check(json.loads(state_path.read_text()) == {"groups": {}, "repositories": {}, "runners": {}, "guests": {}}, "fresh repository refusal rolls back the transaction-created group")
+    write_json(state_path, {"groups": {}, "repositories": {}, "runners": {}, "guests": {}})
+    duplicate_org_registration = call(approved_command, env={**live_env, "KEN_FAKE_GH_DUPLICATE_ORG_AFTER_ADD": "1"})
+    check(duplicate_org_registration.returncode != 0 and "duplicate" in duplicate_org_registration.stderr.lower() and json.loads(state_path.read_text()) == {"groups": {}, "repositories": {}, "runners": {}, "guests": {}}, "registration rejects duplicate organization runner names introduced during post-add polling", duplicate_org_registration)
+    write_json(state_path, {"groups": {}, "repositories": {}, "runners": {}, "guests": {}})
+    duplicate_group_registration = call(approved_command, env={**live_env, "KEN_FAKE_GH_DUPLICATE_GROUP_AT_FINAL": "1"})
+    check(duplicate_group_registration.returncode != 0 and "duplicate" in duplicate_group_registration.stderr.lower() and json.loads(state_path.read_text()) == {"groups": {}, "repositories": {}, "runners": {}, "guests": {}}, "registration rejects duplicate group memberships introduced during final convergence", duplicate_group_registration)
+    write_json(state_path, {"groups": {}, "repositories": {}, "runners": {}, "guests": {}})
+    live_log_start = len(command_log.read_text().splitlines())
     live_first = call(approved_command, env=live_env)
     check(live_first.returncode == 0 and "REGISTERED_RUNNERS=12" in live_first.stdout and "REGISTRATION_MODE=live-guarded" in live_first.stdout, "approved guarded transport converges exact live runner set", live_first)
     if live_first.returncode != 0:
@@ -738,7 +751,7 @@ else:
         raise SystemExit(1)
     live_second = call(approved_command, env=live_env)
     check(live_second.returncode == 0 and "NO_CHANGES=1" in live_second.stdout, "approved guarded live rerun is exact no-op", live_second)
-    log_records = [json.loads(line) for line in command_log.read_text().splitlines()]
+    log_records = [json.loads(line) for line in command_log.read_text().splitlines()[live_log_start:]]
     check(any(record.get("tool") == "gh" and "registration-token" in " ".join(record.get("args", [])) for record in log_records), "live path requests short-lived GitHub registration tokens")
     check(not any("--replace" in " ".join(record.get("args", [])) for record in log_records), "live path never uses --replace")
     check(not any("short-lived-registration-token" in json.dumps(record) for record in log_records), "live command journal never records registration token")
@@ -747,6 +760,10 @@ else:
     check(len(deploy_apply_records) == 2 and all(expected_deploy_slices <= set(record["payload"]["units"]) for record in deploy_apply_records), "guarded live install carries every reviewed deploy aggregate/child slice")
     verified_live = call(["bash", str(verify), "runners", "--approval-evidence", str(approval_path)], env=live_env)
     check(verified_live.returncode == 0 and "RUNNERS_OK=12" in verified_live.stdout and "VERIFY_MODE=live-read-only" in verified_live.stdout, "approved live verifier uses read-only gh/SSH transport", verified_live)
+    duplicate_org_verify = call(["bash", str(verify), "runners", "--approval-evidence", str(approval_path)], env={**live_env, "KEN_FAKE_GH_DUPLICATE_ORG_AFTER_ADD": "1"})
+    check(duplicate_org_verify.returncode != 0 and "duplicate" in duplicate_org_verify.stderr.lower(), "live verifier rejects duplicate organization runner names", duplicate_org_verify)
+    duplicate_group_verify = call(["bash", str(verify), "runners", "--approval-evidence", str(approval_path)], env={**live_env, "KEN_FAKE_GH_DUPLICATE_GROUP_AT_FINAL": "1"})
+    check(duplicate_group_verify.returncode != 0 and "duplicate" in duplicate_group_verify.stderr.lower(), "live verifier rejects duplicate runner-group memberships", duplicate_group_verify)
     pagination_log_start = len(command_log.read_text().splitlines())
     hidden_disabled = call(["bash", str(verify), "runners", "--approval-evidence", str(approval_path)], env={**live_env, "KEN_FAKE_GH_DISABLED_RUNNER_ON_PAGE_2": "1"})
     pagination_records = [json.loads(line) for line in command_log.read_text().splitlines()[pagination_log_start:]]

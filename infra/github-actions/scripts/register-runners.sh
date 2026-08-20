@@ -1155,6 +1155,13 @@ def runner_labels_from_api(item):
     return [label.get("name") if isinstance(label, dict) else label for label in labels]
 
 
+def unique_runner_names(items, context):
+    names = [item.get("name") for item in items]
+    if None in names or len(names) != len(set(names)):
+        raise ContractError(f"{context} contains duplicate or missing runner names")
+    return names
+
+
 def run_live(platform, ga_root, args):
     load_live_approval(args.approval_evidence)
     gh_bin = command_path("gh", "KEN_RUNNER_GH_BIN")
@@ -1192,9 +1199,8 @@ def run_live(platform, ga_root, args):
             group_ids[key] = actual["id"]
 
         github_runners = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runners", "runners")
-        github_by_name = {item.get("name"): item for item in github_runners}
-        if len(github_by_name) != len(github_runners):
-            raise ContractError("GitHub runner inventory contains duplicate names")
+        unique_runner_names(github_runners, "GitHub runner inventory")
+        github_by_name = {item["name"]: item for item in github_runners}
         expected_group_members = {
             key: {runner["name"] for runner in platform["runners"] if runner["enabled"] and runner["runner_group"] == key}
             for key in ("ci", "deploy")
@@ -1202,8 +1208,8 @@ def run_live(platform, ga_root, args):
         actual_group_members = {}
         for key in ("ci", "deploy"):
             response = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runner-groups/{group_ids[key]}/runners", "runners")
-            names = [item.get("name") for item in response]
-            if None in names or len(names) != len(set(names)) or not set(names) <= expected_group_members[key]:
+            names = unique_runner_names(response, f"runner group membership: {key}")
+            if not set(names) <= expected_group_members[key]:
                 raise ContractError(f"runner group membership drift: {key}")
             actual_group_members[key] = set(names)
         disabled = {runner["name"] for runner in platform["runners"] if not runner["enabled"]}
@@ -1261,7 +1267,8 @@ def run_live(platform, ga_root, args):
             registered = None
             for attempt in range(12):
                 refreshed = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runners", "runners")
-                registered = next((item for item in refreshed if item.get("name") == runner["name"]), None)
+                unique_runner_names(refreshed, "GitHub runner polling inventory")
+                registered = next((item for item in refreshed if item["name"] == runner["name"]), None)
                 if registered is not None and registered.get("status") == "online" and registered.get("busy") is False:
                     break
                 if os.environ.get("KEN_RUNNER_COMMAND_TEST") != "1":
@@ -1269,7 +1276,8 @@ def run_live(platform, ga_root, args):
             if registered is None or registered.get("status") != "online" or registered.get("busy") is not False or set(runner_labels_from_api(registered)) != set(runner["labels"]) or len(runner_labels_from_api(registered)) != len(runner["labels"]):
                 raise ContractError(f"GitHub runner did not reach exact online state: {runner['name']}")
             group_runners = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runner-groups/{group_ids[runner['runner_group']]}/runners", "runners")
-            if runner["name"] not in {item.get("name") for item in group_runners}:
+            group_names = unique_runner_names(group_runners, f"runner group polling inventory: {runner['runner_group']}")
+            if runner["name"] not in set(group_names):
                 raise ContractError(f"GitHub runner did not join exact runner group: {runner['name']}")
             journal.record("runner-created", name=runner["name"], vm=runner["vm"])
             changed = True
@@ -1277,7 +1285,8 @@ def run_live(platform, ga_root, args):
                 raise ContractError(f"injected live failure after {runner['name']}")
         for key in ("ci", "deploy"):
             response = gh_paginated(gh_bin, f"orgs/{args.org}/actions/runner-groups/{group_ids[key]}/runners", "runners")
-            if {item.get("name") for item in response} != expected_group_members[key]:
+            names = unique_runner_names(response, f"final runner group inventory: {key}")
+            if set(names) != expected_group_members[key]:
                 raise ContractError(f"runner group membership did not converge exactly: {key}")
         journal.record("complete", created=len(created_runners))
         journal.finish()
