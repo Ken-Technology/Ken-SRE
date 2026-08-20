@@ -42,6 +42,9 @@ validate_local_contract() {
     "${GA_ROOT}/inventory/guest-image-manifest.yaml" \
     "${GA_ROOT}/inventory/firewall-endpoint-policy.yaml" \
     "${GA_ROOT}/inventory/runner-platform.yaml" \
+    "${GA_ROOT}/inventory/broker-runtime.lock.yaml" \
+    "${GA_ROOT}/inventory/op-broker-policy.yaml" \
+    "${GA_ROOT}/inventory/action-transport.lock.yaml" \
     "${GA_ROOT}/proxy/ken-actions-artifact-proxy-deploy.conf" \
     "${GA_ROOT}/proxy/ken-actions-artifact-proxy-runtime.yaml" \
     "${GA_ROOT}/systemd/ken-actions-artifact-proxy-deploy.service" \
@@ -196,8 +199,17 @@ if type(lock) is not dict or type(lock.get("schema_version")) is not int or lock
     raise SystemExit("runtime lock authority invalid")
 if type(broker) is not dict or type(broker.get("schema_version")) is not int or broker["schema_version"] != 1:
     raise SystemExit("broker policy authority invalid")
-if type(task7) is not dict or type(task7.get("schema_version")) is not int or task7["schema_version"] != 1 or (task7.get("task6_final") or {}).get("status") != "ready":
+if type(task7) is not dict or type(task7.get("schema_version")) is not int or task7["schema_version"] != 1:
     raise SystemExit("Task 7 transport authority is not final")
+task6_final = task7.get("task6_final") or {}
+if (task6_final.get("status") != "reviewed-final-bindings"
+        or task6_final.get("commit_sha") != "d03694d41c044985d406e74d434fdf2928bc4798"
+        or task6_final.get("tree_sha") != "71b57ed890f5f39ea3ee90eaccb59a8cf3666fb4"):
+    raise SystemExit("Task 7 Task 6 final authority mismatch")
+task6_artifacts = task6_final.get("artifacts") or {}
+if ((task6_artifacts.get("runtime_lock") or {}).get("sha256") != authority["broker_runtime_lock_sha256"]
+        or (task6_artifacts.get("policy") or {}).get("sha256") != authority["op_broker_policy_sha256"]):
+    raise SystemExit("Task 7 Task 6 artifact cross-reference mismatch")
 
 refresh = endpoint["refresh"]
 expected_refresh = {
@@ -673,16 +685,22 @@ require(authority.get("broker_runtime_lock_path") == "inventory/broker-runtime.l
 require(authority.get("op_broker_policy_path") == "inventory/op-broker-policy.yaml", "broker policy path drift")
 require(authority.get("action_transport_lock_path") == "inventory/action-transport.lock.yaml", "action transport path drift")
 require(authority.get("firewall_endpoint_policy_path") == "inventory/firewall-endpoint-policy.yaml", "firewall endpoint policy path drift")
-require(authority.get("task6_commit") is None, "unreviewed Task 6 commit present")
-require(authority.get("broker_runtime_lock_sha256") is None, "unreviewed Task 6 lock digest present")
-require(authority.get("op_broker_policy_sha256") is None, "unreviewed Task 6 policy digest present")
-require(authority.get("task7_commit") is None, "unreviewed Task 7 commit present")
+runtime_lock_path = ga / authority["broker_runtime_lock_path"]
+broker_policy_path = ga / authority["op_broker_policy_path"]
+task7_path = ga / authority["action_transport_lock_path"]
+endpoint_policy_path = ga / authority["firewall_endpoint_policy_path"]
+require(authority.get("task6_commit") == "d03694d41c044985d406e74d434fdf2928bc4798", "Task 6 final commit drift")
+require(authority.get("broker_runtime_lock_sha256") == digest(runtime_lock_path), "Task 6 lock digest drift")
+require(authority.get("op_broker_policy_sha256") == digest(broker_policy_path), "Task 6 policy digest drift")
+require(authority.get("task7_commit") == "0dfa2b1ae721180b49f8ccf9d4c4dd7bdb027894", "Task 7 final manifest commit drift")
+require(authority.get("action_transport_lock_sha256") == "908c58e4fb0849bfadc0762f230fa94361bd73853db2a4ed4f40bb288fa3e4dc", "Task 7 final manifest digest drift")
+require(authority.get("action_transport_lock_sha256") == digest(task7_path), "Task 7 transport file digest drift")
+require(authority.get("firewall_endpoint_policy_sha256") == digest(endpoint_policy_path), "firewall endpoint policy digest drift")
 for key in (
-    "action_transport_lock_sha256", "firewall_endpoint_policy_sha256",
     "firewall_endpoint_generation_sha256", "firewall_endpoint_generation_receipt_sha256",
     "onepassword_canary_receipt_sha256",
 ):
-    require(authority.get(key) is None, f"unreviewed firewall authority present: {key}")
+    require(authority.get(key) is None, f"unobserved external authority present: {key}")
 require(authority.get("guest_install_contract_sha256") is None, "unobserved guest install contract present")
 require(authority.get("platform_payload_manifest_sha256") == "dd26525559aa26532fc58658ea4c668f72df73b6cd77a60eef7ec5cb73c2a8c0", "platform payload manifest digest drift")
 require(is_sha256(authority.get("immutable_payload_manifest_sha256")), "immutable payload manifest digest drift")
@@ -692,13 +710,11 @@ require(readiness.get("state") == "blocked", "unobserved manifest readiness")
 require(readiness.get("live_apply_allowed") is False, "unapproved live apply")
 require(readiness.get("ready_marker") is None, "unobserved ready marker")
 require(readiness.get("blockers") == [
-    "missing-final-task6-lock",
-    "missing-final-task6-policy-and-identities",
-    "missing-final-task7-transport-manifest",
     "missing-single-stop-production-target-readback",
     "missing-approved-onepassword-endpoint-canary",
     "missing-final-firewall-endpoint-generation",
     "missing-both-guest-runtime-receipts",
+    "missing-user-approval",
 ], "guest manifest blocker set drift")
 require(manifest.get("firewall") == {
     "status": "blocked",
@@ -755,9 +771,40 @@ require_exact(manifest["verification"].get("result_receipts"), {"ci", "deploy"},
 for name in ("ci", "deploy"):
     require_exact(manifest["verification"]["result_receipts"].get(name), {"path", "sha256"}, f"guest manifest {name} receipt schema drift")
 
+runtime_lock = load(runtime_lock_path)
+task7 = load(task7_path)
+require((manifest["common_runtime"] or {}).get("status") == "ready" and manifest["common_runtime"].get("blocker") is None, "common runtime is not final")
+for section in ("ci_image", "deploy_image", "remote_pinned_build_inputs", "generated_files"):
+    require((manifest.get(section) or {}).get("status") == "ready", f"{section} is not final")
+require(type(runtime_lock) is dict and len(runtime_lock.get("components") or []) == 17 and len(runtime_lock.get("installed_files") or []) == 52, "Task 6 runtime inventory drift")
+components = runtime_lock["components"]
+component_by_id = {item["id"]: item for item in components}
+common_component_ids = ["1password-cli", "python", "pyyaml", "pyjwt", "cryptography", "ca-certificates", "git", "systemd", "zip-safety"]
+deploy_toolchain_ids = ["buildkit", "rootlesskit", "buildkit-rootless-prerequisites", "node", "corepack", "pnpm", "oci-image-tools"]
+require(manifest["common_runtime"].get("payloads") == common_component_ids, "common runtime payload inventory drift")
+require(manifest["common_runtime"].get("installed_files") == [item["path"] for item in runtime_lock["installed_files"] if item["source"].removeprefix("component:") in common_component_ids and item["source"].startswith("component:")], "common runtime installed-file inventory drift")
+require(manifest["deploy_image"].get("deploy_toolchain_payloads") == deploy_toolchain_ids, "deploy toolchain inventory drift")
+require(manifest["remote_pinned_build_inputs"].get("inputs") == [component_by_id["node-build-base"]], "remote build input inventory drift")
+require(manifest["provenance_only"].get("inputs") == runtime_lock.get("provenance_payloads"), "provenance-only inventory drift")
+require(manifest["ci_image"].get("common_runtime_included") is True and manifest["deploy_image"].get("common_runtime_included") is True, "common runtime inclusion drift")
+expected_ci_repo = [item["path"] for item in runtime_lock["installed_files"] if item["source"].startswith("repo:") and "ken-ci" in item["hosts"]]
+expected_deploy_repo = [item["path"] for item in runtime_lock["installed_files"] if item["source"].startswith("repo:") and "ken-deploy" in item["hosts"]]
+require(manifest["ci_image"].get("installed_files") == [item["path"] for item in runtime_lock["installed_files"] if "ken-ci" in item["hosts"]], "CI installed-file inventory drift")
+require(manifest["deploy_image"].get("installed_files") == [item["path"] for item in runtime_lock["installed_files"] if "ken-deploy" in item["hosts"]], "deploy installed-file inventory drift")
+require(manifest["ci_image"].get("task6_ci_files") == expected_ci_repo, "CI Task 6 file inventory drift")
+require(manifest["deploy_image"].get("task6_deploy_files") == expected_deploy_repo, "deploy Task 6 file inventory drift")
+task6_final = task7.get("task6_final") or {}
+require(task6_final.get("status") == "reviewed-final-bindings", "Task 7 final authority status drift")
+require(task6_final.get("commit_sha") == authority["task6_commit"], "Task 7 Task 6 commit cross-reference drift")
+require(task6_final.get("tree_sha") == "71b57ed890f5f39ea3ee90eaccb59a8cf3666fb4", "Task 7 Task 6 tree cross-reference drift")
+
 authority_inputs = [
     manifest_path,
     runner_path,
+    runtime_lock_path,
+    broker_policy_path,
+    task7_path,
+    endpoint_policy_path,
     ga / "libvirt/ken-ci.xml",
     ga / "libvirt/ken-deploy.xml",
     ga / "cloud-init/ken-ci-user-data.yaml",
@@ -817,7 +864,7 @@ for path in ga.rglob("*"):
     require(not re.search(r"-----BEGIN [A-Z0-9 ]+PRIVATE KEY-----\s+[A-Za-z0-9+/=\n]{64,}", text), f"secret-shaped material in {path}")
     require(not re.search(r"\b(ghp_|github_pat_|ops_)[A-Za-z0-9_=-]{16,}", text), f"token-shaped material in {path}")
 
-print("STATIC_OK readiness=blocked blocker=missing-final-task6-lock")
+print("STATIC_OK readiness=blocked blocker=missing-single-stop-production-target-readback")
 PY
 }
 
@@ -1007,7 +1054,7 @@ exact(lock, {
 }, "runtime lock top-level schema drift")
 if type(lock.get("schema_version")) is not int or lock["schema_version"] != 1:
     raise SystemExit("runtime lock schema version invalid")
-if type(lock.get("lock_version")) is not str or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[.][0-9]+", lock["lock_version"]):
+if type(lock.get("lock_version")) is not str or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[.][0-9]+[+]task7-[0-9a-f]{40}", lock["lock_version"]):
     raise SystemExit("runtime lock version invalid")
 if lock.get("plan_sha256") != authority.get("plan_sha256"):
     raise SystemExit("runtime lock plan digest mismatch")
@@ -1122,7 +1169,7 @@ for entry in installed:
         raise SystemExit("runtime installed-file source invalid")
 if len(paths) != len(set(paths)):
     raise SystemExit("runtime installed-file path duplicate")
-if len(installed) != 46:
+if len(installed) != 52:
     raise SystemExit("runtime installed-file cardinality invalid")
 required_paths = {
     "/usr/local/bin/op",
@@ -1142,7 +1189,7 @@ runtime = lock.get("runtime_contract")
 exact(runtime, {
     "op_path", "guest_payload_count", "remote_build_inputs", "principals",
     "subordinate_ids", "firewall_phase_interface", "startup_gates",
-    "deferred_execution_transport",
+    "execution_transport",
 }, "runtime contract schema drift")
 if runtime.get("op_path") != "/usr/local/bin/op" or type(runtime.get("guest_payload_count")) is not int:
     raise SystemExit("runtime path or payload count invalid")
@@ -1191,6 +1238,40 @@ if subordinate != {
     "subgid_count": 65536,
 }:
     raise SystemExit("runtime subordinate-ID contract drift")
+
+transport = runtime.get("execution_transport")
+exact(transport, {
+    "status", "reviewed_commit_sha", "coordinator", "coordinator_sha256",
+    "transaction_slices", "units", "bindings", "live_execution_authorized",
+    "external_readiness",
+}, "runtime execution transport schema drift")
+if transport.get("status") != "bound-reviewed-task7" or transport.get("reviewed_commit_sha") != "a06da36014e6b08a7478f5306c137c52c436c3ef":
+    raise SystemExit("runtime execution transport authority drift")
+if transport.get("coordinator") != "/usr/local/libexec/ken-actions/ken-actions-deploy-transaction" or transport.get("coordinator_sha256") != "f4cbe9c5222d3dafe9899b539c0bcdbd3b734f8b39d6c1c444f7ae8e42e54fd2":
+    raise SystemExit("runtime coordinator authority drift")
+if transport.get("transaction_slices") != ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"]:
+    raise SystemExit("runtime transaction slice authority drift")
+if transport.get("units") != {
+    "ordinary_slot_1": "8934f845a0ea882a26f3b6699f6a865662febbb736ec5816897504186b9faa24",
+    "ordinary_slot_2": "d137931523ec039b51f1b2428bf9e0c485b2ce688e5efca06b8678ba55f91ba1",
+    "frontend_builder": "434e76ae73a386c290bb16f3f45df48cfc892b738d8fec2c32ed1bcda3cc3c3e",
+    "frontend_uploader": "0e67084dc290d659581e250c5ba78d33f5c1b3ac42bb0aacbb9d3557d97d0ce0",
+    "frontend_deploy": "dac86637f7f99ec71087585052250fbc4e32fc73cc585ac3370998c96fde78fd",
+}:
+    raise SystemExit("runtime execution unit authority drift")
+expected_bindings = {
+    "ordinary_systemd_transaction_transport_sha256": "5e1641f88d90bd43ad1fb56cef41574c3cda29497d3c139aa1c040e0634500f2",
+    "frontend_operation_binding_sha256": "ab05e6593ce625be91fad528f7adcdd7c2696f1664d8ba113a0f58a5a363b12e",
+    "frontend_phase_transport_sha256": "f4784b92e104c27530e0b9dd86b98d4205faf83098aae616e9ecf392bef12fda",
+    "frontend_deploy_contract_sha256": "47ebf14dcd3341c1dd7b843d45b102e996190d6f954d8b1bb4d003e6484cc564",
+    "trusted_generation_dependency_acquisition_sha256": "dcd386771149140e68e19a2c44989ea3e268c7171afd32fa38db166541ae6933",
+    "trusted_generation_generated_paths_manifest_sha256": "08720cf30192a6daf13056fd150cece9c4308ff13adad1861b9f2db6deea3ec9",
+    "trusted_generation_commit_input_contract_sha256": "d2d81004d9076702ddc01e37cb0d8f189008f033cd7b03871eacf1d8d4e484df",
+    "trusted_generation_cgroup_contract_sha256": "9c01ecb1ada3ae65f0f157698accf56cc56cbafadd078589bf3df7d4893cf854",
+    "trusted_generation_phase_transport_sha256": "6e0945130af419de14091f5afc06d404a919319f7dc2bcee7cf40489561ec12b",
+}
+if transport.get("bindings") != expected_bindings or transport.get("live_execution_authorized") is not False or transport.get("external_readiness") != "policy-deferred-bindings":
+    raise SystemExit("runtime execution binding authority drift")
 
 exact(runner_platform, {
     "schema_version", "organization", "source_inventory", "runner_distribution",

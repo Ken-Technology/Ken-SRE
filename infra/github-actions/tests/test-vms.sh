@@ -165,12 +165,17 @@ authority = manifest.get("authority") or {}
 require(authority.get("plan_sha256") == "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658", "plan digest")
 require(authority.get("task5_integrated_commit") == "e2b3b2b50890be01601288f5294ac847fb575e71", "Task 5 integrated commit")
 require(authority.get("runner_platform_sha256") == sha(runner_path), "runner platform digest")
-require(authority.get("task6_commit") is None, "Task 6 commit must remain null")
-require(authority.get("broker_runtime_lock_sha256") is None, "Task 6 lock digest must remain null")
-require(authority.get("op_broker_policy_sha256") is None, "Task 6 policy digest must remain null")
-require(authority.get("task7_commit") is None, "Task 7 commit must remain null")
-require(authority.get("action_transport_lock_sha256") is None, "Task 7 transport digest must remain null")
-require(authority.get("firewall_endpoint_policy_sha256") is None, "endpoint policy digest must remain null")
+runtime_lock_path = ga / authority.get("broker_runtime_lock_path", "")
+broker_policy_path = ga / authority.get("op_broker_policy_path", "")
+task7_path = ga / authority.get("action_transport_lock_path", "")
+endpoint_policy_path = ga / authority.get("firewall_endpoint_policy_path", "")
+require(authority.get("task6_commit") == "d03694d41c044985d406e74d434fdf2928bc4798", "Task 6 final commit")
+require(authority.get("broker_runtime_lock_sha256") == sha(runtime_lock_path), "Task 6 lock digest")
+require(authority.get("op_broker_policy_sha256") == sha(broker_policy_path), "Task 6 policy digest")
+require(authority.get("task7_commit") == "0dfa2b1ae721180b49f8ccf9d4c4dd7bdb027894", "Task 7 final manifest commit")
+require(authority.get("action_transport_lock_sha256") == "908c58e4fb0849bfadc0762f230fa94361bd73853db2a4ed4f40bb288fa3e4dc", "Task 7 transport digest")
+require(authority.get("action_transport_lock_sha256") == sha(task7_path), "Task 7 transport file digest")
+require(authority.get("firewall_endpoint_policy_sha256") == sha(endpoint_policy_path), "endpoint policy digest")
 require(authority.get("firewall_endpoint_generation_sha256") is None, "numeric generation digest must remain null")
 require(authority.get("firewall_endpoint_generation_receipt_sha256") is None, "numeric generation receipt digest must remain null")
 require(authority.get("onepassword_canary_receipt_sha256") is None, "1Password canary receipt digest must remain null")
@@ -180,12 +185,14 @@ readiness = manifest.get("readiness") or {}
 blockers = readiness.get("blockers") or []
 require(readiness.get("state") == "blocked", "manifest readiness must be blocked")
 require(readiness.get("live_apply_allowed") is False, "live apply must be false")
-require("missing-final-task6-lock" in blockers, "missing Task 6 lock blocker")
-require("missing-final-task6-policy-and-identities" in blockers, "missing Task 6 identities blocker")
-require("missing-final-task7-transport-manifest" in blockers, "missing Task 7 transport blocker")
+require("missing-final-task6-lock" not in blockers, "stale Task 6 lock blocker")
+require("missing-final-task6-policy-and-identities" not in blockers, "stale Task 6 identities blocker")
+require("missing-final-task7-transport-manifest" not in blockers, "stale Task 7 transport blocker")
 require("missing-single-stop-production-target-readback" in blockers, "missing target readback blocker")
 require("missing-approved-onepassword-endpoint-canary" in blockers, "missing 1Password canary blocker")
 require("missing-final-firewall-endpoint-generation" in blockers, "missing numeric generation blocker")
+require("missing-both-guest-runtime-receipts" in blockers, "missing guest receipt blocker")
+require("missing-user-approval" in blockers, "missing user approval blocker")
 require("missing-task5-consumer-hard-dependencies" not in blockers, "resolved Task 5 dependency blocker remains")
 require(readiness.get("ready_marker") is None, "ready marker must be null")
 require((manifest.get("common_runtime") or {}).get("required_checks") == [
@@ -198,10 +205,29 @@ require((manifest.get("common_runtime") or {}).get("required_checks") == [
     "ca-bundle-generation-and-hash",
 ], "common runtime verification list")
 require((manifest.get("base_image") or {}).get("status") == "ready", "base_image status")
-for section in ("common_runtime", "ci_image", "deploy_image", "derived_images"):
-    require((manifest.get(section) or {}).get("status") == "blocked", f"{section} status")
-require((manifest.get("ci_image") or {}).get("installed_files") == [], "CI installed-files scaffold")
-require((manifest.get("deploy_image") or {}).get("installed_files") == [], "deploy installed-files scaffold")
+for section in ("common_runtime", "ci_image", "deploy_image", "remote_pinned_build_inputs", "generated_files"):
+    require((manifest.get(section) or {}).get("status") == "ready", f"{section} status")
+require((manifest.get("derived_images") or {}).get("status") == "blocked", "derived_images status")
+runtime_lock = load_yaml(runtime_lock_path)
+require(len(runtime_lock.get("components") or []) == 17, "Task 6 component cardinality")
+require(len(runtime_lock.get("installed_files") or []) == 52, "Task 6 installed-file cardinality")
+components = runtime_lock["components"]
+component_by_id = {item["id"]: item for item in components}
+common_component_ids = ["1password-cli", "python", "pyyaml", "pyjwt", "cryptography", "ca-certificates", "git", "systemd", "zip-safety"]
+deploy_toolchain_ids = ["buildkit", "rootlesskit", "buildkit-rootless-prerequisites", "node", "corepack", "pnpm", "oci-image-tools"]
+require(manifest["common_runtime"].get("payloads") == common_component_ids, "common runtime payload inventory")
+require(manifest["common_runtime"].get("installed_files") == [item["path"] for item in runtime_lock["installed_files"] if item["source"].startswith("component:") and item["source"].removeprefix("component:") in common_component_ids], "common runtime installed-file inventory")
+require(manifest["deploy_image"].get("deploy_toolchain_payloads") == deploy_toolchain_ids, "deploy toolchain inventory")
+require(manifest["remote_pinned_build_inputs"].get("inputs") == [component_by_id["node-build-base"]], "remote pinned input inventory")
+require(manifest["provenance_only"].get("inputs") == runtime_lock.get("provenance_payloads"), "provenance-only inventory")
+require((manifest.get("ci_image") or {}).get("installed_files") == [item["path"] for item in runtime_lock["installed_files"] if "ken-ci" in item["hosts"]], "CI installed-file inventory")
+require((manifest.get("deploy_image") or {}).get("installed_files") == [item["path"] for item in runtime_lock["installed_files"] if "ken-deploy" in item["hosts"]], "deploy installed-file inventory")
+require((manifest.get("ci_image") or {}).get("task6_ci_files") == [item["path"] for item in runtime_lock["installed_files"] if item["source"].startswith("repo:") and "ken-ci" in item["hosts"]], "CI Task 6 files")
+require((manifest.get("deploy_image") or {}).get("task6_deploy_files") == [item["path"] for item in runtime_lock["installed_files"] if item["source"].startswith("repo:") and "ken-deploy" in item["hosts"]], "deploy Task 6 files")
+transport = load_yaml(task7_path)
+require((transport.get("task6_final") or {}).get("status") == "reviewed-final-bindings", "Task 7 final Task 6 status")
+require((transport.get("task6_final") or {}).get("commit_sha") == "d03694d41c044985d406e74d434fdf2928bc4798", "Task 7 Task 6 commit binding")
+require((transport.get("task6_final") or {}).get("tree_sha") == "71b57ed890f5f39ea3ee90eaccb59a8cf3666fb4", "Task 7 Task 6 tree binding")
 require(manifest.get("firewall") == {
     "status": "blocked",
     "blocker": "missing-final-firewall-endpoint-generation",
@@ -323,13 +349,13 @@ PY
 echo '== provisioner fail-closed gates =='
 static_output="$({ bash "${PROVISION}" --verify-static; } 2>&1)"
 static_status=$?
-if (( static_status == 0 )) && grep -Fq 'STATIC_OK readiness=blocked blocker=missing-final-task6-lock' <<<"${static_output}"; then
+if (( static_status == 0 )) && grep -Fq 'STATIC_OK readiness=blocked blocker=missing-single-stop-production-target-readback' <<<"${static_output}"; then
   pass 'static verifier accepts only the explicit blocked state'
 else
   printf '%s\n' "${static_output}" >&2
   fail 'static verifier accepts only the explicit blocked state'
 fi
-expect_failure 'guest readiness rejects the unfinished Task 6 handoff' 'missing-final-task6-lock' \
+expect_failure 'guest readiness rejects the external target handoff' 'missing-single-stop-production-target-readback' \
   bash "${PROVISION}" --check-readiness
 
 fake_bin="${tmp_root}/fake-bin"
@@ -350,7 +376,7 @@ else
 fi
 expect_failure 'wrong live target is rejected locally' 'target must be root@167.235.8.250' \
   env PATH="${fake_bin}:/usr/bin:/bin" bash "${PROVISION}" --dry-run root@192.0.2.10
-expect_failure 'live apply is blocked before SSH' 'missing-final-task6-lock' \
+expect_failure 'live apply is blocked before SSH' 'missing-single-stop-production-target-readback' \
   env PATH="${fake_bin}:/usr/bin:/bin" bash "${PROVISION}" root@167.235.8.250
 
 echo '== authority mutation rejection =='
@@ -403,12 +429,12 @@ expect_failure 'boolean manifest input epoch is rejected' 'guest manifest genera
   env PROVISION_VMS_GA_ROOT="${mutation_root}" bash "${PROVISION}" --verify-static
 
 mutation_root="$(copy_ga_for_mutation removed-required-blocker)"
-perl -0pi -e 's/^    - missing-final-task6-lock\n//m' "${mutation_root}/inventory/guest-image-manifest.yaml"
+perl -0pi -e 's/^    - missing-single-stop-production-target-readback\n//m' "${mutation_root}/inventory/guest-image-manifest.yaml"
 expect_failure 'blocked manifest requires the exact blocker set' 'guest manifest blocker set drift' \
   env PROVISION_VMS_GA_ROOT="${mutation_root}" bash "${PROVISION}" --verify-static
 
 mutation_root="$(copy_ga_for_mutation boolean-ready-authority)"
-perl -0pi -e 's/(  task6_commit:) null/$1 true/; s/(  broker_runtime_lock_sha256:) null/$1 true/; s/(  op_broker_policy_sha256:) null/$1 true/; s/(  state:) blocked/$1 ready/; s/(  live_apply_allowed:) false/$1 true/' "${mutation_root}/inventory/guest-image-manifest.yaml"
+perl -0pi -e 's/(  task6_commit:) [0-9a-f]+/$1 true/; s/(  broker_runtime_lock_sha256:) [0-9a-f]+/$1 true/; s/(  op_broker_policy_sha256:) [0-9a-f]+/$1 true/; s/(  state:) blocked/$1 ready/; s/(  live_apply_allowed:) false/$1 true/' "${mutation_root}/inventory/guest-image-manifest.yaml"
 expect_failure 'readiness rejects Boolean commit and digest authority' 'guest manifest Task 6 commit type drift' \
   env PROVISION_VMS_GA_ROOT="${mutation_root}" bash "${PROVISION}" --check-readiness
 
@@ -435,8 +461,8 @@ expect_failure 'wildcard proxy listener is rejected' 'proxy bind drift' \
 echo '== strict Task 6 runtime authority consumer =='
 runtime_authority="${tmp_root}/runtime-authority"
 mkdir -p "${runtime_authority}"
-cp /private/tmp/ken-sre-task6-broker-runtime-sol/infra/github-actions/inventory/broker-runtime.lock.yaml "${runtime_authority}/lock.yaml"
-cp /private/tmp/ken-sre-task6-broker-runtime-sol/infra/github-actions/inventory/op-broker-policy.yaml "${runtime_authority}/policy.yaml"
+cp "${GA_ROOT}/inventory/broker-runtime.lock.yaml" "${runtime_authority}/lock.yaml"
+cp "${GA_ROOT}/inventory/op-broker-policy.yaml" "${runtime_authority}/policy.yaml"
 cp "${GA_ROOT}/inventory/guest-image-manifest.yaml" "${runtime_authority}/manifest.yaml"
 python3 - "${runtime_authority}" <<'PY'
 import hashlib
@@ -449,12 +475,12 @@ root = Path(sys.argv[1])
 manifest = yaml.safe_load((root / "manifest.yaml").read_text())
 lock = yaml.safe_load((root / "lock.yaml").read_text())
 manifest["authority"]["plan_sha256"] = lock["plan_sha256"]
-manifest["authority"]["task6_commit"] = "a" * 40
+manifest["authority"]["task6_commit"] = "d03694d41c044985d406e74d434fdf2928bc4798"
 manifest["authority"]["broker_runtime_lock_sha256"] = hashlib.sha256((root / "lock.yaml").read_bytes()).hexdigest()
 manifest["authority"]["op_broker_policy_sha256"] = hashlib.sha256((root / "policy.yaml").read_bytes()).hexdigest()
 (root / "manifest.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False))
 PY
-expect_success 'strict Task 6 lock and policy validate as one consumed authority' 'RUNTIME_AUTHORITY_OK components=17 installed_files=46 principals=10' \
+expect_success 'strict Task 6 lock and policy validate as one consumed authority' 'RUNTIME_AUTHORITY_OK components=17 installed_files=52 principals=10' \
   bash "${PROVISION}" --validate-runtime-authority "${runtime_authority}/manifest.yaml" "${runtime_authority}/lock.yaml" "${runtime_authority}/policy.yaml"
 
 runtime_manifest_for_lock() {
@@ -575,7 +601,7 @@ expect_failure 'Boolean Task 5 subordinate-ID count is rejected' 'runner identit
 endpoint_ready_root="${tmp_root}/endpoint-ready"
 mkdir -p "${endpoint_ready_root}"
 cp "${endpoint_policy}" "${endpoint_ready_root}/policy.yaml"
-cp /private/tmp/ken-sre-task7-action-transport/infra/github-actions/inventory/action-transport.lock.yaml "${endpoint_ready_root}/task7.yaml"
+cp "${GA_ROOT}/inventory/action-transport.lock.yaml" "${endpoint_ready_root}/task7.yaml"
 cp "${runtime_authority}/lock.yaml" "${endpoint_ready_root}/lock.yaml"
 cp "${runtime_authority}/policy.yaml" "${endpoint_ready_root}/broker-policy.yaml"
 endpoint_runtime_lock="${endpoint_ready_root}/lock.yaml"
@@ -588,18 +614,7 @@ import sys
 import yaml
 
 root = Path(sys.argv[1]); runner, lock, broker = map(Path, sys.argv[2:])
-lock_value = yaml.safe_load(lock.read_text())
-lock_value["plan_sha256"] = "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658"
-lock.write_text(yaml.safe_dump(lock_value, sort_keys=False))
-broker_value = yaml.safe_load(broker.read_text())
-frontend_phases = broker_value["firewall_phase_interface"]["profiles"]["frontend-production-digest-deploy"]
-frontend_phases.remove("github-read")
-frontend_phases.insert(frontend_phases.index("posthog-upload"), "build-offline")
-broker.write_text(yaml.safe_dump(broker_value, sort_keys=False))
 task7_path = root / "task7.yaml"
-task7 = yaml.safe_load(task7_path.read_text())
-task7["task6_final"] = {"status": "ready", "commit_sha": "b" * 40, "policy_sha256": hashlib.sha256(broker.read_bytes()).hexdigest(), "runtime_lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest()}
-task7_path.write_text(yaml.safe_dump(task7, sort_keys=False))
 path = root / "policy.yaml"; policy = yaml.safe_load(path.read_text())
 policy["authority"].update({
     "runner_platform_sha256": hashlib.sha256(runner.read_bytes()).hexdigest(),
@@ -1305,7 +1320,6 @@ manifest["authority"].update({
     "plan_sha256": "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658",
     "broker_runtime_lock_sha256": hashlib.sha256(runtime_lock.read_bytes()).hexdigest(),
     "op_broker_policy_sha256": hashlib.sha256(broker_policy.read_bytes()).hexdigest(),
-    "task7_commit": "b" * 40,
     "action_transport_lock_sha256": hashlib.sha256(task7.read_bytes()).hexdigest(),
     "firewall_endpoint_policy_sha256": hashlib.sha256(endpoint_policy.read_bytes()).hexdigest(),
     "firewall_endpoint_generation_sha256": hashlib.sha256(generation.read_bytes()).hexdigest(),
@@ -1407,8 +1421,6 @@ chmod +x "${build_bin}/qemu-img" "${build_bin}/virt-customize" "${build_bin}/vir
 build_ga_root="${build_root}/ga-root"
 mkdir -p "${build_ga_root}"
 cp -R "${GA_ROOT}/." "${build_ga_root}/"
-mkdir -p "${build_ga_root}/bin"
-cp /private/tmp/ken-sre-task6-broker-runtime-sol/infra/github-actions/bin/ken-actions-artifact-download "${build_ga_root}/bin/ken-actions-artifact-download"
 
 build_command=(bash "${PROVISION}" --build-offline \
   "${build_root}/manifest.yaml" "${endpoint_runtime_lock}" "${endpoint_broker_policy}" \
@@ -1628,7 +1640,7 @@ fi
 blocked_build_root="${tmp_root}/blocked-build"
 mkdir -p "${blocked_build_root}"
 blocked_log="${blocked_build_root}/transport.log"
-expect_failure 'committed blocked authority refuses before qemu transport' 'missing-final-task6-lock' \
+expect_failure 'committed externally blocked authority refuses before qemu transport' 'missing or malformed build authority: firewall_endpoint_generation_sha256' \
   env PATH="${build_bin}:/usr/bin:/bin" KEN_ACTIONS_TEST_TRANSPORT_LOG="${blocked_log}" \
   bash "${PROVISION}" --build-offline \
     "${GA_ROOT}/inventory/guest-image-manifest.yaml" "${endpoint_runtime_lock}" "${endpoint_broker_policy}" \

@@ -4,16 +4,16 @@ authority:
   task5_integrated_commit: e2b3b2b50890be01601288f5294ac847fb575e71
   runner_platform_path: inventory/runner-platform.yaml
   runner_platform_sha256: 79a0b4fd92ac0635127da68f0b273dadb8b45c61992a6f5cb7d3f6519f3ce03f
-  task6_commit: null
+  task6_commit: d03694d41c044985d406e74d434fdf2928bc4798
   broker_runtime_lock_path: inventory/broker-runtime.lock.yaml
-  broker_runtime_lock_sha256: null
+  broker_runtime_lock_sha256: 0e571c4d20ce68ebb7fd97c2a3dbc0d7430c50c4a09dfd0b89cb08c0ffec2bfa
   op_broker_policy_path: inventory/op-broker-policy.yaml
-  op_broker_policy_sha256: null
-  task7_commit: null
+  op_broker_policy_sha256: 383ea7d1d2beb7e0ced15ed68768ce41e9ec9abbae5f180b6ac29542970b1335
+  task7_commit: 0dfa2b1ae721180b49f8ccf9d4c4dd7bdb027894
   action_transport_lock_path: inventory/action-transport.lock.yaml
-  action_transport_lock_sha256: null
+  action_transport_lock_sha256: 908c58e4fb0849bfadc0762f230fa94361bd73853db2a4ed4f40bb288fa3e4dc
   firewall_endpoint_policy_path: inventory/firewall-endpoint-policy.yaml
-  firewall_endpoint_policy_sha256: null
+  firewall_endpoint_policy_sha256: 1d1c786ca1e299f1e91baf0ddf3a0a1f4a0b26e73270a9c7beb8c9ab553ec748
   firewall_endpoint_generation_sha256: null
   firewall_endpoint_generation_receipt_sha256: null
   onepassword_canary_receipt_sha256: null
@@ -33,11 +33,37 @@ base_image:
   signer_fingerprint: D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81
   dpkg_inventory_sha256: eeabaab04e894d41d33b207718b189b7bc27716af8f25aa2857a68e434203316
 common_runtime:
-  status: blocked
-  blocker: missing-final-task6-lock
+  status: ready
+  blocker: null
   exact_op_path: /usr/local/bin/op
-  payloads: []
-  installed_files: []
+  payloads:
+    - 1password-cli
+    - python
+    - pyyaml
+    - pyjwt
+    - cryptography
+    - ca-certificates
+    - git
+    - systemd
+    - zip-safety
+  installed_files:
+    - /usr/local/bin/op
+    - /usr/bin/python3.12
+    - /usr/lib/python3/dist-packages/yaml/__init__.py
+    - /usr/lib/python3/dist-packages/yaml/_yaml.cpython-312-x86_64-linux-gnu.so
+    - /usr/lib/python3/dist-packages/jwt/__init__.py
+    - /usr/lib/python3/dist-packages/jwt/algorithms.py
+    - /usr/lib/python3/dist-packages/cryptography/__init__.py
+    - /usr/lib/python3/dist-packages/cryptography/hazmat/bindings/_rust.abi3.so
+    - /usr/lib/python3/dist-packages/_cffi_backend.cpython-312-x86_64-linux-gnu.so
+    - /usr/sbin/update-ca-certificates
+    - /usr/bin/git
+    - /usr/lib/git-core/git-remote-http
+    - /usr/bin/systemd-creds
+    - /usr/bin/systemctl
+    - /usr/lib/x86_64-linux-gnu/systemd/libsystemd-shared-255.so
+    - /usr/lib/python3.12/zipfile/__init__.py
+    - /usr/bin/unzip
   required_checks:
     - op-version
     - python-isolated-mode
@@ -47,7 +73,7 @@ common_runtime:
     - elf-soname-abi
     - ca-bundle-generation-and-hash
 ci_image:
-  status: blocked
+  status: ready
   virtual_size_gib: 750
   platform_payloads:
     - actions-runner-linux-x64-2.336.0.tar.gz
@@ -65,11 +91,40 @@ ci_image:
     - libsubid4_4.13+dfsg1-4ubuntu3.2_amd64.deb
     - slirp4netns_1.2.1-1build2_amd64.deb
     - uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb
-  installed_files: []
-  common_runtime_included: false
-  task6_ci_files: []
+  installed_files:
+    - /usr/local/bin/op
+    - /usr/bin/python3.12
+    - /usr/lib/python3/dist-packages/yaml/__init__.py
+    - /usr/lib/python3/dist-packages/yaml/_yaml.cpython-312-x86_64-linux-gnu.so
+    - /usr/lib/python3/dist-packages/jwt/__init__.py
+    - /usr/lib/python3/dist-packages/jwt/algorithms.py
+    - /usr/lib/python3/dist-packages/cryptography/__init__.py
+    - /usr/lib/python3/dist-packages/cryptography/hazmat/bindings/_rust.abi3.so
+    - /usr/lib/python3/dist-packages/_cffi_backend.cpython-312-x86_64-linux-gnu.so
+    - /usr/sbin/update-ca-certificates
+    - /usr/bin/git
+    - /usr/lib/git-core/git-remote-http
+    - /usr/bin/systemd-creds
+    - /usr/bin/systemctl
+    - /usr/lib/x86_64-linux-gnu/systemd/libsystemd-shared-255.so
+    - /usr/lib/python3.12/zipfile/__init__.py
+    - /usr/bin/unzip
+    - /usr/local/bin/ken-op-exec
+    - /usr/local/bin/ken-op-broker
+    - /usr/local/libexec/ken-actions/runtime-known-answer.py
+    - /etc/ken-op-broker/op-broker-policy.yaml
+    - /etc/systemd/system/ken-op-broker@.service
+    - /etc/systemd/system/ken-op-broker@.socket
+  common_runtime_included: true
+  task6_ci_files:
+    - /usr/local/bin/ken-op-exec
+    - /usr/local/bin/ken-op-broker
+    - /usr/local/libexec/ken-actions/runtime-known-answer.py
+    - /etc/ken-op-broker/op-broker-policy.yaml
+    - /etc/systemd/system/ken-op-broker@.service
+    - /etc/systemd/system/ken-op-broker@.socket
 deploy_image:
-  status: blocked
+  status: ready
   virtual_size_gib: 80
   platform_payloads:
     - actions-runner-linux-x64-2.336.0.tar.gz
@@ -87,22 +142,118 @@ deploy_image:
     - libsubid4_4.13+dfsg1-4ubuntu3.2_amd64.deb
     - slirp4netns_1.2.1-1build2_amd64.deb
     - uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb
-  installed_files: []
-  common_runtime_included: false
-  deploy_toolchain_payloads: []
-  task6_deploy_files: []
-  task6_principals: []
-  builder_subuid_range: null
-  builder_subgid_range: null
+  installed_files:
+    - /usr/local/bin/op
+    - /usr/bin/python3.12
+    - /usr/lib/python3/dist-packages/yaml/__init__.py
+    - /usr/lib/python3/dist-packages/yaml/_yaml.cpython-312-x86_64-linux-gnu.so
+    - /usr/lib/python3/dist-packages/jwt/__init__.py
+    - /usr/lib/python3/dist-packages/jwt/algorithms.py
+    - /usr/lib/python3/dist-packages/cryptography/__init__.py
+    - /usr/lib/python3/dist-packages/cryptography/hazmat/bindings/_rust.abi3.so
+    - /usr/lib/python3/dist-packages/_cffi_backend.cpython-312-x86_64-linux-gnu.so
+    - /usr/sbin/update-ca-certificates
+    - /usr/bin/git
+    - /usr/lib/git-core/git-remote-http
+    - /usr/bin/systemd-creds
+    - /usr/bin/systemctl
+    - /usr/lib/x86_64-linux-gnu/systemd/libsystemd-shared-255.so
+    - /usr/lib/python3.12/zipfile/__init__.py
+    - /usr/bin/unzip
+    - /usr/local/bin/buildkitd
+    - /usr/local/bin/buildctl
+    - /usr/local/bin/buildkit-runc
+    - /usr/local/bin/rootlesskit
+    - /usr/local/bin/rootlessctl
+    - /usr/local/bin/rootlesskit-docker-proxy
+    - /usr/bin/newuidmap
+    - /usr/bin/newgidmap
+    - /usr/bin/slirp4netns
+    - /usr/bin/fuse-overlayfs
+    - /opt/ken-toolchain/node-v22.20.0/bin/node
+    - /opt/ken-toolchain/node-v22.20.0/lib/node_modules/corepack/dist/corepack.js
+    - /opt/ken-toolchain/lib/node_modules/pnpm/bin/pnpm.cjs
+    - /opt/ken-toolchain/lib/node_modules/pnpm/bin/pnpx.cjs
+    - /usr/local/bin/crane
+    - /usr/bin/umoci
+    - /usr/local/bin/ken-op-exec
+    - /usr/local/bin/ken-op-broker
+    - /usr/local/libexec/ken-actions/ken-actions-deploy-transaction
+    - /etc/systemd/system/ken-actions-deploy-transaction-1.service
+    - /etc/systemd/system/ken-actions-deploy-transaction-2.service
+    - /etc/systemd/system/ken-frontend-production-builder@.service
+    - /etc/systemd/system/ken-frontend-source-map-uploader@.service
+    - /etc/systemd/system/ken-frontend-deploy-executor@.service
+    - /usr/local/bin/ken-actions-artifact-download
+    - /usr/local/bin/ken-frontend-production-release
+    - /usr/local/bin/ken-frontend-source-map-upload
+    - /usr/local/libexec/ken-actions/ken-vexa-mcp-auth-production-deploy
+    - /usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync
+    - /usr/local/libexec/ken-actions/ken-website-production-deploy
+    - /usr/local/libexec/ken-actions/ken-frontend-production-release-build
+    - /usr/local/libexec/ken-actions/runtime-known-answer.py
+    - /etc/ken-op-broker/op-broker-policy.yaml
+    - /etc/systemd/system/ken-op-broker@.service
+    - /etc/systemd/system/ken-op-broker@.socket
+  common_runtime_included: true
+  deploy_toolchain_payloads:
+    - buildkit
+    - rootlesskit
+    - buildkit-rootless-prerequisites
+    - node
+    - corepack
+    - pnpm
+    - oci-image-tools
+  task6_deploy_files:
+    - /usr/local/bin/ken-op-exec
+    - /usr/local/bin/ken-op-broker
+    - /usr/local/libexec/ken-actions/ken-actions-deploy-transaction
+    - /etc/systemd/system/ken-actions-deploy-transaction-1.service
+    - /etc/systemd/system/ken-actions-deploy-transaction-2.service
+    - /etc/systemd/system/ken-frontend-production-builder@.service
+    - /etc/systemd/system/ken-frontend-source-map-uploader@.service
+    - /etc/systemd/system/ken-frontend-deploy-executor@.service
+    - /usr/local/bin/ken-actions-artifact-download
+    - /usr/local/bin/ken-frontend-production-release
+    - /usr/local/bin/ken-frontend-source-map-upload
+    - /usr/local/libexec/ken-actions/ken-vexa-mcp-auth-production-deploy
+    - /usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync
+    - /usr/local/libexec/ken-actions/ken-website-production-deploy
+    - /usr/local/libexec/ken-actions/ken-frontend-production-release-build
+    - /usr/local/libexec/ken-actions/runtime-known-answer.py
+    - /etc/ken-op-broker/op-broker-policy.yaml
+    - /etc/systemd/system/ken-op-broker@.service
+    - /etc/systemd/system/ken-op-broker@.socket
+  task6_principals: [22001, 22002, 22003, 22101, 22102, 22103, 22104, 22201, 22202, 22203]
+  builder_subuid_range: 300000:65536
+  builder_subgid_range: 300000:65536
 remote_pinned_build_inputs:
-  status: blocked
-  blocker: missing-final-task6-build-inputs
-  inputs: []
+  status: ready
+  blocker: null
+  inputs:
+    - id: node-build-base
+      delivery_class: remote-pinned-build-input
+      version: 22.20.0-alpine
+      source_url: https://registry-1.docker.io/v2/library/node/manifests/sha256:aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6
+      payload_filename: node-22.20.0-alpine-linux-amd64-manifest.json
+      payload_sha256: aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6
+      hosts: [ken-deploy]
+      compatibility:
+        canonical_reference: docker.io/library/node@sha256:aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6
+        platform: linux/amd64
+        config_digest: sha256:735b621e3e541de2a851625c382db48f76185f79cbaa1c94adcc8a80fd849e54
 provenance_only:
   installable: false
-  inputs: []
+  inputs:
+    - id: ubuntu-archive-keyring
+      version: 2023.11.28.1
+      filename: ubuntu-keyring_2023.11.28.1_all.deb
+      source_url: https://archive.ubuntu.com/ubuntu/pool/main/u/ubuntu-keyring/ubuntu-keyring_2023.11.28.1_all.deb
+      sha256: 36de43b15853ccae0028e9a767613770c704833f82586f28eb262f0311adb8a8
+      install_on_guest: false
+      purpose: verify-signed-ubuntu-package-indexes-only
 generated_files:
-  status: blocked
+  status: ready
   files: []
 verification:
   network_allowed: false
@@ -142,10 +293,8 @@ readiness:
   live_apply_allowed: false
   ready_marker: null
   blockers:
-    - missing-final-task6-lock
-    - missing-final-task6-policy-and-identities
-    - missing-final-task7-transport-manifest
     - missing-single-stop-production-target-readback
     - missing-approved-onepassword-endpoint-canary
     - missing-final-firewall-endpoint-generation
     - missing-both-guest-runtime-receipts
+    - missing-user-approval
