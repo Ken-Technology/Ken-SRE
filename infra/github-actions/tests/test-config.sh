@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Thin inventory entry point. Parser/classifier behavior lives in
-# test_audit_workflows.py.
+# Aggregate GitHub Actions platform test entry point. Detailed inventory, VM,
+# and runner behavior lives in the focused test modules.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -2654,6 +2654,14 @@ PY
   return 1
 }
 
+run_final_vm_suite() {
+  bash "${GA_ROOT}/tests/test-vms.sh"
+}
+
+run_final_runner_suite() {
+  bash "${GA_ROOT}/tests/test-runners.sh"
+}
+
 cmd="${1:-inventory}"
 case "${cmd}" in
   inventory)
@@ -2663,18 +2671,19 @@ case "${cmd}" in
     run_host
     ;;
   vm-definitions)
-    run_vm_definitions
+    run_final_vm_suite
     ;;
   vm-static)
-    VM_TEST_STATIC_ONLY=1 run_vm_definitions
+    run_final_vm_suite
     ;;
   all)
     run_inventory
     run_host
-    run_vm_definitions
+    run_final_vm_suite
+    run_final_runner_suite
     ;;
   runners)
-    run_runners
+    run_final_runner_suite
     ;;
   -h|--help)
     echo "Usage: bash infra/github-actions/tests/test-config.sh [inventory|host|vm-static|vm-definitions|runners|all]"
