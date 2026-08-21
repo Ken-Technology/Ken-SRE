@@ -37,22 +37,22 @@ task6_receipts:
   task4_deploy_target_authority: deferred-until-single-stop-readback
 task6_final:
   status: reviewed-final-bindings
-  commit_sha: d03694d41c044985d406e74d434fdf2928bc4798
-  tree_sha: 71b57ed890f5f39ea3ee90eaccb59a8cf3666fb4
-  task7_base_commit_sha: a06da36014e6b08a7478f5306c137c52c436c3ef
+  commit_sha: a7c554536e5c90092ecccdcacad3db5b2e01b1cf
+  tree_sha: 1f918bf0d5d58e61ce0b76d587233e02597b8ea6
+  task7_base_commit_sha: d1f38c6b5afef34825d4905f11583ca85af39173
   artifacts:
     policy:
       path: inventory/op-broker-policy.yaml
-      git_blob_sha: 208c5c02f1b7415887c7ff30c70f6d863d60df8d
-      sha256: 383ea7d1d2beb7e0ced15ed68768ce41e9ec9abbae5f180b6ac29542970b1335
+      git_blob_sha: 04733937c94cf00d9e07ce528ac3e5fb1d643fa4
+      sha256: a0c9e849227ce0d6c8db5fd747913bfc244e6311d7b225427dabab6d5279b4d7
     runtime_lock:
       path: inventory/broker-runtime.lock.yaml
-      git_blob_sha: 41b6bda7e96c8c2751f10c1c4bd75d279b06458a
-      sha256: 0e571c4d20ce68ebb7fd97c2a3dbc0d7430c50c4a09dfd0b89cb08c0ffec2bfa
+      git_blob_sha: 06f33ed0a1e8dbd9cba42a2b799b2d114fec9f19
+      sha256: 4c9dbea1c116aa95328e3d1541a4114907770d3664b0a4454fadf74a3efef797
     broker:
       path: bin/ken-op-broker
-      git_blob_sha: 8bbd30fab740a08b016d214f6d10c2f40276136a
-      sha256: 84f38c9f8cc2dfaa45aec438230af1c948b6fd6ae71767f39ccc1f72974257df
+      git_blob_sha: 7cd0bb14b699ae497d94cfefc773af387c3dfda9
+      sha256: 6d3af857cccd43be82a813846e1c4977b4d9a508ea57e06cd5cf23d6a5443127
     client:
       path: bin/ken-op-exec
       git_blob_sha: 90e5a39253a082598d15533f8f4d620e84468953
