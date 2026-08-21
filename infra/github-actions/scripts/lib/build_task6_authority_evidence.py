@@ -2204,9 +2204,9 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     search_extra_specs = [
         ("DB_CONNECTION_STRING", add_source(_deployed_source(scraper_file, "ConnectionStrings.KenDb")), "copy", "credential"),
         ("CLICKUP_LIST_ID", add_source(_deployed_source(scraper_file, "ClickUpAlerting.ListId")), "move-to-variable", "identifier"),
-        ("KEN_SEARCH_CLERK_SECRET_KEY", search_clerk, "copy", "credential"),
+        ("CLERK_SECRET_KEY", search_clerk, "copy", "credential"),
         ("KEN_SEARCH_INTERNAL_TOKEN", add_source(_deployed_source(scraper_file, "KenSearch.ServiceBearerToken")), "copy", "credential"),
-        ("VPS_HOST", search_root_host, "move-to-variable", "identifier"),
+        ("DEPLOY_HOST", search_root_host, "copy", "credential"),
         ("VPS_SSH_KEY", search_root_key, "copy", "credential"),
     ]
     for name, source_ref, action, classification in search_extra_specs:

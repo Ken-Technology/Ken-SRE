@@ -451,12 +451,12 @@ jobs:
             secrets["broker_actions"], handoff["broker_actions"]
         )
         self.assertEqual(input_manifest["collected_at"], "2026-08-19T20:13:15Z")
-        self.assertEqual(input_manifest["input_hash"], "e0dd452e5d16d270daf076486c4dbfbb2e64fbfe5de70b3924da0a8b3b58cc46")
+        self.assertEqual(input_manifest["input_hash"], "cf99f52bf11298b9228a513bede17cfb19392b6e25bf06b8c35dbb26e9e3f88b")
         manifest_without_derived_hash = dict(input_manifest)
         manifest_without_derived_hash.pop("input_hash")
         self.assertEqual(
             hashlib.sha256(json.dumps(manifest_without_derived_hash, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-            "5d73440957bf2bd071d6bc68ae0d72d249587de9b0d189db910f0d13d03c1d07",
+            "cf99f52bf11298b9228a513bede17cfb19392b6e25bf06b8c35dbb26e9e3f88b",
         )
         self.assertEqual(
             hashlib.sha256((inventory / "runners.yaml").read_bytes()).hexdigest(),

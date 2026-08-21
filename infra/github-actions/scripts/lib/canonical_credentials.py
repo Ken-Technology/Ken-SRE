@@ -126,7 +126,7 @@ REVIEWED_EVIDENCE_ARTIFACTS = {
     },
     "production-credential-comparison": {
         "artifact": "infra/github-actions/inventory/evidence/ken-production-credential-comparison.yaml",
-        "sha256": "4b2f27dbd8de06c2b8c725a8dd68d5e2b4cc9b77acce1494735bd34a0b1afe96",
+        "sha256": "c2fff321fbf09f00cc6e9ddbc30c586e700e2b25b0eeec84a25ffed0dde97f41",
         "row_count": 57,
     },
     "unresolved-authority-resolution": {

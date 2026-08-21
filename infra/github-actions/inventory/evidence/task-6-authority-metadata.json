@@ -3149,6 +3149,21 @@
       "target_vault": "Ken Deploy Production"
     },
     {
+      "alias_group": "ken-search/CLERK_SECRET_KEY",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy ken-search/CLERK_SECRET_KEY from its exact readable authority into the exact target 1Password field through the temporary migration writer without printing it.",
+        "Cut every ken-search consumer of CLERK_SECRET_KEY over to the local 1Password broker, verify the live consumer, and only then delete the GitHub secret field."
+      ],
+      "github_secret_name": "CLERK_SECRET_KEY",
+      "mapping_id": "ken-search-ken-deploy-production-all-workflows-clerk-secret-key",
+      "migration_action": "copy",
+      "repository": "ken-search",
+      "source_ref": "op-development-ken-backend-env-kensearch-clerkapikey",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
       "alias_group": "ken-search/CLICKUP_API_TOKEN",
       "authority_match": "reviewed-semantic",
       "classification": "credential",
@@ -3193,6 +3208,21 @@
       "target_vault": "Ken Deploy Production"
     },
     {
+      "alias_group": "ken-search/DEPLOY_HOST",
+      "authority_match": "reviewed-semantic",
+      "classification": "credential",
+      "downstream_update_steps": [
+        "Copy ken-search/DEPLOY_HOST from its exact readable authority into the exact target 1Password field through the temporary migration writer without printing it.",
+        "Cut every ken-search consumer of DEPLOY_HOST over to the local 1Password broker, verify the live consumer, and only then delete the GitHub secret field."
+      ],
+      "github_secret_name": "DEPLOY_HOST",
+      "mapping_id": "ken-search-ken-deploy-production-all-workflows-deploy-host",
+      "migration_action": "copy",
+      "repository": "ken-search",
+      "source_ref": "op-development-ssh-search-root-devws-host",
+      "target_vault": "Ken Deploy Production"
+    },
+    {
       "alias_group": "ken-search/ELASTICSEARCH_API_KEY",
       "authority_match": "reviewed-semantic",
       "classification": "credential",
@@ -3208,21 +3238,6 @@
       "target_vault": "Ken Deploy Production"
     },
     {
-      "alias_group": "ken-search/KEN_SEARCH_CLERK_SECRET_KEY",
-      "authority_match": "reviewed-semantic",
-      "classification": "credential",
-      "downstream_update_steps": [
-        "Copy ken-search/KEN_SEARCH_CLERK_SECRET_KEY from its exact readable authority into the exact target 1Password field through the temporary migration writer without printing it.",
-        "Cut every ken-search consumer of KEN_SEARCH_CLERK_SECRET_KEY over to the local 1Password broker, verify the live consumer, and only then delete the GitHub secret field."
-      ],
-      "github_secret_name": "KEN_SEARCH_CLERK_SECRET_KEY",
-      "mapping_id": "ken-search-ken-deploy-production-all-workflows-ken-search-clerk-secret-key",
-      "migration_action": "copy",
-      "repository": "ken-search",
-      "source_ref": "op-development-ken-backend-env-kensearch-clerkapikey",
-      "target_vault": "Ken Deploy Production"
-    },
-    {
       "alias_group": "ken-search/KEN_SEARCH_INTERNAL_TOKEN",
       "authority_match": "reviewed-semantic",
       "classification": "credential",
@@ -3235,20 +3250,6 @@
       "migration_action": "copy",
       "repository": "ken-search",
       "source_ref": "worldstream-scraper-api-kensearch-servicebearertoken",
-      "target_vault": "Ken Deploy Production"
-    },
-    {
-      "alias_group": "ken-search/VPS_HOST",
-      "authority_match": "reviewed-semantic",
-      "classification": "identifier",
-      "downstream_update_steps": [
-        "Create repository Actions variable VPS_HOST in ken-search, update the workflow reference from secrets to vars, and verify without printing the setting."
-      ],
-      "github_secret_name": "VPS_HOST",
-      "mapping_id": "ken-search-ken-deploy-production-all-workflows-vps-host",
-      "migration_action": "move-to-variable",
-      "repository": "ken-search",
-      "source_ref": "op-development-ssh-search-root-devws-host",
       "target_vault": "Ken Deploy Production"
     },
     {

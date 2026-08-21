@@ -1,6 +1,6 @@
 schema_version: 1
 collected_at: '2026-08-19T20:13:15Z'
-input_hash: e0dd452e5d16d270daf076486c4dbfbb2e64fbfe5de70b3924da0a8b3b58cc46
+input_hash: cf99f52bf11298b9228a513bede17cfb19392b6e25bf06b8c35dbb26e9e3f88b
 covered_inputs:
 - org
 - repos_index
@@ -65,12 +65,12 @@ repositories:
     sha: 553e74034938d5256bc757935066ff526344eb2c
 - name: ken-search
   default_branch: main
-  default_sha: 11c27e990d20d312fda0dc23b0e1e71ee1afb9fa
+  default_sha: bc63ca44e8f86557f76524198b34f1b0f1f740ba
   workflows:
   - path: .github/workflows/database-files-check.yml
     sha: 6f58cf55c3d739c4ed0cc88561dc3e810c648369
   - path: .github/workflows/deploy.yml
-    sha: 1f22583b08d02b090e418f47f618f5363e2396fd
+    sha: b5727e83097648ce93ac2c3fc681c5fe9e2b46f3
   - path: .github/workflows/grok-pr-review.yml
     sha: 9fbfd60c6b67180c797c7b8cdf786d67c7611901
   - path: .github/workflows/projection-mysql-tests.yml

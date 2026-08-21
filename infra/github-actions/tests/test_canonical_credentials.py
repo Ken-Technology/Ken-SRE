@@ -174,6 +174,43 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
             registry.canonical_coordinate(direct_row), direct_row["coordinate"]
         )
 
+    def test_ken_search_handoff_uses_current_workflow_names(self) -> None:
+        """The handoff must follow the reviewed workflow, not pre-cutover aliases."""
+        coordinates = {row["coordinate"] for row in self.handoff["rows"]}
+        self.assertIn("ken-search|CLERK_SECRET_KEY|Ken Deploy Production", coordinates)
+        self.assertIn("ken-search|DEPLOY_HOST|Ken Deploy Production", coordinates)
+        self.assertNotIn(
+            "ken-search|KEN_SEARCH_CLERK_SECRET_KEY|Ken Deploy Production", coordinates
+        )
+        self.assertNotIn("ken-search|VPS_HOST|no-1password-target", coordinates)
+
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        entries = {entry["coordinate"] for entry in document["entries"]}
+        self.assertIn("ken-search|CLERK_SECRET_KEY|Ken Deploy Production", entries)
+        self.assertIn("ken-search|DEPLOY_HOST|Ken Deploy Production", entries)
+        self.assertNotIn(
+            "ken-search|KEN_SEARCH_CLERK_SECRET_KEY|Ken Deploy Production", entries
+        )
+        self.assertNotIn("ken-search|VPS_HOST|no-1password-target", entries)
+
+        repositories = yaml.safe_load(
+            (INVENTORY / "repositories.yaml").read_text(encoding="utf-8")
+        )
+        search = next(
+            repo for repo in repositories["repositories"] if repo["name"] == "ken-search"
+        )
+        deploy = next(
+            workflow
+            for workflow in search["workflows"]
+            if workflow["path"] == ".github/workflows/deploy.yml"
+        )
+        self.assertIn("CLERK_SECRET_KEY", deploy["secret_names"])
+        self.assertIn("DEPLOY_HOST", deploy["secret_names"])
+        self.assertNotIn("KEN_SEARCH_CLERK_SECRET_KEY", deploy["secret_names"])
+        self.assertNotIn("VPS_HOST", deploy["secret_names"])
+
     def test_proven_renames_are_canonical_and_unresolved_rows_stay_unresolved(
         self,
     ) -> None:
@@ -223,7 +260,7 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
         }
         self.assertEqual(
             evidence["production-credential-comparison"]["sha256"],
-            "4b2f27dbd8de06c2b8c725a8dd68d5e2b4cc9b77acce1494735bd34a0b1afe96",
+            "c2fff321fbf09f00cc6e9ddbc30c586e700e2b25b0eeec84a25ffed0dde97f41",
         )
         self.assertEqual(
             evidence["unresolved-authority-resolution"]["sha256"],
@@ -435,7 +472,7 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
             "WORLDSTREAM_PASSWORD",
         )
         self.assertEqual(
-            entries["ken-search|VPS_HOST|no-1password-target"]["canonical_field"],
+            entries["ken-search|DEPLOY_HOST|Ken Deploy Production"]["canonical_field"],
             "DEPLOY_HOST",
         )
         self.assertEqual(

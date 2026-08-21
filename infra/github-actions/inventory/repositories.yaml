@@ -5390,7 +5390,7 @@ repositories:
   visibility: private
   archived: false
   default_branch: main
-  default_sha: 11c27e990d20d312fda0dc23b0e1e71ee1afb9fa
+  default_sha: bc63ca44e8f86557f76524198b34f1b0f1f740ba
   workflow_count: 7
   job_count: 9
   workflows:
@@ -5460,13 +5460,13 @@ repositories:
     - AWS_ACCESS_KEY_ID
     - AWS_SECRET_ACCESS_KEY
     - CLICKUP_API_TOKEN
-    - CLICKUP_LIST_ID
+    - DEPLOY_HOST
     - DEEPSEEK_API_KEY
-    - KEN_SEARCH_CLERK_SECRET_KEY
+    - CLERK_SECRET_KEY
     - KEN_SEARCH_INTERNAL_TOKEN
-    - VPS_HOST
     - VPS_SSH_KEY
     variable_names:
+    - CLICKUP_LIST_ID
     - KEN_SEARCH_CLERK_AUTHORITY
     - TechnologySearch__TechnologyFiltersEnabled
     - TechnologySearch__AllowedClientIds__0
@@ -5536,13 +5536,13 @@ repositories:
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
       - CLICKUP_API_TOKEN
-      - CLICKUP_LIST_ID
+      - DEPLOY_HOST
       - DEEPSEEK_API_KEY
-      - KEN_SEARCH_CLERK_SECRET_KEY
+      - CLERK_SECRET_KEY
       - KEN_SEARCH_INTERNAL_TOKEN
-      - VPS_HOST
       - VPS_SSH_KEY
       variable_names:
+      - CLICKUP_LIST_ID
       - KEN_SEARCH_CLERK_AUTHORITY
       - TechnologySearch__TechnologyFiltersEnabled
       - TechnologySearch__AllowedClientIds__0
@@ -5551,16 +5551,16 @@ repositories:
       target_hints:
       - NuGet
       - ClickUp
-      - VPS_HOST
+      - DEPLOY_HOST
       target:
         kind: ssh-or-host
         action_types:
         - appleboy/scp-action
         - appleboy/ssh-action
         endpoint_expressions:
-        - ${{ secrets.VPS_HOST }}
+        - ${{ secrets.DEPLOY_HOST }}
         host_secret_names:
-        - VPS_HOST
+        - DEPLOY_HOST
         host_variable_names: []
         registry_or_package: null
         unknown_reason: null
