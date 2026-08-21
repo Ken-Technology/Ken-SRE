@@ -848,6 +848,73 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
                         ledger_path=root / "ledger.yaml",
                     )
 
+    def test_existing_generated_item_requires_a_nonempty_string_value(self):
+        tool = load_module()
+        missing = object()
+        for bad_value in (missing, "", 7):
+            with self.subTest(bad_value="missing" if bad_value is missing else bad_value):
+                with tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    row = {
+                        "coordinate": "fixture|GENERATED|Ken Deploy Production",
+                        "action": "generate-random-additive",
+                        "target_canonical": {
+                            "vault": "Ken Deploy Production",
+                            "item": "fixture-generated",
+                            "field": "GENERATED",
+                        },
+                    }
+                    plan = root / "plan.yaml"
+                    plan.write_text(yaml.safe_dump({"schema_version": 1, "rows": [row]}, sort_keys=False))
+                    allowlist = root / "allowlist.yaml"
+                    allowlist.write_text(yaml.safe_dump({"coordinates": [row["coordinate"]]}))
+
+                    def run_json(**kwargs):
+                        command = list(kwargs["argv"])
+                        if command[:2] == ["whoami", "--format=json"]:
+                            return {
+                                "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                                "user_uuid": "writer-uuid",
+                                "user_type": "SERVICE_ACCOUNT",
+                                "ServiceAccountType": "SERVICE_ACCOUNT",
+                            }
+                        if command[:3] == ["vault", "list", "--format=json"]:
+                            return [{"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"], "name": "Ken Deploy Production"}]
+                        if command[:3] == ["item", "list", "--vault"]:
+                            return [{"id": "generated-id", "title": "fixture-generated"}]
+                        if command[:3] == ["item", "get", "generated-id"]:
+                            field = {"label": "GENERATED", "type": "CONCEALED"}
+                            if bad_value is not missing:
+                                field["value"] = bad_value
+                            return {
+                                "id": "generated-id",
+                                "title": "fixture-generated",
+                                "vault": {"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"]},
+                                "fields": [field],
+                                "sections": [],
+                            }
+                        raise AssertionError(f"unexpected op command: {command}")
+
+                    with (
+                        mock.patch.object(tool, "_validate_writer_scopes"),
+                        mock.patch.object(tool._MIGRATION, "run_op_json", side_effect=run_json),
+                        mock.patch.object(tool, "_generate_secret", return_value=("must-not-persist", None)),
+                    ):
+                        with self.assertRaises(tool.MigrationError):
+                            tool.generate_canonical_vaults(
+                                plan_path=plan,
+                                allowlist_path=allowlist,
+                                writer_source=tool.StaticWriterTokenSource(
+                                    {
+                                        "Ken CI Runtime": "writer-ci",
+                                        "Ken Deploy Nonproduction": "writer-nonprod",
+                                        "Ken Deploy Production": "writer-prod",
+                                    }
+                                ),
+                                op_bin=root / "op",
+                                ledger_path=root / "ledger.yaml",
+                            )
+
     def test_existing_ssh_private_key_does_not_fabricate_public_registration(self):
         tool = load_module()
         with tempfile.TemporaryDirectory() as temp:

@@ -961,6 +961,13 @@ def _inspect_generation_target(
     ):
         raise MigrationError("existing item response is invalid")
     expected_fields = {field: "CONCEALED" for field in fields}
+    for observed_field in existing["fields"]:
+        if not isinstance(observed_field, Mapping):
+            raise MigrationError("existing item field structure is invalid")
+        if observed_field.get("label") in expected_fields:
+            concealed_value = observed_field.get("value")
+            if not isinstance(concealed_value, str) or not concealed_value:
+                raise MigrationError("existing generated concealed value is invalid")
     # verify_item_shape records only labels/types; concealed values never leave
     # this process and are never included in the status or ledger.
     return vault_id, _MIGRATION.verify_item_shape(
