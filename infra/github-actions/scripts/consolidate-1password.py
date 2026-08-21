@@ -454,17 +454,108 @@ _CONNECTION_KEYS = {
 def _parse_connection_string(raw: str) -> dict[str, str]:
     if not isinstance(raw, str) or not raw:
         raise MigrationError("connection string is invalid")
+
+    if any(character in raw for character in "\r\n"):
+        raise MigrationError("connection string is invalid")
+
+    # Connection-string values may contain '=' and, when quoted or braced,
+    # semicolons too.  Split only on delimiters outside a value wrapper.  A
+    # wrapper is significant only at the beginning of a value; apostrophes or
+    # braces occurring later are ordinary value characters.
+    parts: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    braced = False
+    assignment_seen = False
+    value_started = False
+    index = 0
+    while index < len(raw):
+        character = raw[index]
+        if quote is not None:
+            current.append(character)
+            if character == "\\" and index + 1 < len(raw):
+                current.append(raw[index + 1])
+                index += 2
+                continue
+            if character == quote:
+                if index + 1 < len(raw) and raw[index + 1] == quote:
+                    current.append(raw[index + 1])
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if braced:
+            current.append(character)
+            if character == "}" and index + 1 < len(raw) and raw[index + 1] == "}":
+                current.append(raw[index + 1])
+                index += 2
+                continue
+            if character == "}":
+                braced = False
+            index += 1
+            continue
+
+        if character == ";":
+            parts.append("".join(current))
+            current = []
+            assignment_seen = False
+            value_started = False
+            index += 1
+            continue
+        current.append(character)
+        if character == "=" and not assignment_seen:
+            assignment_seen = True
+            index += 1
+            continue
+        if assignment_seen and not value_started and not character.isspace():
+            if character in {"'", '"'}:
+                quote = character
+            elif character == "{":
+                braced = True
+            value_started = True
+        index += 1
+    if quote is not None or braced:
+        raise MigrationError("connection string is invalid")
+    parts.append("".join(current))
+
     result: dict[str, str] = {}
-    for part in raw.split(";"):
+    for part in parts:
         if not part:
             continue
-        if part.count("=") != 1:
+        if "=" not in part:
             raise MigrationError("connection string is invalid")
         key, value = (piece.strip() for piece in part.split("=", 1))
         normalized = _CONNECTION_KEYS.get(key.casefold())
         if normalized is None or not value or normalized in result:
             raise MigrationError("connection string is invalid")
-        if any(character in value for character in "\r\n"):
+        if value[0] in {"'", '"'}:
+            delimiter = value[0]
+            closing_index: int | None = None
+            index = 1
+            while index < len(value):
+                if value[index] == "\\" and index + 1 < len(value):
+                    index += 2
+                    continue
+                if value[index] == delimiter:
+                    if index + 1 < len(value) and value[index + 1] == delimiter:
+                        index += 2
+                        continue
+                    closing_index = index
+                    break
+                index += 1
+            if closing_index is None or value[closing_index + 1 :].strip():
+                raise MigrationError("connection string is invalid")
+            value = value[1:closing_index]
+            value = value.replace("\\" + delimiter, delimiter).replace(
+                delimiter * 2, delimiter
+            )
+        elif value[0] == "{":
+            if not value.endswith("}"):
+                raise MigrationError("connection string is invalid")
+            inner = value[1:-1]
+            value = inner.replace("}}", "}")
+        if not value:
             raise MigrationError("connection string is invalid")
         result[normalized] = value
     return result

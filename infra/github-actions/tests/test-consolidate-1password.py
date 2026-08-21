@@ -124,6 +124,51 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "connection string"):
                 tool._parse_connection_string("Server=db;Password=pw;Password=other")
 
+    def test_connection_parser_allows_equals_in_unquoted_values(self):
+        tool = load_module()
+
+        parsed = tool._parse_connection_string(
+            "Server=db;Database=ken;User Id=reader;Password=pw=with=equals"
+        )
+
+        self.assertEqual(parsed["password"], "pw=with=equals")
+
+    def test_connection_parser_supports_quoted_values_and_escaped_quotes(self):
+        tool = load_module()
+
+        parsed = tool._parse_connection_string(
+            'Server=db;Database="ken;primary";User Id=reader;'
+            'Password="pw with ""quotes""=equals"'
+        )
+
+        self.assertEqual(parsed["database"], "ken;primary")
+        self.assertEqual(parsed["password"], 'pw with "quotes"=equals')
+
+    def test_connection_parser_supports_braced_values_and_escaped_braces(self):
+        tool = load_module()
+
+        parsed = tool._parse_connection_string(
+            "Server=db;Database={ken;primary};User Id=reader;"
+            "Password={pw with }}brace=equals}"
+        )
+
+        self.assertEqual(parsed["database"], "ken;primary")
+        self.assertEqual(parsed["password"], "pw with }brace=equals")
+
+    def test_connection_parser_rejects_malformed_quoted_and_braced_values(self):
+        tool = load_module()
+
+        for raw in (
+            'Server=db;Password="unterminated',
+            "Server=db;Password={unterminated",
+            'Server=db;Password="closed" trailing',
+            "Server=db;Password={closed} trailing",
+        ):
+            with self.subTest(case=raw), self.assertRaisesRegex(
+                ValueError, "connection string"
+            ):
+                tool._parse_connection_string(raw)
+
     def test_deployed_authority_rejects_shell_metacharacters(self):
         tool = load_module()
         shell_metacharacters = ";|&$`()<>*?!\\"
