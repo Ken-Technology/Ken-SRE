@@ -295,6 +295,41 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
         self.assertEqual(fields["OPENAI_API_KEY"]["value"], "provider-secret")
         self.assertNotIn("OP_SERVICE_ACCOUNT_TOKEN", json.dumps(template))
 
+    def test_existing_item_merge_preserves_unrelated_fields_sections_and_metadata(self):
+        tool = load_module()
+        existing = {
+            "id": "item-id",
+            "category": "API_CREDENTIAL",
+            "title": "openai-production",
+            "vault": {"id": "vault-id"},
+            "fields": [
+                {"id": "openai-api-key", "label": "OPENAI_API_KEY", "type": "CONCEALED", "value": "old"},
+                {"id": "account", "label": "ACCOUNT", "type": "STRING", "value": "ken"},
+            ],
+            "sections": [{"id": "custom", "label": "Custom", "fields": [{"id": "url", "label": "URL", "type": "STRING", "value": "https://example.test"}]}],
+            "notesPlain": "keep this note",
+        }
+        merged, preserved = tool.merge_item_template(
+            existing=existing,
+            title="openai-production",
+            fields={"OPENAI_API_KEY": "new"},
+            text_fields={},
+        )
+        self.assertEqual(merged["sections"], existing["sections"])
+        self.assertEqual(merged["notesPlain"], existing["notesPlain"])
+        self.assertEqual(next(field for field in merged["fields"] if field["label"] == "ACCOUNT"), existing["fields"][1])
+        self.assertEqual(next(field for field in merged["fields"] if field["label"] == "OPENAI_API_KEY")["value"], "new")
+        self.assertNotIn("old", json.dumps(preserved))
+
+    def test_existing_passkey_item_is_rejected_before_edit(self):
+        tool = load_module()
+        with self.assertRaisesRegex(ValueError, "passkey"):
+            tool.merge_item_template(
+                existing={"category": "LOGIN", "title": "openai-production", "fields": [{"type": "PASSKEY", "label": "passkey"}], "sections": []},
+                title="openai-production",
+                fields={"OPENAI_API_KEY": "new"},
+            )
+
     def test_op_runner_uses_minimal_environment_and_stdin(self):
         tool = load_module()
         with tempfile.TemporaryDirectory() as temp:

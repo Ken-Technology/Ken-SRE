@@ -5,6 +5,7 @@ import stat
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import yaml
@@ -93,18 +94,25 @@ def write_fake_op(root):
         "        handle.write(json.dumps({'argv': args, 'token': token, 'stdin': stdin}) + '\\n')\n"
         "if token == 'personal-session':\n"
         "    item_id = args[args.index('get') + 1]\n"
-        "    values = {'personal-ci-item': 'writer-ci', 'personal-nonprod-item': 'writer-nonprod', 'personal-prod-item': 'writer-prod'}\n"
-        "    print(json.dumps({'id': item_id, 'title': item_id, 'fields': [{'label': 'credential', 'type': 'CONCEALED', 'value': values[item_id]}]}))\n"
-        "elif not token and args[:2] == ['item', 'get']:\n"
-        "    item_id = args[args.index('get') + 1]\n"
-        "    values = {'personal-ci-item': 'writer-ci', 'personal-nonprod-item': 'writer-nonprod', 'personal-prod-item': 'writer-prod'}\n"
-        "    print(json.dumps({'id': item_id, 'title': item_id, 'fields': [{'label': 'credential', 'type': 'CONCEALED', 'value': values[item_id]}]}))\n"
+        "    values = {'j34dtkat667tgzeopkanjwbdau': 'writer-ci', 'h5lsxmq25qrgk4x22wf4k57z24': 'writer-nonprod', '5ncmp2wtb44nmvdwmlo5coirq4': 'writer-prod'}\n"
+        "    titles = {'j34dtkat667tgzeopkanjwbdau': 'Service Account Auth Token: ken-ci-runtime', 'h5lsxmq25qrgk4x22wf4k57z24': 'Service Account Auth Token: ken-deploy-nonproduction', '5ncmp2wtb44nmvdwmlo5coirq4': 'Service Account Auth Token: ken-deploy-production'}\n"
+        "    print(json.dumps({'id': item_id, 'title': titles[item_id], 'vault': {'name': 'Employee'}, 'fields': [{'label': 'credential', 'type': 'CONCEALED', 'value': values[item_id]}]}))\n"
+        "elif token == '':\n"
+        "    if args[:2] == ['whoami', '--format=json']:\n"
+        "        print(json.dumps({'id': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'type': 'USER'}))\n"
+        "    elif args[:2] == ['vault', 'get']:\n"
+        "        print(json.dumps({'id': 'employee-vault-id', 'name': 'Employee'}))\n"
+        "    else:\n"
+        "        item_id = args[args.index('get') + 1]\n"
+        "        values = {'j34dtkat667tgzeopkanjwbdau': 'writer-ci', 'h5lsxmq25qrgk4x22wf4k57z24': 'writer-nonprod', '5ncmp2wtb44nmvdwmlo5coirq4': 'writer-prod'}\n"
+        "        titles = {'j34dtkat667tgzeopkanjwbdau': 'Service Account Auth Token: ken-ci-runtime', 'h5lsxmq25qrgk4x22wf4k57z24': 'Service Account Auth Token: ken-deploy-nonproduction', '5ncmp2wtb44nmvdwmlo5coirq4': 'Service Account Auth Token: ken-deploy-production'}\n"
+        "        print(json.dumps({'id': item_id, 'title': titles[item_id], 'vault': {'name': 'Employee'}, 'fields': [{'label': 'credential', 'type': 'CONCEALED', 'value': values[item_id]}]}))\n"
         "elif token.startswith('source-'):\n"
         "    print(json.dumps({'title': 'source', 'fields': [{'label': 'credential', 'value': 'resolved-secret'}]}))\n"
         "elif args[:2] == ['whoami', '--format=json']:\n"
         "    print(json.dumps({'type': 'SERVICE_ACCOUNT', 'name': token}))\n"
         "elif args[:3] == ['vault', 'list', '--format=json']:\n"
-        "    names = {'writer-ci': ('ci-id', 'Ken CI Runtime'), 'writer-nonprod': ('nonprod-id', 'Ken Deploy Nonproduction'), 'writer-prod': ('prod-id', 'Ken Deploy Production')}\n"
+        "    names = {'writer-ci': ('istjrwyeqryhpv7rytbm34pfea', 'Ken CI Runtime'), 'writer-nonprod': ('wmb7rpm5xvl4ez4kur3s5l3hxe', 'Ken Deploy Nonproduction'), 'writer-prod': ('q7zdmdggp2ng7hvxozhzt4uupm', 'Ken Deploy Production')}\n"
         "    vault_id, name = names[token]\n"
         "    print(json.dumps([{'id': vault_id, 'name': name}]))\n"
         "elif args[:2] == ['item', 'list']:\n"
@@ -114,10 +122,10 @@ def write_fake_op(root):
         "    item_id = 'created-' + payload.get('title', 'item')\n"
         "    state[item_id] = payload\n"
         "    json.dump(state, open(state_path, 'w', encoding='utf-8'))\n"
-        "    print(json.dumps({'id': item_id, 'title': payload.get('title'), 'vault': {'id': {'writer-ci': 'ci-id', 'writer-nonprod': 'nonprod-id', 'writer-prod': 'prod-id'}[token]}, 'fields': payload.get('fields', [])}))\n"
+        "    print(json.dumps({'id': item_id, 'title': payload.get('title'), 'vault': {'id': {'writer-ci': 'istjrwyeqryhpv7rytbm34pfea', 'writer-nonprod': 'wmb7rpm5xvl4ez4kur3s5l3hxe', 'writer-prod': 'q7zdmdggp2ng7hvxozhzt4uupm'}[token]}, 'fields': payload.get('fields', [])}))\n"
         "else:\n"
         "    item_id = args[args.index('get') + 1]\n"
-        "    vault_id = {'writer-ci': 'ci-id', 'writer-nonprod': 'nonprod-id', 'writer-prod': 'prod-id'}[token]\n"
+        "    vault_id = {'writer-ci': 'istjrwyeqryhpv7rytbm34pfea', 'writer-nonprod': 'wmb7rpm5xvl4ez4kur3s5l3hxe', 'writer-prod': 'q7zdmdggp2ng7hvxozhzt4uupm'}[token]\n"
         "    payload = state.get(item_id, {})\n"
         "    print(json.dumps({'id': item_id, 'title': payload.get('title', item_id), 'vault': {'id': vault_id}, 'fields': payload.get('fields', [{'label': 'TOKEN', 'type': 'CONCEALED'}])}))\n"
     )
@@ -146,11 +154,11 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
             tokens = tool.PersonalWriterTokenSource(
                 op_bin=fake_op,
                 personal_token="personal-session",
-                personal_vault="Private",
+                personal_vault="Employee",
                 token_items={
-                    "Ken CI Runtime": "personal-ci-item",
-                    "Ken Deploy Nonproduction": "personal-nonprod-item",
-                    "Ken Deploy Production": "personal-prod-item",
+                    "Ken CI Runtime": "j34dtkat667tgzeopkanjwbdau",
+                    "Ken Deploy Nonproduction": "h5lsxmq25qrgk4x22wf4k57z24",
+                    "Ken Deploy Production": "5ncmp2wtb44nmvdwmlo5coirq4",
                 },
             ).load()
             self.assertEqual(set(tokens), tool.TARGET_VAULTS)
@@ -164,7 +172,7 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
             tool.PersonalWriterTokenSource(
                 op_bin=Path("/bin/false"),
                 personal_token="personal-session",
-                personal_vault="Private",
+                personal_vault="Employee",
                 token_items={"Ken CI Runtime": "one"},
             )
 
@@ -178,9 +186,9 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
                 personal_account=True,
                 personal_vault="Employee",
                 token_items={
-                    "Ken CI Runtime": "personal-ci-item",
-                    "Ken Deploy Nonproduction": "personal-nonprod-item",
-                    "Ken Deploy Production": "personal-prod-item",
+                    "Ken CI Runtime": "j34dtkat667tgzeopkanjwbdau",
+                    "Ken Deploy Nonproduction": "h5lsxmq25qrgk4x22wf4k57z24",
+                    "Ken Deploy Production": "5ncmp2wtb44nmvdwmlo5coirq4",
                 },
                 extra_env={"FAKE_OP_LOG": str(root / "op.log")},
             )
@@ -211,7 +219,11 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
             ]
             self.assertEqual(len(personal_reads), 6)
             self.assertTrue(all(call["token"] == "" for call in personal_reads))
-            target_calls = [call for call in calls if call not in personal_reads]
+            target_calls = [
+                call for call in calls
+                if call not in personal_reads
+                and call["argv"][:2] not in (["whoami", "--format=json"], ["vault", "get"])
+            ]
             self.assertTrue(target_calls)
             self.assertTrue(all(call["token"] in set(tokens.values()) for call in target_calls))
 
@@ -433,7 +445,84 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
                 check=True,
                 text=True,
             ).stdout.strip()
-            self.assertEqual(derived, public.strip().rsplit(" ", 1)[0])
+            self.assertEqual(derived, public.strip())
+
+    def test_redirect_signing_key_interoperates_with_openssl_dgst(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            row = {"target_canonical": {"field": "REDIRECT_RELEASE_SIGNING_PRIVATE_KEY"}}
+            private, public = tool._generate_secret(row)
+            self.assertIsNone(public)
+            key = root / "signing.pem"
+            key.write_text(private)
+            key.chmod(0o600)
+            data = root / "payload"
+            signature = root / "signature"
+            data.write_bytes(b"ken-signing-compatibility")
+            openssl = tool._tool_path("openssl")
+            subprocess.run([str(openssl), "dgst", "-sha256", "-sign", str(key), "-out", str(signature), str(data)], check=True)
+            verify_key = root / "public.pem"
+            subprocess.run([str(openssl), "pkey", "-in", str(key), "-pubout", "-out", str(verify_key)], check=True, capture_output=True)
+            verified = subprocess.run([str(openssl), "dgst", "-sha256", "-verify", str(verify_key), "-signature", str(signature), str(data)], capture_output=True, text=True)
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            self.assertIn("Verified OK", verified.stdout)
+
+    def test_generation_allowlist_rejects_profile_wildcards(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "allowlist.yaml"
+            path.write_text(yaml.safe_dump({"coordinates": ["one"], "profiles": ["opaque-token"]}))
+            with self.assertRaisesRegex(ValueError, "wildcards"):
+                tool._allowlist(path)
+
+    def test_empty_source_is_rejected_before_population(self):
+        tool = load_module()
+        with self.assertRaisesRegex(ValueError, "empty"):
+            tool._resolve_targets(
+                [entry("fixture|EMPTY|Ken CI Runtime", "Ken CI Runtime", "item", "EMPTY", "op://Source/item/field")],
+                tool.MappingSourceAdapter({"op://Source/item/field": ""}),
+            )
+
+    def test_failed_item_leaves_blocked_progress_ledger_and_invalidates_ready(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake_op = write_fake_op(root)
+            entries = [
+                entry("fixture|ONE|Ken CI Runtime", "Ken CI Runtime", "one", "ONE", "op://Source/item/one"),
+                entry("fixture|TWO|Ken CI Runtime", "Ken CI Runtime", "two", "TWO", "op://Source/item/two"),
+            ]
+            ledger = root / "ledger.yaml"
+            ledger.write_text(yaml.safe_dump({"status": "complete", "ready": True, "counts": {"selected": 0, "populated": 0, "blocked": 0}, "items": [], "blocked": []}))
+            good = {"coordinate": "x", "status": "verified", "vault_id": tool.APPROVED_TARGET_VAULT_IDS["Ken CI Runtime"], "item_id": "one", "fields": {"ONE": "CONCEALED"}}
+            with mock.patch.object(tool._MIGRATION, "populate_item", side_effect=[good, tool.MigrationError("write failed")]):
+                with self.assertRaises(ValueError):
+                    tool.populate_canonical_vaults(
+                        registry=registry_for(entries),
+                        source_adapter=tool.MappingSourceAdapter({"op://Source/item/one": "one-secret", "op://Source/item/two": "two-secret"}),
+                        writer_source=tool.StaticWriterTokenSource({"Ken CI Runtime": "writer-ci", "Ken Deploy Nonproduction": "writer-nonprod", "Ken Deploy Production": "writer-prod"}),
+                        op_bin=fake_op,
+                        ledger_path=ledger,
+                    )
+            persisted = yaml.safe_load(ledger.read_text())
+            self.assertEqual(persisted["status"], "blocked")
+            self.assertFalse(persisted["ready"])
+            self.assertEqual(persisted["counts"]["populated"], 1)
+
+    def test_registration_artifact_is_durable_value_free_and_rejects_hardlinks(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            artifact = root / "registration.json"
+            tool._write_registration_artifact(artifact, [{"coordinate": "fixture|SSH", "public_key": "ssh-ed25519 key"}], status="pending")
+            document = json.loads(artifact.read_text())
+            self.assertEqual(document["status"], "pending")
+            self.assertEqual(stat.S_IMODE(artifact.stat().st_mode), 0o600)
+            hardlink = root / "hardlink"
+            os.link(artifact, hardlink)
+            with self.assertRaisesRegex(ValueError, "unsafe"):
+                tool._write_registration_artifact(artifact, [])
 
     def test_cli_does_not_print_writer_or_source_values(self):
         # Keep one end-to-end smoke assertion around the public command boundary.

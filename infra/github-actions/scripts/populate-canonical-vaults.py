@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import importlib.util
 import json
 import os
 import secrets
+import shutil
 import stat
 import subprocess
 import sys
@@ -46,6 +46,27 @@ KNOWN_STATUSES = frozenset(
 ITEM_DISPOSITIONS = frozenset({"canonical-item", "dedicated-item"})
 GENERATION_ACTIONS = frozenset({"generate-random-additive", "generate-ssh-additive"})
 FIELD_TYPES = frozenset({"CONCEALED", "STRING"})
+APPROVED_PERSONAL_ACCOUNT_UUID = "PHLSEQ2HNVAALEWHKWGKZOAGSY"
+APPROVED_PERSONAL_VAULT_NAME = "Employee"
+APPROVED_WRITER_ITEMS = {
+    "Ken CI Runtime": {
+        "id": "j34dtkat667tgzeopkanjwbdau",
+        "title": "Service Account Auth Token: ken-ci-runtime",
+    },
+    "Ken Deploy Nonproduction": {
+        "id": "h5lsxmq25qrgk4x22wf4k57z24",
+        "title": "Service Account Auth Token: ken-deploy-nonproduction",
+    },
+    "Ken Deploy Production": {
+        "id": "5ncmp2wtb44nmvdwmlo5coirq4",
+        "title": "Service Account Auth Token: ken-deploy-production",
+    },
+}
+APPROVED_TARGET_VAULT_IDS = {
+    "Ken CI Runtime": "istjrwyeqryhpv7rytbm34pfea",
+    "Ken Deploy Nonproduction": "wmb7rpm5xvl4ez4kur3s5l3hxe",
+    "Ken Deploy Production": "q7zdmdggp2ng7hvxozhzt4uupm",
+}
 GENERATION_PROFILES = frozenset(
     {
         "opaque-token",
@@ -53,8 +74,8 @@ GENERATION_PROFILES = frozenset(
         "mcp-smoke-token",
         "oauth2-cookie-secret",
         "next-server-actions-key",
-        "ed25519-private-key",
         "ssh-ed25519",
+        "openssl-rsa-private-key",
     }
 )
 
@@ -84,11 +105,11 @@ class PersonalWriterTokenSource:
         op_bin: Path,
         personal_token: str | None = None,
         personal_account: bool = False,
-        personal_vault: str = "Employee",
-        token_items: Mapping[str, str],
+        personal_vault: str = APPROVED_PERSONAL_VAULT_NAME,
+        token_items: Mapping[str, str] | None = None,
         extra_env: Mapping[str, str] | None = None,
     ):
-        if not isinstance(personal_vault, str) or not personal_vault or personal_vault in TARGET_VAULTS:
+        if personal_vault != APPROVED_PERSONAL_VAULT_NAME:
             raise MigrationError("personal source vault must be distinct from target vaults")
         if personal_token is not None and (
             not isinstance(personal_token, str) or not personal_token or "\n" in personal_token
@@ -100,7 +121,10 @@ class PersonalWriterTokenSource:
         self.personal_token = personal_token
         self.personal_account = personal_account
         self.personal_vault = personal_vault
-        self.token_items = dict(token_items)
+        expected_items = {vault: details["id"] for vault, details in APPROVED_WRITER_ITEMS.items()}
+        if token_items is not None and dict(token_items) != expected_items:
+            raise MigrationError("personal writer source requires exactly three reviewed item IDs")
+        self.token_items = expected_items
         self.extra_env = extra_env
         if set(self.token_items) != TARGET_VAULTS:
             raise MigrationError("personal writer source requires exactly three target vault items")
@@ -110,6 +134,19 @@ class PersonalWriterTokenSource:
 
     def load(self) -> dict[str, str]:
         tokens: dict[str, str] = {}
+        if self.personal_account:
+            identity = _run_personal_session_json(
+                op_bin=self.op_bin,
+                argv=["whoami", "--format=json"],
+                extra_env=self.extra_env,
+            )
+            _validate_personal_identity(identity)
+            vault = _run_personal_session_json(
+                op_bin=self.op_bin,
+                argv=["vault", "get", APPROVED_PERSONAL_VAULT_NAME, "--format=json"],
+                extra_env=self.extra_env,
+            )
+            _validate_personal_vault(vault)
         for vault in sorted(TARGET_VAULTS):
             item_id = self.token_items[vault]
             argv = ["item", "get", item_id, "--vault", self.personal_vault, "--format=json"]
@@ -124,8 +161,7 @@ class PersonalWriterTokenSource:
                     token=self.personal_token,
                     extra_env=self.extra_env,
                 )
-            if isinstance(response, Mapping) and response.get("id") not in {None, item_id}:
-                raise MigrationError("personal token item ID mismatch")
+            _validate_personal_token_item(response, vault, item_id)
             token = _extract_personal_token(response)
             if token == self.personal_token:
                 raise MigrationError("personal source and writer token must be distinct")
@@ -182,6 +218,34 @@ def _extract_personal_token(response: Any) -> str:
     return candidates[0]
 
 
+def _validate_personal_identity(response: Any) -> None:
+    if not isinstance(response, Mapping) or response.get("id") != APPROVED_PERSONAL_ACCOUNT_UUID:
+        raise MigrationError("personal account identity is not the reviewed account")
+    if str(response.get("type", "")).upper() not in {"USER", "PERSON"}:
+        raise MigrationError("personal account identity is invalid")
+
+
+def _validate_personal_vault(response: Any) -> None:
+    if not isinstance(response, Mapping) or response.get("name") != APPROVED_PERSONAL_VAULT_NAME:
+        raise MigrationError("personal source vault is not the reviewed vault")
+    vault_id = response.get("id")
+    if not isinstance(vault_id, str) or not vault_id:
+        raise MigrationError("personal source vault metadata is invalid")
+
+
+def _validate_personal_token_item(response: Any, vault: str, item_id: str) -> None:
+    expected = APPROVED_WRITER_ITEMS[vault]
+    if not isinstance(response, Mapping) or response.get("id") != item_id:
+        raise MigrationError("personal token item ID mismatch")
+    if response.get("title") != expected["title"]:
+        raise MigrationError("personal token item title mismatch")
+    if response.get("vault", {}).get("name") not in {None, APPROVED_PERSONAL_VAULT_NAME}:
+        raise MigrationError("personal token item vault mismatch")
+    fields = response.get("fields")
+    if not isinstance(fields, list):
+        raise MigrationError("personal token item response is invalid")
+
+
 def _validate_writer_tokens(tokens: Mapping[str, str]) -> None:
     if set(tokens) != TARGET_VAULTS:
         raise MigrationError("writer token map must cover exactly three target vaults")
@@ -213,6 +277,8 @@ def _validate_writer_scopes(
         if not isinstance(identity, Mapping) or not isinstance(vaults, list):
             raise MigrationError("writer scope response is invalid")
         _MIGRATION.validate_service_account_scope(identity, vaults, vault)
+        if vaults[0].get("id") != APPROVED_TARGET_VAULT_IDS[vault]:
+            raise MigrationError("writer target vault ID is not the reviewed vault")
 
 
 def _registry_document(*, registry_path: Path | None, registry: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -345,7 +411,7 @@ def _validate_ledger_shape(document: Mapping[str, Any]) -> None:
     """Keep the persisted ledger to the deliberately small metadata schema."""
     if set(document) != {"status", "ready", "counts", "items", "blocked"}:
         raise MigrationError("ledger schema mismatch")
-    if document["status"] not in {"complete", "blocked"} or not isinstance(document["ready"], bool):
+    if document["status"] not in {"complete", "blocked", "in-progress"} or not isinstance(document["ready"], bool):
         raise MigrationError("ledger status is invalid")
     counts = document["counts"]
     if not isinstance(counts, Mapping) or set(counts) != {"selected", "populated", "blocked"}:
@@ -354,8 +420,8 @@ def _validate_ledger_shape(document: Mapping[str, Any]) -> None:
         raise MigrationError("ledger counts are invalid")
     if document["status"] == "complete" and document["ready"] is not True:
         raise MigrationError("complete ledger must be ready")
-    if document["status"] == "blocked" and document["ready"] is not False:
-        raise MigrationError("blocked ledger cannot claim readiness")
+    if document["status"] in {"blocked", "in-progress"} and document["ready"] is not False:
+        raise MigrationError("non-complete ledger cannot claim readiness")
     if not isinstance(document["items"], list) or not isinstance(document["blocked"], list):
         raise MigrationError("ledger collections are invalid")
     for item in document["items"]:
@@ -390,7 +456,9 @@ def write_value_free_ledger(path: Path, document: Mapping[str, Any]) -> bool:
     _validate_ledger_shape(document)
     _validate_value_free_document(document)
     parent = path.parent
-    if path.is_symlink() or not parent.is_dir() or parent.is_symlink():
+    # System temporary paths such as macOS /tmp may themselves be symlinks;
+    # reject a symlink at the ledger file, while allowing the trusted parent.
+    if path.is_symlink() or not parent.is_dir():
         raise MigrationError("ledger path is unsafe")
     payload = yaml.safe_dump(dict(document), sort_keys=False).encode("utf-8")
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=parent)
@@ -415,21 +483,66 @@ def write_value_free_ledger(path: Path, document: Mapping[str, Any]) -> bool:
     return bool(document.get("ready"))
 
 
-def _write_registration_artifact(path: Path, entries: Sequence[Mapping[str, str]]) -> None:
+def _ledger_document(
+    *, status: str, selected: int, items: Sequence[Mapping[str, Any]], blocked: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "ready": status == "complete",
+        "counts": {"selected": selected, "populated": len(items), "blocked": len(blocked)},
+        "items": list(items),
+        "blocked": list(blocked),
+    }
+
+
+def _write_failure_ledger(
+    path: Path, *, selected: int, items: Sequence[Mapping[str, Any]], blocked: Sequence[Mapping[str, Any]]
+) -> None:
+    try:
+        write_value_free_ledger(
+            path,
+            _ledger_document(status="blocked", selected=selected, items=items, blocked=blocked),
+        )
+    except (MigrationError, OSError):
+        # Preserve the original failure; the caller must not mistake this for readiness.
+        pass
+
+
+def _write_registration_artifact(
+    path: Path, entries: Sequence[Mapping[str, str]], *, status: str = "ready"
+) -> None:
     if path.is_symlink() or path.parent.is_symlink() or not path.parent.is_dir():
         raise MigrationError("registration artifact path is unsafe")
-    document = {"schema_version": 1, "entries": list(entries)}
+    if status not in {"pending", "ready"}:
+        raise MigrationError("registration artifact status is invalid")
+    if path.exists():
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise MigrationError("registration artifact target is unsafe")
+    document = {"schema_version": 1, "status": status, "entries": list(entries)}
     _validate_value_free_document(document)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(document, stream, sort_keys=True, separators=(",", ":"))
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
+        payload = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        offset = 0
+        while offset < len(payload):
+            written = os.write(fd, payload[offset:])
+            if written <= 0:
+                raise MigrationError("registration artifact short write")
+            offset += written
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
         os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     except Exception:
+        if fd >= 0:
+            os.close(fd)
         try:
             os.unlink(temporary)
         except FileNotFoundError:
@@ -449,36 +562,52 @@ def populate_canonical_vaults(
     extra_env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     document = _registry_document(registry_path=registry_path, registry=registry)
-    selected, blocked = _selected_entries(document, known_only=known_only)
-    writer_tokens = writer_source.load()
-    _validate_writer_tokens(writer_tokens)
-    _validate_writer_scopes(op_bin=op_bin, writer_tokens=writer_tokens, extra_env=extra_env)
-    if _source_token_set(source_adapter) & set(writer_tokens.values()):
-        raise MigrationError("source and target writer tokens must be distinct")
-    grouped = _resolve_targets(selected, source_adapter) if selected else {}
     items: list[dict[str, Any]] = []
-    for (vault, item), fields in sorted(grouped.items()):
-        concealed = {field["label"]: field["value"] for field in fields if field["type"] == "CONCEALED"}
-        text = {field["label"]: field["value"] for field in fields if field["type"] == "STRING"}
-        status = _MIGRATION.populate_item(
-            op_bin=op_bin,
-            target_token=writer_tokens[vault],
-            expected_vault=vault,
-            coordinate=f"{vault}|{item}",
-            title=item,
-            concealed_fields=concealed,
-            text_fields=text,
-            extra_env=extra_env,
+    selected: list[Mapping[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    # Invalidate any prior ready ledger before source resolution or a target write.
+    write_value_free_ledger(ledger_path, _ledger_document(status="in-progress", selected=0, items=[], blocked=[]))
+    try:
+        selected, blocked = _selected_entries(document, known_only=known_only)
+        write_value_free_ledger(
+            ledger_path,
+            _ledger_document(status="in-progress", selected=len(selected), items=[], blocked=blocked),
         )
-        items.append(_report_item(vault, item, status))
-    ready = not blocked
-    result = {
-        "status": "complete" if ready else "blocked",
-        "ready": ready,
-        "counts": {"selected": len(selected), "populated": len(items), "blocked": len(blocked)},
-        "items": items,
-        "blocked": blocked,
-    }
+        writer_tokens = writer_source.load()
+        _validate_writer_tokens(writer_tokens)
+        _validate_writer_scopes(op_bin=op_bin, writer_tokens=writer_tokens, extra_env=extra_env)
+        if _source_token_set(source_adapter) & set(writer_tokens.values()):
+            raise MigrationError("source and target writer tokens must be distinct")
+        grouped = _resolve_targets(selected, source_adapter) if selected else {}
+    except MigrationError:
+        failure = blocked or [{"coordinate": "registry|selection", "status": "blocked", "reason": "population preflight failed"}]
+        _write_failure_ledger(ledger_path, selected=len(selected), items=items, blocked=failure)
+        raise
+    try:
+        for (vault, item), fields in sorted(grouped.items()):
+            concealed = {field["label"]: field["value"] for field in fields if field["type"] == "CONCEALED"}
+            text = {field["label"]: field["value"] for field in fields if field["type"] == "STRING"}
+            status = _MIGRATION.populate_item(
+                op_bin=op_bin,
+                target_token=writer_tokens[vault],
+                expected_vault=vault,
+                coordinate=f"{vault}|{item}",
+                title=item,
+                concealed_fields=concealed,
+                text_fields=text,
+                extra_env=extra_env,
+            )
+            items.append(_report_item(vault, item, status))
+            write_value_free_ledger(
+                ledger_path,
+                _ledger_document(status="in-progress", selected=len(selected), items=items, blocked=blocked),
+            )
+    except (MigrationError, OSError):
+        _write_failure_ledger(ledger_path, selected=len(selected), items=items, blocked=blocked or [{"coordinate": "registry|write", "status": "blocked", "reason": "item population failed"}])
+        raise
+    result = _ledger_document(
+        status="complete" if not blocked else "blocked", selected=len(selected), items=items, blocked=blocked
+    )
     write_value_free_ledger(ledger_path, result)
     return result
 
@@ -493,19 +622,22 @@ def _load_yaml(path: Path) -> Any:
         raise MigrationError("planning file is invalid") from exc
 
 
-def _allowlist(path: Path) -> tuple[set[str], set[str]]:
+def _allowlist(path: Path) -> set[str]:
     document = _load_yaml(path)
     if isinstance(document, list):
-        return {str(value) for value in document}, set()
-    if not isinstance(document, Mapping):
+        coordinates = document
+    elif isinstance(document, Mapping):
+        coordinates = document.get("coordinates", document.get("approved_coordinates", []))
+        profiles = document.get("profiles", document.get("approved_profiles", []))
+        if profiles:
+            raise MigrationError("generation profile wildcards are not allowed")
+    else:
         raise MigrationError("generation allowlist is invalid")
-    coordinates = document.get("coordinates", document.get("approved_coordinates", []))
-    profiles = document.get("profiles", document.get("approved_profiles", []))
-    if not isinstance(coordinates, list) or not isinstance(profiles, list):
+    if not isinstance(coordinates, list):
         raise MigrationError("generation allowlist lists are invalid")
-    if any(not isinstance(value, str) or not value for value in [*coordinates, *profiles]):
+    if any(not isinstance(value, str) or not value for value in coordinates):
         raise MigrationError("generation allowlist entry is invalid")
-    return set(coordinates), set(profiles)
+    return set(coordinates)
 
 
 def _source_adapter_from_cli(args: argparse.Namespace) -> Any:
@@ -569,7 +701,7 @@ def _generation_profile(row: Mapping[str, Any]) -> str:
     if field == "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY":
         return "next-server-actions-key"
     if field == "REDIRECT_RELEASE_SIGNING_PRIVATE_KEY":
-        return "ed25519-private-key"
+        return "openssl-rsa-private-key"
     if field == "KEN_AGENTS_INTERNAL_KEY":
         return "ken-agents-internal-key"
     if field == "MCP_SMOKE_TOKEN":
@@ -579,8 +711,10 @@ def _generation_profile(row: Mapping[str, Any]) -> str:
 
 def _generate_secret(row: Mapping[str, Any]) -> tuple[str, str | None]:
     profile = _generation_profile(row)
-    if profile in {"ssh-ed25519", "ed25519-private-key"}:
+    if profile == "ssh-ed25519":
         return _ed25519_keypair()
+    if profile == "openssl-rsa-private-key":
+        return _openssl_private_key(), None
     if profile == "oauth2-cookie-secret":
         return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("="), None
     if profile == "next-server-actions-key":
@@ -592,58 +726,95 @@ def _generate_secret(row: Mapping[str, Any]) -> tuple[str, str | None]:
     raise MigrationError("generation profile is not approved")
 
 
+def _tool_path(name: str) -> Path:
+    candidates = [Path(f"/usr/bin/{name}"), Path(f"/opt/homebrew/bin/{name}")]
+    resolved = shutil.which(name)
+    if resolved:
+        candidates.append(Path(resolved))
+    for candidate in candidates:
+        if candidate.is_file() and not candidate.is_symlink() and os.access(candidate, os.X_OK):
+            return candidate
+    raise MigrationError(f"required crypto tool is unavailable: {name}")
+
+
 def _ed25519_keypair() -> tuple[str, str]:
-    # RFC 8032 scalar multiplication, keeping all key material in memory.
-    q = 2**255 - 19
-    d = (-121665 * pow(121666, q - 2, q)) % q
-    seed = secrets.token_bytes(32)
-    digest = hashlib.sha512(seed).digest()
-    scalar = int.from_bytes(digest[:32], "little")
-    scalar &= (1 << 254) - 8
-    scalar |= 1 << 254
-    by = 4 * pow(5, q - 2, q) % q
-    bx = pow((by * by - 1) * pow(d * by * by + 1, q - 2, q), (q + 3) // 8, q)
-    if (bx * bx - (by * by - 1) * pow(d * by * by + 1, q - 2, q)) % q:
-        bx = (bx * pow(2, (q - 1) // 4, q)) % q
-    if bx & 1:
-        bx = q - bx
-    point = (0, 1, 1, 0)
-    base = (bx, by, 1, (bx * by) % q)
-    def add(p, r):
-        x1, y1, z1, t1 = p
-        x2, y2, z2, t2 = r
-        a = (y1 - x1) * (y2 - x2) % q
-        b = (y1 + x1) * (y2 + x2) % q
-        c = 2 * d * t1 * t2 % q
-        dd = 2 * z1 * z2 % q
-        e, f, g, h = (b - a) % q, (dd - c) % q, (dd + c) % q, (b + a) % q
-        return (e * f % q, g * h % q, f * g % q, e * h % q)
-    n = scalar
-    while n:
-        if n & 1:
-            point = add(point, base)
-        base = add(base, base)
-        n >>= 1
-    x, y, z, _ = point
-    zi = pow(z, q - 2, q)
-    x, y = x * zi % q, y * zi % q
-    public = y.to_bytes(32, "little")
-    public = bytearray(public)
-    public[31] |= (x & 1) << 7
-    public_bytes = bytes(public)
-    def blob(value: bytes) -> bytes:
-        return len(value).to_bytes(4, "big") + value
-    public_blob = blob(b"ssh-ed25519") + blob(public_bytes)
-    check = secrets.randbits(32).to_bytes(4, "big")
-    private_block = check + check + blob(b"ssh-ed25519") + blob(public_bytes) + blob(seed + public_bytes) + blob(b"")
-    pad = (8 - len(private_block) % 8) % 8 or 8
-    private_block += bytes(range(1, pad + 1))
-    raw = b"openssh-key-v1\0" + blob(b"none") + blob(b"none") + blob(b"") + (1).to_bytes(4, "big") + blob(public_blob) + blob(private_block)
-    private = "-----BEGIN " + "OPENSSH PRIVATE KEY-----\n" + "\n".join(
-        base64.b64encode(raw).decode("ascii")[offset : offset + 70] for offset in range(0, len(base64.b64encode(raw)), 70)
-    ) + "\n-----END OPENSSH PRIVATE KEY-----\n"
-    public_text = "ssh-ed25519 " + base64.b64encode(public_blob).decode("ascii") + " ken-generated\n"
-    return private, public_text
+    """Generate an OpenSSH key using the maintained system implementation."""
+    ssh_keygen = _tool_path("ssh-keygen")
+    with tempfile.TemporaryDirectory(prefix="ken-key-", dir=os.environ.get("TMPDIR", "/tmp")) as temp:
+        root = Path(temp)
+        os.chmod(root, 0o700)
+        private_path = root / "id_ed25519"
+        completed = subprocess.run(
+            [str(ssh_keygen), "-q", "-t", "ed25519", "-N", "", "-C", "ken-generated", "-f", str(private_path)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=30,
+        )
+        if completed.returncode != 0:
+            raise MigrationError("SSH key generation failed")
+        try:
+            private = private_path.read_text(encoding="utf-8")
+            public = private_path.with_name("id_ed25519.pub").read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise MigrationError("SSH key generation output is invalid") from exc
+        if not private.startswith("-----BEGIN OPENSSH PRIVATE KEY-----") or not public.startswith("ssh-ed25519 "):
+            raise MigrationError("SSH key generation output is invalid")
+        public_parts = public.strip().split()
+        if len(public_parts) < 2:
+            raise MigrationError("SSH public-key output is invalid")
+        return private, public
+
+
+def _openssl_private_key() -> str:
+    """Generate a PKCS#8 PEM key for the redirector's openssl dgst consumer."""
+    openssl = _tool_path("openssl")
+    completed = subprocess.run(
+        [str(openssl), "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:3072"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        timeout=60,
+    )
+    if completed.returncode != 0:
+        raise MigrationError("OpenSSL private-key generation failed")
+    try:
+        value = completed.stdout.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise MigrationError("OpenSSL private-key output is invalid") from exc
+    if not value.startswith("-----BEGIN PRIVATE KEY-----"):
+        raise MigrationError("OpenSSL private-key output is invalid")
+    return value
+
+
+def _build_generation_groups(
+    selected: Sequence[Mapping[str, Any]],
+) -> tuple[dict[tuple[str, str], dict[str, tuple[str, str, str, str | None]]], dict[tuple[str, str], list[dict[str, str]]]]:
+    grouped: dict[tuple[str, str], dict[str, tuple[str, str, str, str | None]]] = {}
+    registrations_by_item: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for row in selected:
+        target = row.get("target_canonical")
+        if not isinstance(target, Mapping):
+            raise MigrationError("generation target is invalid")
+        vault, item, field = target.get("vault"), target.get("item"), target.get("field")
+        if vault not in TARGET_VAULTS or not all(isinstance(value, str) and value for value in (item, field)):
+            raise MigrationError("generation target is invalid")
+        action = row["action"]
+        profile = _generation_profile(row)
+        target_fields = grouped.setdefault((vault, item), {})
+        prior = target_fields.get(field)
+        if prior is None:
+            value, public = _generate_secret(row)
+            target_fields[field] = (action, profile, value, public)
+            if public is not None:
+                registrations_by_item.setdefault((vault, item), []).append(
+                    {"coordinate": row["coordinate"], "public_key": public.rstrip("\n")}
+                )
+        elif prior[0] != action or prior[1] != profile:
+            raise MigrationError("generation target has conflicting actions")
+    return grouped, registrations_by_item
 
 
 def generate_canonical_vaults(
@@ -660,7 +831,10 @@ def generate_canonical_vaults(
     rows = plan.get("rows") if isinstance(plan, Mapping) else None
     if not isinstance(rows, list):
         raise MigrationError("generation plan rows are invalid")
-    allowed_coordinates, allowed_profiles = _allowlist(allowlist_path)
+    write_value_free_ledger(
+        ledger_path, _ledger_document(status="in-progress", selected=0, items=[], blocked=[])
+    )
+    allowed_coordinates = _allowlist(allowlist_path)
     generation_rows = [
         row for row in rows if isinstance(row, Mapping) and row.get("action") in GENERATION_ACTIONS
     ]
@@ -669,11 +843,8 @@ def generate_canonical_vaults(
         for row in generation_rows
         if isinstance(row.get("coordinate"), str) and row["coordinate"]
     }
-    approved_profiles = set().union(*(_row_profiles(row) for row in generation_rows)) if generation_rows else set()
     if not allowed_coordinates <= approved_coordinates:
         raise MigrationError("generation allowlist contains an unapproved coordinate")
-    if not allowed_profiles <= approved_profiles:
-        raise MigrationError("generation allowlist contains an unapproved profile")
     selected: list[Mapping[str, Any]] = []
     blocked: list[dict[str, Any]] = []
     for row in rows:
@@ -682,68 +853,73 @@ def generate_canonical_vaults(
         coordinate = row.get("coordinate")
         if not isinstance(coordinate, str) or not coordinate:
             raise MigrationError("generation coordinate is invalid")
-        if coordinate in allowed_coordinates or _row_profiles(row) & allowed_profiles:
+        if coordinate in allowed_coordinates:
             selected.append(row)
         else:
             blocked.append({"coordinate": coordinate, "status": "not-allowlisted"})
-    writer_tokens = writer_source.load()
-    _validate_writer_tokens(writer_tokens)
-    _validate_writer_scopes(op_bin=op_bin, writer_tokens=writer_tokens, extra_env=extra_env)
-    grouped: dict[tuple[str, str], dict[str, tuple[str, str, str, str | None]]] = {}
-    registrations: list[dict[str, str]] = []
-    for row in selected:
-        target = row.get("target_canonical")
-        if not isinstance(target, Mapping):
-            raise MigrationError("generation target is invalid")
-        vault, item, field = target.get("vault"), target.get("item"), target.get("field")
-        if vault not in TARGET_VAULTS or not all(isinstance(value, str) and value for value in (item, field)):
-            raise MigrationError("generation target is invalid")
-        action = row["action"]
-        profile = _generation_profile(row)
-        target_fields = grouped.setdefault((vault, item), {})
-        prior = target_fields.get(field)
-        if prior is None:
-            value, public = _generate_secret(row)
-            target_fields[field] = (action, profile, value, public)
-            if public is not None:
-                registrations.append({"coordinate": row["coordinate"], "public_key": public.rstrip("\n")})
-        elif prior[0] != action or prior[1] != profile:
-            raise MigrationError("generation target has conflicting actions")
-    if registrations:
+    try:
+        writer_tokens = writer_source.load()
+        _validate_writer_tokens(writer_tokens)
+        _validate_writer_scopes(op_bin=op_bin, writer_tokens=writer_tokens, extra_env=extra_env)
+    except MigrationError:
+        _write_failure_ledger(ledger_path, selected=len(selected), items=[], blocked=blocked or [{"coordinate": "generation|preflight", "status": "blocked", "reason": "generation preflight failed"}])
+        raise
+    try:
+        grouped, registrations_by_item = _build_generation_groups(selected)
+    except MigrationError:
+        _write_failure_ledger(ledger_path, selected=len(selected), items=[], blocked=blocked or [{"coordinate": "generation|plan", "status": "blocked", "reason": "generation plan invalid"}])
+        raise
+    if registrations_by_item:
         if registration_artifact is None:
             raise MigrationError("SSH generation requires a protected registration artifact")
-        _write_registration_artifact(registration_artifact, registrations)
     items: list[dict[str, Any]] = []
-    for (vault, item), fields in sorted(grouped.items()):
-        status = _MIGRATION.populate_item(
-            op_bin=op_bin,
-            target_token=writer_tokens[vault],
-            expected_vault=vault,
-            coordinate=f"{vault}|{item}",
-            title=item,
-            concealed_fields={field: value[2] for field, value in fields.items()},
-            text_fields={},
-            extra_env=extra_env,
-        )
-        items.append(_report_item(vault, item, status))
-    result = {
-        "status": "complete" if not blocked else "blocked",
-        "ready": not blocked,
-        "counts": {"selected": len(selected), "populated": len(items), "blocked": len(blocked)},
-        "items": items,
-        "blocked": blocked,
-    }
+    published_registrations: list[dict[str, str]] = []
+    try:
+        for (vault, item), fields in sorted(grouped.items()):
+            status = _MIGRATION.populate_item(
+                op_bin=op_bin,
+                target_token=writer_tokens[vault],
+                expected_vault=vault,
+                coordinate=f"{vault}|{item}",
+                title=item,
+                concealed_fields={field: value[2] for field, value in fields.items()},
+                text_fields={},
+                extra_env=extra_env,
+            )
+            items.append(_report_item(vault, item, status))
+            published_registrations.extend(registrations_by_item.get((vault, item), []))
+            if published_registrations:
+                _write_registration_artifact(registration_artifact, published_registrations, status="pending")
+            write_value_free_ledger(
+                ledger_path,
+                _ledger_document(status="in-progress", selected=len(selected), items=items, blocked=blocked),
+            )
+    except (MigrationError, OSError):
+        _write_failure_ledger(ledger_path, selected=len(selected), items=items, blocked=blocked or [{"coordinate": "generation|write", "status": "blocked", "reason": "generated item population failed"}])
+        raise
+    if published_registrations:
+        _write_registration_artifact(registration_artifact, published_registrations, status="ready")
+    result = _ledger_document(
+        status="complete" if not blocked else "blocked", selected=len(selected), items=items, blocked=blocked
+    )
     write_value_free_ledger(ledger_path, result)
     return result
 
 
 def _read_protected_token(path: Path) -> str:
     info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or path.is_symlink() or stat.S_IMODE(info.st_mode) != 0o600:
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or path.is_symlink()
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) != 0o600
+    ):
         raise MigrationError("token file must be a regular mode-0600 file")
     token = path.read_text(encoding="utf-8")
     if token.endswith("\n"):
         token = token[:-1]
+    if not token:
+        raise MigrationError("token file is empty")
     return token
 
 

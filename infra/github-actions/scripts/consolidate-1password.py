@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -581,6 +582,98 @@ def build_item_template(
     }
 
 
+def _structure_without_values(value: Any, *, in_field: bool = False) -> Any:
+    """Return a value-free structural projection for preservation checks."""
+    if isinstance(value, Mapping):
+        result = {}
+        for key, child in value.items():
+            lowered = str(key).casefold()
+            if lowered in {"value", "plaintext", "notesplain", "secret", "password", "token"}:
+                result[str(key)] = "<redacted>"
+            else:
+                result[str(key)] = _structure_without_values(child, in_field=in_field)
+        return result
+    if isinstance(value, list):
+        return [_structure_without_values(child, in_field=in_field) for child in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    raise MigrationError("item contains an unsupported JSON structure")
+
+
+def _validate_existing_item_for_edit(item: Mapping[str, Any], expected_title: str) -> None:
+    """Reject passkeys and malformed item shapes before any edit is attempted."""
+    if item.get("title") != expected_title:
+        raise MigrationError("existing item title mismatch")
+    def contains_passkey(value: Any) -> bool:
+        if isinstance(value, Mapping):
+            if any(str(key).casefold() == "passkey" for key in value):
+                return True
+            if str(value.get("type", "")).casefold() == "passkey" or str(value.get("purpose", "")).casefold() == "passkey":
+                return True
+            return any(contains_passkey(child) for child in value.values())
+        if isinstance(value, list):
+            return any(contains_passkey(child) for child in value)
+        return False
+    if contains_passkey(item):
+        raise MigrationError("existing passkey item is unsupported")
+    fields = item.get("fields", [])
+    sections = item.get("sections", [])
+    if not isinstance(fields, list) or not isinstance(sections, list):
+        raise MigrationError("existing item structure is unsupported")
+    for collection in (fields, sections):
+        for entry in collection:
+            if not isinstance(entry, Mapping):
+                raise MigrationError("existing item structure is unsupported")
+    if item.get("category") not in {None, "API_CREDENTIAL"}:
+        raise MigrationError("existing item category is unsupported")
+
+
+def merge_item_template(
+    *,
+    existing: Mapping[str, Any],
+    title: str,
+    fields: Mapping[str, str],
+    text_fields: Mapping[str, str] | None = None,
+) -> tuple[dict[str, Any], Any]:
+    """Replace only canonical fields while preserving complete item structure."""
+    _validate_existing_item_for_edit(existing, title)
+    canonical = build_item_template(title=title, fields=fields, text_fields=text_fields)
+    canonical_fields = {field["label"]: field for field in canonical["fields"]}
+    merged = copy.deepcopy(dict(existing))
+    merged["title"] = title
+    merged["category"] = merged.get("category") or "API_CREDENTIAL"
+    observed: set[str] = set()
+    output_fields = []
+    for field in merged.get("fields", []):
+        label = field.get("label")
+        if label in canonical_fields:
+            if label in observed:
+                raise MigrationError("duplicate canonical field in existing item")
+            output_fields.append(canonical_fields[label])
+            observed.add(label)
+        else:
+            output_fields.append(field)
+    for label, field in canonical_fields.items():
+        if label not in observed:
+            output_fields.append(field)
+    merged["fields"] = output_fields
+    preserved = _preserved_item_structure(existing, set(canonical_fields))
+    return merged, preserved
+
+
+def _preserved_item_structure(item: Mapping[str, Any], canonical_labels: set[str]) -> Any:
+    volatile = {"id", "uuid", "vault", "createdat", "updatedat", "revision"}
+    projection = {
+        str(key): value
+        for key, value in item.items()
+        if str(key).casefold() not in volatile
+    }
+    projection["fields"] = [
+        field for field in item.get("fields", []) if field.get("label") not in canonical_labels
+    ]
+    return _structure_without_values(projection)
+
+
 def _minimal_env(token: str, extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     if not isinstance(token, str) or not token or "\n" in token or len(token) > 4096:
         raise MigrationError("service-account token is invalid")
@@ -720,15 +813,25 @@ def populate_item(
     if len(matches) > 1:
         raise MigrationError("duplicate item title")
 
-    template = build_item_template(
-        title=title,
-        fields=concealed_fields,
-        text_fields=text_fields,
-    )
+    preserved_structure = None
     if matches:
         item_id = matches[0].get("id")
         if not isinstance(item_id, str) or not item_id:
             raise MigrationError("existing item ID is invalid")
+        existing = run_op_json(
+            op_bin=op_bin,
+            argv=["item", "get", item_id, "--vault", expected_vault, "--format=json"],
+            token=writer_token,
+            extra_env=extra_env,
+        )
+        if not isinstance(existing, Mapping):
+            raise MigrationError("existing item response is invalid")
+        template, preserved_structure = merge_item_template(
+            existing=existing,
+            title=title,
+            fields=concealed_fields,
+            text_fields=text_fields,
+        )
         written = run_op_json(
             op_bin=op_bin,
             argv=["item", "edit", item_id, "--vault", expected_vault],
@@ -737,6 +840,11 @@ def populate_item(
             extra_env=extra_env,
         )
     else:
+        template = build_item_template(
+            title=title,
+            fields=concealed_fields,
+            text_fields=text_fields,
+        )
         written = run_op_json(
             op_bin=op_bin,
             argv=["item", "create", "--vault", expected_vault, "-"],
@@ -763,6 +871,7 @@ def populate_item(
         expected_vault_id=vault_id,
         expected_title=title,
         expected_fields=expected_fields,
+        preserved_structure=preserved_structure,
     )
 
 
@@ -773,6 +882,7 @@ def verify_item_shape(
     expected_vault_id: str,
     expected_title: str,
     expected_fields: Mapping[str, str],
+    preserved_structure: Any = None,
 ) -> dict[str, Any]:
     if item.get("title") != expected_title or item.get("vault", {}).get("id") != expected_vault_id:
         raise MigrationError("item authority mismatch")
@@ -780,15 +890,23 @@ def verify_item_shape(
     if not isinstance(item_id, str) or not item_id:
         raise MigrationError("item ID is invalid")
     observed: dict[str, str] = {}
+    if not isinstance(item.get("fields", []), list) or not isinstance(item.get("sections", []), list):
+        raise MigrationError("item structure is invalid")
     for field in item.get("fields", []):
+        if not isinstance(field, Mapping):
+            raise MigrationError("item field structure is invalid")
         label = field.get("label")
         field_type = field.get("type")
         if label in expected_fields:
             if label in observed:
                 raise MigrationError("duplicate field")
             observed[label] = field_type
-        elif field.get("purpose") not in {"NOTES"}:
+        elif preserved_structure is None and field.get("purpose") not in {"NOTES"}:
             raise MigrationError(f"unexpected field: {label}")
+    if preserved_structure is not None:
+        observed_structure = _preserved_item_structure(item, set(expected_fields))
+        if observed_structure != preserved_structure:
+            raise MigrationError("preserved item structure changed")
     if observed != dict(expected_fields):
         raise MigrationError("item field shape mismatch")
     status = {
@@ -922,6 +1040,8 @@ def _resolve_source(adapter: Any, authority: str) -> str:
         raise MigrationError("source authority could not be read") from exc
     if not isinstance(value, str):
         raise MigrationError("source authority returned a non-string value")
+    if not value:
+        raise MigrationError("source authority returned an empty value")
     return value
 
 
