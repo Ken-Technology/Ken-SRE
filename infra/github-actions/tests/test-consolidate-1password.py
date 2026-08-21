@@ -7,9 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "consolidate-1password.py"
+CANONICAL = ROOT / "inventory" / "canonical-credentials.yaml"
 
 
 def load_module():
@@ -300,6 +303,249 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
             combined = completed.stdout + completed.stderr
             self.assertNotIn("service-account-token", combined)
             self.assertNotIn("provider-secret", combined)
+
+    def _batch_registry(self, *, entries=None):
+        item = {"id": "shared-production", "vault": "Ken Deploy Production", "aliases": []}
+        base = {
+            "schema_version": 1,
+            "organization": "Ken-Technology",
+            "allowed_vaults": [
+                "Ken CI Runtime",
+                "Ken Deploy Nonproduction",
+                "Ken Deploy Production",
+            ],
+            "canonical_items": [item],
+            "entries": entries
+            or [
+                {
+                    "coordinate": "repo|FIRST_TOKEN|Ken Deploy Production",
+                    "canonical_id": "shared-production",
+                    "aliases": [],
+                    "disposition": "canonical-item",
+                    "verification_status": "verified-readable",
+                    "source_authority": "op://Development/source/first",
+                    "canonical_vault": "Ken Deploy Production",
+                    "canonical_item": "shared-production",
+                    "canonical_field": "FIRST_TOKEN",
+                    "environment": "production",
+                    "consumer_repositories": ["repo"],
+                },
+                {
+                    "coordinate": "repo|SECOND_TOKEN|Ken Deploy Production",
+                    "canonical_id": "shared-production",
+                    "aliases": [],
+                    "disposition": "canonical-item",
+                    "verification_status": "existing-direct-reference",
+                    "source_authority": "op://Development/source/second",
+                    "canonical_vault": "Ken Deploy Production",
+                    "canonical_item": "shared-production",
+                    "canonical_field": "SECOND_TOKEN",
+                    "environment": "production",
+                    "consumer_repositories": ["repo"],
+                },
+            ],
+        }
+        return base
+
+    def _write_registry(self, root, document):
+        path = root / "canonical.yaml"
+        path.write_text(yaml.safe_dump(document, sort_keys=False))
+        return path
+
+    def test_batch_plan_loads_strict_registry_and_groups_exact_target_fields(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            path = self._write_registry(Path(temp), self._batch_registry())
+            plan = tool.plan_batch(
+                registry_path=path,
+                source_adapter=tool.MappingSourceAdapter(
+                    {
+                        "op://Development/source/first": "first-secret",
+                        "op://Development/source/second": "second-secret",
+                    }
+                ),
+            )
+        self.assertEqual(plan["status"], "planned")
+        self.assertEqual(plan["item_count"], 1)
+        self.assertEqual(plan["field_count"], 2)
+        self.assertEqual(plan["items"][0]["vault"], "Ken Deploy Production")
+        self.assertEqual(plan["items"][0]["item"], "shared-production")
+        self.assertEqual(
+            [field["label"] for field in plan["items"][0]["fields"]],
+            ["FIRST_TOKEN", "SECOND_TOKEN"],
+        )
+        serialized = json.dumps(plan)
+        self.assertNotIn("first-secret", serialized)
+        self.assertNotIn("second-secret", serialized)
+
+    def test_batch_plan_rejects_duplicate_target_field_with_different_sources(self):
+        tool = load_module()
+        entries = self._batch_registry()["entries"]
+        entries[1]["canonical_field"] = entries[0]["canonical_field"]
+        with self.assertRaisesRegex(ValueError, "conflicting values"):
+            tool.plan_batch(
+                registry=self._batch_registry(entries=entries),
+                source_adapter=tool.MappingSourceAdapter(
+                    {
+                        entries[0]["source_authority"]: "one",
+                        entries[1]["source_authority"]: "two",
+                    }
+                ),
+            )
+
+        with self.assertRaisesRegex(ValueError, "duplicate target field"):
+            tool.plan_batch(
+                registry=self._batch_registry(entries=entries),
+                source_adapter=tool.MappingSourceAdapter(
+                    {
+                        entries[0]["source_authority"]: "same-secret",
+                        entries[1]["source_authority"]: "same-secret",
+                    }
+                ),
+            )
+
+    def test_batch_plan_rejects_unresolved_and_unprotected_non_op_authorities(self):
+        tool = load_module()
+        unresolved = self._batch_registry()["entries"][:1]
+        unresolved[0]["verification_status"] = "unresolved"
+        unresolved[0]["source_authority"] = None
+        with self.assertRaisesRegex(ValueError, "unresolved"):
+            tool.plan_batch(registry=self._batch_registry(entries=unresolved))
+
+        non_op = self._batch_registry()["entries"][:1]
+        non_op[0]["source_authority"] = "deployed://host/config#TOKEN"
+        with self.assertRaisesRegex(ValueError, "protected source adapter"):
+            tool.plan_batch(registry=self._batch_registry(entries=non_op))
+
+    def test_batch_plan_allows_non_op_source_only_through_protected_adapter(self):
+        tool = load_module()
+        entries = self._batch_registry()["entries"][:1]
+        entries[0]["source_authority"] = "deployed://host/config#TOKEN"
+        plan = tool.plan_batch(
+            registry=self._batch_registry(entries=entries),
+            source_adapter=tool.MappingSourceAdapter(
+                {"deployed://host/config#TOKEN": "deployed-secret"}
+            ),
+        )
+        self.assertEqual(plan["field_count"], 1)
+        self.assertNotIn("deployed-secret", json.dumps(plan))
+
+    def test_batch_execution_is_idempotent_create_edit_and_readback_value_free(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            registry_path = self._write_registry(root, self._batch_registry())
+            state_path = root / "state.json"
+            calls_path = root / "calls.jsonl"
+            fake_op = root / "op"
+            fake_op.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "args = sys.argv[1:]\n"
+                "stdin = sys.stdin.read()\n"
+                "with open(os.environ['CALLS'], 'a') as f: f.write(json.dumps({'argv': args}) + '\\n')\n"
+                "state_path = os.environ['STATE']\n"
+                "try: state = json.load(open(state_path))\n"
+                "except FileNotFoundError: state = {'items': {}}\n"
+                "if args == ['whoami', '--format=json']: result = {'type':'SERVICE_ACCOUNT'}\n"
+                "elif args == ['vault', 'list', '--format=json']: result = [{'id':'vault-id','name':'Ken Deploy Production'}]\n"
+                "elif args == ['item', 'list', '--vault', 'Ken Deploy Production', '--format=json']:\n"
+                "    result = [{'id': item['id'], 'title': item['title']} for item in state['items'].values()]\n"
+                "elif args[:2] == ['item', 'create']:\n"
+                "    template = json.loads(stdin); item_id = 'item-' + str(len(state['items']) + 1)\n"
+                "    state['items'][item_id] = {'id':item_id, 'title':template['title'], 'vault':{'id':'vault-id'}, 'fields':template['fields']}\n"
+                "    result = state['items'][item_id]; json.dump(state, open(state_path, 'w'))\n"
+                "elif args[:2] == ['item', 'edit']:\n"
+                "    template = json.loads(stdin); item_id = args[2]; state['items'][item_id].update({'title':template['title'], 'fields':template['fields']})\n"
+                "    result = state['items'][item_id]; json.dump(state, open(state_path, 'w'))\n"
+                "elif args[:2] == ['item', 'get']:\n"
+                "    result = state['items'][args[2]]\n"
+                "else: raise SystemExit(7)\n"
+                "print(json.dumps(result))\n"
+            )
+            fake_op.chmod(0o755)
+            adapter = tool.MappingSourceAdapter(
+                {
+                    "op://Development/source/first": "first-secret",
+                    "op://Development/source/second": "second-secret",
+                }
+            )
+            env = {"STATE": str(state_path), "CALLS": str(calls_path)}
+            plan = tool.plan_batch(registry_path=registry_path, source_adapter=adapter)
+            first = tool.execute_batch(
+                plan=plan,
+                op_bin=fake_op,
+                token="service-account-token",
+                source_adapter=adapter,
+                extra_env=env,
+            )
+            second = tool.execute_batch(
+                plan=plan,
+                op_bin=fake_op,
+                token="service-account-token",
+                source_adapter=adapter,
+                extra_env=env,
+            )
+            self.assertEqual(first["status"], "completed")
+            self.assertEqual(second["status"], "completed")
+            self.assertEqual(first["items"], second["items"])
+            calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+            writes = [call for call in calls if call["argv"][:2] in (["item", "create"], ["item", "edit"])]
+            self.assertEqual([call["argv"][:2] for call in writes], [["item", "create"], ["item", "edit"]])
+            joined_argv = json.dumps(calls)
+            self.assertNotIn("first-secret", joined_argv)
+            self.assertNotIn("second-secret", joined_argv)
+
+    def test_batch_execution_reports_partial_write_without_values(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            entries = self._batch_registry()["entries"]
+            entries[1]["canonical_item"] = "zz-second-production"
+            entries[1]["canonical_id"] = "zz-second-production"
+            document = self._batch_registry(entries=entries)
+            document["canonical_items"].append(
+                {"id": "zz-second-production", "vault": "Ken Deploy Production", "aliases": []}
+            )
+            registry_path = self._write_registry(root, document)
+            fake_op = root / "op"
+            fake_op.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, sys\n"
+                "args = sys.argv[1:]; stdin = sys.stdin.read()\n"
+                "if args == ['whoami', '--format=json']: result = {'type':'SERVICE_ACCOUNT'}\n"
+                "elif args == ['vault', 'list', '--format=json']: result = [{'id':'vault-id','name':'Ken Deploy Production'}]\n"
+                "elif args == ['item', 'list', '--vault', 'Ken Deploy Production', '--format=json']: result = []\n"
+                "elif args[:2] == ['item', 'create']:\n"
+                "    template = json.loads(stdin)\n"
+                "    if template['title'] == 'zz-second-production': raise SystemExit(8)\n"
+                "    result = {'id':'first-id','title':template['title'],'vault':{'id':'vault-id'},'fields':template['fields']}\n"
+                "elif args[:2] == ['item', 'get']:\n"
+                "    result = {'id':'first-id','title':'shared-production','vault':{'id':'vault-id'},'fields':[{'label':'FIRST_TOKEN','type':'CONCEALED'}]}\n"
+                "else: raise SystemExit(8)\n"
+                "print(json.dumps(result))\n"
+            )
+            fake_op.chmod(0o755)
+            adapter = tool.MappingSourceAdapter(
+                {
+                    "op://Development/source/first": "first-secret",
+                    "op://Development/source/second": "second-secret",
+                }
+            )
+            plan = tool.plan_batch(registry_path=registry_path, source_adapter=adapter)
+            report = tool.execute_batch(
+                plan=plan,
+                op_bin=fake_op,
+                token="service-account-token",
+                source_adapter=adapter,
+            )
+            self.assertEqual(report["status"], "partial-failure")
+            self.assertEqual(report["completed_count"], 1)
+            self.assertEqual(report["failed_count"], 1)
+            output = json.dumps(report)
+            self.assertNotIn("first-secret", output)
+            self.assertNotIn("second-secret", output)
+            self.assertNotIn("service-account-token", output)
 
 
 if __name__ == "__main__":

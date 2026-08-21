@@ -13,9 +13,74 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+_CANONICAL_LIB = Path(__file__).resolve().parent / "lib"
+if str(_CANONICAL_LIB) not in sys.path:
+    sys.path.insert(0, str(_CANONICAL_LIB))
+
+from canonical_credentials import load_registry  # noqa: E402
+
 
 class MigrationError(ValueError):
     """A fail-closed migration contract violation."""
+
+
+class ProtectedSourceAdapter:
+    """In-process source reader; implementations must keep values private."""
+
+    protected = True
+
+    def resolve(self, authority: str) -> str:
+        raise NotImplementedError
+
+
+class MappingSourceAdapter(ProtectedSourceAdapter):
+    """Small protected adapter intended for hermetic tests and local dry runs."""
+
+    def __init__(self, values: Mapping[str, str]):
+        self._values = dict(values)
+
+    def resolve(self, authority: str) -> str:
+        try:
+            value = self._values[authority]
+        except KeyError as exc:
+            raise MigrationError("source authority could not be read") from exc
+        if not isinstance(value, str):
+            raise MigrationError("source authority returned a non-string value")
+        return value
+
+
+class OpSourceAdapter(ProtectedSourceAdapter):
+    """Read a source 1Password field without exposing its value to the caller."""
+
+    def __init__(
+        self,
+        *,
+        op_bin: Path,
+        token: str,
+        extra_env: Mapping[str, str] | None = None,
+    ):
+        self.op_bin = op_bin
+        self.token = token
+        self.extra_env = extra_env
+
+    def resolve(self, authority: str) -> str:
+        vault, item, field = _parse_op_authority(authority)
+        result = run_op_json(
+            op_bin=self.op_bin,
+            argv=["item", "get", item, "--vault", vault, "--format=json"],
+            token=self.token,
+            extra_env=self.extra_env,
+        )
+        if not isinstance(result, Mapping) or not isinstance(result.get("fields"), list):
+            raise MigrationError("source item response is invalid")
+        matches = [
+            candidate
+            for candidate in result["fields"]
+            if candidate.get("label") == field or candidate.get("id") == field
+        ]
+        if len(matches) != 1 or not isinstance(matches[0].get("value"), str):
+            raise MigrationError("source field is not uniquely readable")
+        return matches[0]["value"]
 
 
 def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -273,6 +338,383 @@ def verify_item_shape(
     return status
 
 
+_BATCH_VERIFICATION_STATUSES = frozenset(
+    {"verified-readable", "verified-reconstructable", "existing-direct-reference"}
+)
+_OP_AUTHORITY_SCHEMES = ("op://", "op-env://", "op-file://", "op-title://")
+_FIELD_LABEL = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+_ITEM_TITLE = re.compile(r"^[a-z0-9][a-z0-9-]{0,126}[a-z0-9]$|^[a-z0-9]$")
+
+
+def _parse_op_authority(authority: str) -> tuple[str, str, str]:
+    if not isinstance(authority, str) or not authority.startswith(_OP_AUTHORITY_SCHEMES):
+        raise MigrationError("source authority is not an op reference")
+    _, remainder = authority.split("://", 1)
+    if "#" in remainder:
+        path, field = remainder.rsplit("#", 1)
+    else:
+        path, field = remainder.rsplit("/", 1)
+    parts = path.split("/", 1)
+    if len(parts) != 2 or not all(parts) or not field:
+        raise MigrationError("source authority is structurally invalid")
+    if any(character.isspace() for character in authority):
+        raise MigrationError("source authority is structurally invalid")
+    return parts[0], parts[1], field
+
+
+def _is_op_authority(authority: Any) -> bool:
+    if not isinstance(authority, str) or not authority.startswith(_OP_AUTHORITY_SCHEMES):
+        return False
+    try:
+        _parse_op_authority(authority)
+    except MigrationError:
+        return False
+    return True
+
+
+def _resolve_source(adapter: Any, authority: str) -> str:
+    if adapter is None:
+        raise MigrationError("source authority requires a protected source adapter")
+    if getattr(adapter, "protected", False) is not True:
+        raise MigrationError("source authority requires a protected source adapter")
+    resolver = getattr(adapter, "resolve", None)
+    if not callable(resolver):
+        resolver = getattr(adapter, "read", None)
+    if not callable(resolver):
+        raise MigrationError("protected source adapter is invalid")
+    try:
+        value = resolver(authority)
+    except MigrationError:
+        raise
+    except Exception as exc:
+        raise MigrationError("source authority could not be read") from exc
+    if not isinstance(value, str):
+        raise MigrationError("source authority returned a non-string value")
+    return value
+
+
+def _registry_document(
+    *, registry_path: str | Path | None, registry: Mapping[str, Any] | None
+) -> Mapping[str, Any]:
+    if (registry_path is None) == (registry is None):
+        raise MigrationError("provide exactly one canonical registry")
+    if registry_path is not None:
+        return load_registry(registry_path)
+    if not isinstance(registry, Mapping):
+        raise MigrationError("canonical registry is invalid")
+    # Re-run the same strict validator for callers that already parsed a document.
+    return load_registry_from_document(registry)
+
+
+def load_registry_from_document(document: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Validate an already parsed registry with the canonical registry loader."""
+    from canonical_credentials import validate_registry
+
+    return validate_registry(document)
+
+
+def _eligible_entries(document: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    entries = document.get("entries")
+    if not isinstance(entries, list):
+        raise MigrationError("canonical registry entries are invalid")
+    selected: list[Mapping[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise MigrationError("canonical registry entry is invalid")
+        status = entry.get("verification_status")
+        if status == "unresolved":
+            raise MigrationError("unresolved source authority")
+        if status in _BATCH_VERIFICATION_STATUSES:
+            selected.append(entry)
+    return selected
+
+
+def _validate_target_entry(
+    entry: Mapping[str, Any], source_adapter: Any | None = None
+) -> tuple[str, str, str]:
+    source = entry.get("source_authority")
+    if not isinstance(source, str) or not source:
+        raise MigrationError("selected entry has an unresolved authority")
+    if not _is_op_authority(source) and getattr(source_adapter, "protected", False) is not True:
+        raise MigrationError("non-op source requires a protected source adapter")
+    vault = entry.get("canonical_vault")
+    item = entry.get("canonical_item")
+    field = entry.get("canonical_field")
+    if not all(isinstance(value, str) and value for value in (vault, item, field)):
+        raise MigrationError("selected entry has incomplete target coordinates")
+    if not _FIELD_LABEL.fullmatch(field):
+        raise MigrationError("selected entry has an invalid target field")
+    if not _ITEM_TITLE.fullmatch(item):
+        raise MigrationError("selected entry has an invalid target item")
+    return vault, item, field
+
+
+def _validate_batch_entries(
+    entries: Sequence[Mapping[str, Any]], source_adapter: Any | None
+) -> dict[tuple[str, str], list[Mapping[str, Any]]]:
+    grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    target_sources: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
+    item_vaults: dict[str, str] = {}
+    for entry in entries:
+        vault, item, field = _validate_target_entry(entry, source_adapter)
+        source = entry["source_authority"]
+        if not _is_op_authority(source) and getattr(source_adapter, "protected", False) is not True:
+            raise MigrationError("non-op source requires a protected source adapter")
+        prior_vault = item_vaults.setdefault(item, vault)
+        if prior_vault != vault:
+            raise MigrationError("canonical item is reused across vaults")
+        target_sources.setdefault((vault, item, field), []).append(entry)
+        grouped.setdefault((vault, item), []).append(entry)
+
+    for _target, matches in target_sources.items():
+        if len(matches) < 2:
+            continue
+        sources = {entry["source_authority"] for entry in matches}
+        if len(sources) > 1:
+            if source_adapter is not None:
+                values = [_resolve_source(source_adapter, source) for source in sorted(sources)]
+                if len(set(values)) > 1:
+                    raise MigrationError("conflicting values for duplicate target field")
+            raise MigrationError("duplicate target field with different sources")
+        raise MigrationError("duplicate target field")
+    return grouped
+
+
+def _value_free_plan(
+    grouped: Mapping[tuple[str, str], Sequence[Mapping[str, Any]]],
+    *,
+    registry_path: str | Path | None,
+) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    field_count = 0
+    for (vault, item), entries in sorted(grouped.items()):
+        fields = [
+            {
+                "label": entry["canonical_field"],
+                "type": "CONCEALED",
+                "coordinate": entry["coordinate"],
+                "source_authority": entry["source_authority"],
+            }
+            for entry in sorted(entries, key=lambda row: row["canonical_field"])
+        ]
+        field_count += len(fields)
+        items.append({"vault": vault, "item": item, "fields": fields})
+    plan = {
+        "status": "planned",
+        "item_count": len(items),
+        "field_count": field_count,
+        "items": items,
+    }
+    if registry_path is not None:
+        plan["registry"] = str(registry_path)
+    return plan
+
+
+def plan_batch(
+    *,
+    registry_path: str | Path | None = None,
+    registry: Mapping[str, Any] | None = None,
+    source_adapter: Any | None = None,
+) -> dict[str, Any]:
+    """Build a value-free grouped plan from the strictly validated registry."""
+    document = _registry_document(registry_path=registry_path, registry=registry)
+    selected = _eligible_entries(document)
+    for entry in selected:
+        source = entry.get("source_authority")
+        if not _is_op_authority(source) and source_adapter is None:
+            raise MigrationError("non-op source requires a protected source adapter")
+    grouped = _validate_batch_entries(selected, source_adapter)
+    return _value_free_plan(grouped, registry_path=registry_path)
+
+
+def _value_free_execution_report(
+    *,
+    status: str,
+    item_count: int,
+    items: list[Mapping[str, Any]],
+    failures: list[Mapping[str, Any]],
+    attempted_count: int,
+) -> dict[str, Any]:
+    report = {
+        "status": status,
+        "item_count": item_count,
+        "attempted_count": attempted_count,
+        "completed_count": len(items),
+        "failed_count": len(failures),
+        "items": items,
+        "failures": failures,
+    }
+    validate_batch_report(report)
+    return report
+
+
+def validate_batch_report(report: Mapping[str, Any]) -> None:
+    """Reject value-bearing batch reports before they can be printed or persisted."""
+    forbidden = ("value", "secret", "hash", "digest", "prefix", "length")
+    encoded = json.dumps(report, sort_keys=True).lower()
+    if any(fragment in encoded for fragment in forbidden):
+        # Field labels may legitimately contain TOKEN; inspect keys and values more narrowly.
+        def walk(value: Any) -> None:
+            if isinstance(value, Mapping):
+                for key, child in value.items():
+                    if any(fragment in str(key).lower() for fragment in forbidden):
+                        raise MigrationError("batch report contains a value-derived field")
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+
+        walk(report)
+    required = {"status", "item_count", "attempted_count", "completed_count", "failed_count", "items", "failures"}
+    if set(report) != required:
+        raise MigrationError("batch report schema mismatch")
+
+
+def validate_batch_plan(plan: Mapping[str, Any]) -> None:
+    """Validate the value-free plan boundary before any source is resolved."""
+    if not isinstance(plan, Mapping):
+        raise MigrationError("batch plan is invalid")
+    allowed = {"status", "item_count", "field_count", "items", "registry"}
+    if set(plan) - allowed or plan.get("status") != "planned":
+        raise MigrationError("batch plan schema mismatch")
+    if not isinstance(plan.get("item_count"), int) or not isinstance(plan.get("field_count"), int):
+        raise MigrationError("batch plan counts are invalid")
+    items = plan.get("items")
+    if not isinstance(items, list):
+        raise MigrationError("batch plan items are invalid")
+    if plan["item_count"] != len(items):
+        raise MigrationError("batch plan item count is invalid")
+    field_count = 0
+    seen_items: set[tuple[str, str]] = set()
+    seen_titles: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, Mapping) or set(item) != {"vault", "item", "fields"}:
+            raise MigrationError("batch plan item schema mismatch")
+        vault = item.get("vault")
+        title = item.get("item")
+        fields = item.get("fields")
+        if (
+            not isinstance(vault, str)
+            or not isinstance(title, str)
+            or not _ITEM_TITLE.fullmatch(title)
+            or not isinstance(fields, list)
+        ):
+            raise MigrationError("batch plan item coordinates are invalid")
+        if (vault, title) in seen_items:
+            raise MigrationError("duplicate batch plan item")
+        seen_items.add((vault, title))
+        prior_vault = seen_titles.setdefault(title, vault)
+        if prior_vault != vault:
+            raise MigrationError("canonical item is reused across vaults")
+        labels: set[str] = set()
+        for field in fields:
+            if not isinstance(field, Mapping) or set(field) != {
+                "label",
+                "type",
+                "coordinate",
+                "source_authority",
+            }:
+                raise MigrationError("batch plan field schema mismatch")
+            label = field.get("label")
+            if (
+                not isinstance(label, str)
+                or not _FIELD_LABEL.fullmatch(label)
+                or label in labels
+                or field.get("type") != "CONCEALED"
+                or not isinstance(field.get("coordinate"), str)
+                or not isinstance(field.get("source_authority"), str)
+            ):
+                raise MigrationError("batch plan field is invalid")
+            labels.add(label)
+            field_count += 1
+    if plan["field_count"] != field_count:
+        raise MigrationError("batch plan field count is invalid")
+
+
+def execute_batch(
+    *,
+    plan: Mapping[str, Any],
+    op_bin: Path,
+    token: str,
+    source_adapter: Any,
+    extra_env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Execute each planned item through the existing stdin-only population path."""
+    validate_batch_plan(plan)
+    plan_items = plan["items"]
+    failures: list[Mapping[str, Any]] = []
+    completed: list[Mapping[str, Any]] = []
+    attempted = 0
+    for planned_item in plan_items:
+        if not isinstance(planned_item, Mapping):
+            raise MigrationError("batch plan item is invalid")
+        vault = planned_item.get("vault")
+        item = planned_item.get("item")
+        fields = planned_item.get("fields")
+        if not isinstance(vault, str) or not isinstance(item, str) or not isinstance(fields, list):
+            raise MigrationError("batch plan item coordinates are invalid")
+        concealed: dict[str, str] = {}
+        try:
+            for field in fields:
+                if not isinstance(field, Mapping):
+                    raise MigrationError("batch plan field is invalid")
+                label = field.get("label")
+                authority = field.get("source_authority")
+                coordinate = field.get("coordinate")
+                if (
+                    not isinstance(label, str)
+                    or not _FIELD_LABEL.fullmatch(label)
+                    or not isinstance(authority, str)
+                    or not isinstance(coordinate, str)
+                ):
+                    raise MigrationError("batch plan field is invalid")
+                concealed[label] = _resolve_source(source_adapter, authority)
+            attempted += 1
+            status = populate_item(
+                op_bin=op_bin,
+                token=token,
+                expected_vault=vault,
+                coordinate=f"{vault}|{item}",
+                title=item,
+                concealed_fields=concealed,
+                text_fields={},
+                extra_env=extra_env,
+            )
+            completed.append(
+                {
+                    "vault": vault,
+                    "item": item,
+                    "status": status["status"],
+                    "item_id": status["item_id"],
+                    "fields": status["fields"],
+                }
+            )
+        except (MigrationError, OSError):
+            attempted += 1
+            failures.append(
+                {
+                    "vault": vault,
+                    "item": item,
+                    "status": "failed",
+                    "field_count": len(fields),
+                }
+            )
+            break
+    status = "completed" if not failures else "partial-failure"
+    return _value_free_execution_report(
+        status=status,
+        item_count=len(plan_items),
+        items=completed,
+        failures=failures,
+        attempted_count=attempted,
+    )
+
+
+# Descriptive aliases for callers that use the migration terminology.
+plan_migration = plan_batch
+execute_migration = execute_batch
+
+
 def _read_protected_json(path: Path) -> Mapping[str, Any]:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or path.is_symlink() or info.st_nlink != 1:
@@ -294,8 +736,51 @@ def _compare_command(args: argparse.Namespace) -> int:
     return 0
 
 
-_FIELD_LABEL = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
-_ITEM_TITLE = re.compile(r"^[a-z0-9][a-z0-9-]{0,126}[a-z0-9]$|^[a-z0-9]$")
+def _batch_input_from_stdin() -> Mapping[str, Any]:
+    raw = sys.stdin.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise MigrationError("batch input is oversized")
+    document = strict_json_loads(raw)
+    if not isinstance(document, Mapping):
+        raise MigrationError("batch input must be an object")
+    if set(document) - {"token", "sources"} or "token" not in document:
+        raise MigrationError("batch input schema mismatch")
+    if not isinstance(document["token"], str) or not document["token"]:
+        raise MigrationError("batch input token is invalid")
+    sources = document.get("sources", {})
+    if not isinstance(sources, Mapping):
+        raise MigrationError("batch input sources are invalid")
+    for authority, value in sources.items():
+        if not isinstance(authority, str) or not isinstance(value, str):
+            raise MigrationError("batch input source is invalid")
+    return document
+
+
+def _plan_batch_command(args: argparse.Namespace) -> int:
+    plan = plan_batch(registry_path=args.registry)
+    print(json.dumps(plan, separators=(",", ":"), sort_keys=True))
+    return 0
+
+
+def _execute_batch_command(args: argparse.Namespace) -> int:
+    input_document = _batch_input_from_stdin()
+    sources = input_document.get("sources", {})
+    if sources:
+        source_adapter: Any = MappingSourceAdapter(sources)
+    else:
+        source_adapter = OpSourceAdapter(
+            op_bin=args.op_bin,
+            token=input_document["token"],
+        )
+    plan = plan_batch(registry_path=args.registry, source_adapter=source_adapter)
+    report = execute_batch(
+        plan=plan,
+        op_bin=args.op_bin,
+        token=input_document["token"],
+        source_adapter=source_adapter,
+    )
+    print(json.dumps(report, separators=(",", ":"), sort_keys=True))
+    return 0 if report["status"] == "completed" else 1
 
 
 def _secret_envelope_from_stdin() -> Mapping[str, Any]:
@@ -357,6 +842,17 @@ def _parser() -> argparse.ArgumentParser:
     compare = commands.add_parser("compare", help="classify two in-memory values")
     compare.add_argument("--request", type=Path, required=True)
     compare.set_defaults(handler=_compare_command)
+    plan = commands.add_parser(
+        "plan", aliases=["batch-plan"], help="plan grouped canonical item writes"
+    )
+    plan.add_argument("--registry", type=Path, required=True)
+    plan.set_defaults(handler=_plan_batch_command)
+    execute = commands.add_parser(
+        "execute", aliases=["batch-execute"], help="execute a grouped canonical item plan"
+    )
+    execute.add_argument("--registry", type=Path, required=True)
+    execute.add_argument("--op-bin", type=Path, default=Path("/usr/local/bin/op"))
+    execute.set_defaults(handler=_execute_batch_command)
     populate = commands.add_parser("populate", help="create or update one canonical item")
     populate.add_argument("--op-bin", type=Path, default=Path("/usr/local/bin/op"))
     populate.set_defaults(handler=_populate_command)
