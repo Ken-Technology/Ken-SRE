@@ -3355,6 +3355,15 @@ class Task6AuthorityEvidenceTests(unittest.TestCase):
                 for mapping in mappings
             )
         )
+        search_clerk = next(
+            mapping
+            for mapping in mappings
+            if mapping["repository"] == "ken-search"
+            and mapping["github_secret_name"] == "CLERK_SECRET_KEY"
+        )
+        self.assertEqual(search_clerk["target_vault"], "Ken Deploy Production")
+        self.assertEqual(search_clerk["target_item"], "clerk-production-api-production")
+        self.assertEqual(search_clerk["target_field"], "CLERK_SECRET_KEY")
         self.assertFalse(
             any(
                 mapping["repository"] == "ken-frontend"

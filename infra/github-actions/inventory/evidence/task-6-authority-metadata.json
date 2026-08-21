@@ -3161,6 +3161,8 @@
       "migration_action": "copy",
       "repository": "ken-search",
       "source_ref": "op-development-ken-backend-env-kensearch-clerkapikey",
+      "target_field": "CLERK_SECRET_KEY",
+      "target_item": "clerk-production-api-production",
       "target_vault": "Ken Deploy Production"
     },
     {

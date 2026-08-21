@@ -2204,7 +2204,6 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
     search_extra_specs = [
         ("DB_CONNECTION_STRING", add_source(_deployed_source(scraper_file, "ConnectionStrings.KenDb")), "copy", "credential"),
         ("CLICKUP_LIST_ID", add_source(_deployed_source(scraper_file, "ClickUpAlerting.ListId")), "move-to-variable", "identifier"),
-        ("CLERK_SECRET_KEY", search_clerk, "copy", "credential"),
         ("KEN_SEARCH_INTERNAL_TOKEN", add_source(_deployed_source(scraper_file, "KenSearch.ServiceBearerToken")), "copy", "credential"),
         ("DEPLOY_HOST", search_root_host, "copy", "credential"),
         ("VPS_SSH_KEY", search_root_key, "copy", "credential"),
@@ -2219,6 +2218,17 @@ def build_evidence(evidence_dir: Path | None = None) -> dict[str, Any]:
                 classification=classification,
             )
         )
+    mappings.append(
+        _mapping(
+            "ken-search",
+            "CLERK_SECRET_KEY",
+            search_clerk,
+            action="copy",
+            classification="credential",
+            target_item="clerk-production-api-production",
+            target_field="CLERK_SECRET_KEY",
+        )
+    )
 
     mcp_clerk_specs = [
         ("KEN_CLERK_DOMAIN", "authorization_server", "move-to-variable", "configuration"),

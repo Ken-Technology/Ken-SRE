@@ -211,6 +211,25 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
         self.assertNotIn("KEN_SEARCH_CLERK_SECRET_KEY", deploy["secret_names"])
         self.assertNotIn("VPS_HOST", deploy["secret_names"])
 
+    def test_ken_search_clerk_target_matches_handoff_target(self) -> None:
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        handoff_row = next(
+            row
+            for row in self.handoff["rows"]
+            if row["coordinate"] == "ken-search|CLERK_SECRET_KEY|Ken Deploy Production"
+        )
+        entry = next(
+            entry
+            for entry in document["entries"]
+            if entry["coordinate"] == handoff_row["coordinate"]
+        )
+
+        self.assertEqual(entry["canonical_vault"], handoff_row["target_vault"])
+        self.assertEqual(entry["canonical_item"], handoff_row["target_item"])
+        self.assertEqual(entry["canonical_field"], handoff_row["target_field"])
+
     def test_proven_renames_are_canonical_and_unresolved_rows_stay_unresolved(
         self,
     ) -> None:
