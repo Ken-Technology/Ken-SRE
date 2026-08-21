@@ -17,7 +17,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping, Sequence
-from urllib.parse import unquote_to_bytes, urlsplit
+from urllib.parse import unquote, unquote_to_bytes, urlsplit
 
 import yaml
 
@@ -40,6 +40,7 @@ APPROVED_VAULTS = frozenset(ALLOWED_VAULTS)
 _ITEM_DISPOSITIONS = frozenset({"canonical-item", "dedicated-item"})
 _FIELD_TYPES = frozenset({"CONCEALED", "STRING"})
 _PERSONAL_ACCOUNT_UUID = "PHLSEQ2HNVAALEWHKWGKZOAGSY"
+_OP_COMMAND_TIMEOUT_SECONDS = 30
 
 
 class ProtectedSourceAdapter:
@@ -177,11 +178,15 @@ class DeployedSourceAdapter(ProtectedSourceAdapter):
         parsed = _parse_source_authority(authority)
         if parsed["scheme"] not in {"deployed", "deployed-component"}:
             raise MigrationError("source authority is not a deployed reference")
-        raw = self._read_file(parsed["host"], parsed["path"])
+        raw = self.read_bytes(parsed["host"], parsed["path"])
         document = _parse_deployed_document(raw, parsed["path"])
         if parsed["scheme"] == "deployed":
             return _lookup_deployed_value(document, parsed["selector"])
         return _lookup_connection_component(document, parsed["selector"])
+
+    def read_bytes(self, host: str, remote_path: str) -> bytes:
+        """Read an approved deployed file without decoding or displaying it."""
+        return self._read_file(host, remote_path)
 
     def _read_file(self, host: str, remote_path: str) -> bytes:
         _validate_deployed_path(remote_path)
@@ -916,25 +921,30 @@ def run_op_json(
     if any(not isinstance(argument, str) or "\n" in argument for argument in argv):
         raise MigrationError("1Password argument is invalid")
     payload = "" if stdin_document is None else json.dumps(stdin_document, separators=(",", ":"))
-    if session:
-        completed = subprocess.run(
-            [str(op_bin), *argv],
-            input=payload,
-            text=True,
-            capture_output=True,
-            check=False,
-            env=_session_env(extra_env),
-        )
-    else:
-        with _private_service_account_home() as home:
+    try:
+        if session:
             completed = subprocess.run(
                 [str(op_bin), *argv],
                 input=payload,
                 text=True,
                 capture_output=True,
                 check=False,
-                env=_minimal_env(token, extra_env, home=home),
+                timeout=_OP_COMMAND_TIMEOUT_SECONDS,
+                env=_session_env(extra_env),
             )
+        else:
+            with _private_service_account_home() as home:
+                completed = subprocess.run(
+                    [str(op_bin), *argv],
+                    input=payload,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=_OP_COMMAND_TIMEOUT_SECONDS,
+                    env=_minimal_env(token, extra_env, home=home),
+                )
+    except subprocess.TimeoutExpired as exc:
+        raise MigrationError("1Password command timed out") from exc
     payload = ""
     if completed.returncode != 0:
         raise MigrationError("1Password command failed")
@@ -1163,6 +1173,7 @@ _SOURCE_AUTHORITY_SCHEMES = _OP_AUTHORITY_SCHEMES + (
     "deployed://",
     "deployed-component://",
     "evidence://",
+    "ken-production://",
 )
 _OP_SCHEME_NAMES = frozenset(scheme.removesuffix("://") for scheme in _OP_AUTHORITY_SCHEMES)
 _FIELD_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,127}$")
@@ -1227,6 +1238,14 @@ def _parse_source_authority(authority: str) -> dict[str, str]:
             raise MigrationError("deployed authority is structurally invalid")
         _validate_deployed_path(path)
         return {"scheme": scheme, "host": host, "path": path, "selector": selector}
+    if scheme == "ken-production":
+        parts = remainder.split("/")
+        if len(parts) != 3 or any(not part for part in parts):
+            raise MigrationError("production authority is structurally invalid")
+        coordinate = "|".join(unquote(part) for part in parts)
+        if not re.fullmatch(r"[^|\r\n]+\|[^|\r\n]+\|[^|\r\n]+", coordinate):
+            raise MigrationError("production authority is structurally invalid")
+        return {"scheme": scheme, "coordinate": coordinate}
     if scheme == "evidence":
         if "#" not in remainder:
             raise MigrationError("evidence authority is structurally invalid")

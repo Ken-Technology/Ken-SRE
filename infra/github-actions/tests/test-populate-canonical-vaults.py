@@ -157,6 +157,27 @@ def write_fake_ssh(root):
 
 
 class PopulateCanonicalVaultsTests(unittest.TestCase):
+    def test_file_writer_token_source_requires_three_user_owned_mode_0600_files(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            names = {
+                "Ken CI Runtime": "ken-ci-runtime.token",
+                "Ken Deploy Nonproduction": "ken-deploy-nonproduction.token",
+                "Ken Deploy Production": "ken-deploy-production.token",
+            }
+            paths = {}
+            for vault, name in names.items():
+                path = root / name
+                path.write_text(f"token-{len(paths)}")
+                os.chmod(path, 0o600)
+                paths[vault] = path
+            source = tool.FileWriterTokenSource(paths)
+            self.assertEqual(set(source.load()), tool.TARGET_VAULTS)
+            os.chmod(paths["Ken CI Runtime"], 0o644)
+            with self.assertRaisesRegex(ValueError, "mode-0600"):
+                source.load()
+
     def test_personal_token_boundary_reads_exact_three_items_without_returning_values(self):
         tool = load_module()
         with tempfile.TemporaryDirectory() as temp:
@@ -251,6 +272,14 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
                 "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
                 "email": "cristian@getken.ai",
                 "url": "ken-ai.1password.com",
+                "user_uuid": "user-uuid",
+            }
+        )
+        tool._validate_personal_identity(
+            {
+                "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                "email": "cristian@getken.ai",
+                "url": "https://ken-ai.1password.com/",
                 "user_uuid": "user-uuid",
             }
         )

@@ -22,6 +22,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -91,6 +92,47 @@ class StaticWriterTokenSource:
     def load(self) -> dict[str, str]:
         _validate_writer_tokens(self._tokens)
         return dict(self._tokens)
+
+
+class FileWriterTokenSource:
+    """Read exactly three cached writer tokens from protected local files."""
+
+    def __init__(self, paths: Mapping[str, Path]):
+        if set(paths) != TARGET_VAULTS:
+            raise MigrationError("writer token files must cover exactly three target vaults")
+        self.paths = {vault: Path(path) for vault, path in paths.items()}
+
+    def load(self) -> dict[str, str]:
+        tokens: dict[str, str] = {}
+        for vault in sorted(TARGET_VAULTS):
+            path = self.paths[vault]
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                raise MigrationError("writer token file could not be read") from exc
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or path.is_symlink()
+                or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.getuid()
+            ):
+                raise MigrationError("writer token file must be a user-owned mode-0600 regular file")
+            try:
+                raw = path.read_bytes()
+            except OSError as exc:
+                raise MigrationError("writer token file could not be read") from exc
+            if not raw or len(raw) > 64 * 1024:
+                raise MigrationError("writer token file is invalid")
+            try:
+                token = raw.decode("utf-8").rstrip("\r\n")
+            except UnicodeDecodeError as exc:
+                raise MigrationError("writer token file is not UTF-8") from exc
+            if not token or any(character in token for character in "\r\n\x00"):
+                raise MigrationError("writer token file is invalid")
+            tokens[vault] = token
+        _validate_writer_tokens(tokens)
+        return tokens
 
 
 class PersonalWriterTokenSource:
@@ -262,7 +304,12 @@ def _personal_session_environment(extra_env: Mapping[str, str] | None = None) ->
 def _validate_personal_identity(response: Any) -> None:
     if not isinstance(response, Mapping) or response.get("account_uuid") != APPROVED_PERSONAL_ACCOUNT_UUID:
         raise MigrationError("personal account identity is not the reviewed account")
-    if response.get("url") != APPROVED_PERSONAL_ACCOUNT_URL:
+    raw_url = response.get("url")
+    normalized_url = raw_url
+    if isinstance(raw_url, str) and "://" in raw_url:
+        parsed_url = urlsplit(raw_url)
+        normalized_url = parsed_url.hostname
+    if normalized_url != APPROVED_PERSONAL_ACCOUNT_URL:
         raise MigrationError("personal account identity is invalid")
     if not isinstance(response.get("user_uuid"), str) or not response["user_uuid"]:
         raise MigrationError("personal account identity is invalid")
@@ -560,6 +607,27 @@ def write_value_free_ledger(path: Path, document: Mapping[str, Any]) -> bool:
     return bool(document.get("ready"))
 
 
+def _read_resume_ledger(path: Path) -> dict[str, Any]:
+    """Read an interrupted protected ledger without accepting secret fields."""
+    info = path.lstat()
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or path.is_symlink()
+        or stat.S_IMODE(info.st_mode) != 0o600
+    ):
+        raise MigrationError("resume ledger must be a regular mode-0600 file")
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise MigrationError("resume ledger is invalid") from exc
+    if not isinstance(document, Mapping):
+        raise MigrationError("resume ledger is invalid")
+    _validate_ledger_shape(document)
+    if document["status"] not in {"in-progress", "blocked"}:
+        raise MigrationError("resume ledger is not resumable")
+    return dict(document)
+
+
 def _ledger_document(
     *, status: str, selected: int, items: Sequence[Mapping[str, Any]], blocked: Sequence[Mapping[str, Any]]
 ) -> dict[str, Any]:
@@ -636,19 +704,23 @@ def populate_canonical_vaults(
     op_bin: Path,
     ledger_path: Path,
     known_only: bool = False,
+    resume_ledger: Path | None = None,
     extra_env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     document = _registry_document(registry_path=registry_path, registry=registry)
-    items: list[dict[str, Any]] = []
+    prior = _read_resume_ledger(resume_ledger) if resume_ledger is not None and resume_ledger.exists() else None
+    items: list[dict[str, Any]] = list(prior["items"]) if prior is not None else []
     selected: list[Mapping[str, Any]] = []
     blocked: list[dict[str, Any]] = []
     # Invalidate any prior ready ledger before source resolution or a target write.
-    write_value_free_ledger(ledger_path, _ledger_document(status="in-progress", selected=0, items=[], blocked=[]))
+    write_value_free_ledger(ledger_path, _ledger_document(status="in-progress", selected=0, items=items, blocked=[]))
     try:
         selected, blocked = _selected_entries(document, known_only=known_only)
+        if prior is not None and prior["counts"]["selected"] != len(selected):
+            raise MigrationError("resume ledger selection changed")
         write_value_free_ledger(
             ledger_path,
-            _ledger_document(status="in-progress", selected=len(selected), items=[], blocked=blocked),
+            _ledger_document(status="in-progress", selected=len(selected), items=items, blocked=blocked),
         )
         writer_tokens = writer_source.load()
         _validate_writer_tokens(writer_tokens)
@@ -656,6 +728,9 @@ def populate_canonical_vaults(
         if _source_token_set(source_adapter) & set(writer_tokens.values()):
             raise MigrationError("source and target writer tokens must be distinct")
         grouped = _resolve_targets(selected, source_adapter) if selected else {}
+        if prior is not None:
+            completed_items = {item["item"] for item in items}
+            grouped = {key: value for key, value in grouped.items() if key[1] not in completed_items}
     except MigrationError:
         failure = blocked or [{"coordinate": "registry|selection", "status": "blocked", "reason": "population preflight failed"}]
         _write_failure_ledger(ledger_path, selected=len(selected), items=items, blocked=failure)

@@ -1,0 +1,75 @@
+schema_version: 1
+status: mapped
+value_disclosure: none
+comparison_boundary: single-process-memory-only
+mapped_count: 18
+rows:
+- coordinate: ken-agents|KEN_AGENTS_PLATFORM_DB_PASSWORD|Ken Deploy Production
+  source_authority: ken-production://ken-agents/KEN_AGENTS_PLATFORM_DB_PASSWORD/Ken%20Deploy%20Production
+  kind: server_file_component
+  locator: 185.183.35.189:/var/www/ken-agents/.env
+- coordinate: ken-ai-mcp|DB_PORT|Ken Deploy Production
+  source_authority: ken-production://ken-ai-mcp/DB_PORT/Ken%20Deploy%20Production
+  kind: server_file_component
+  locator: 185.183.35.189:/etc/ken-ai-mcp/ken-ai-mcp.env
+- coordinate: ken-backend|CLOUDFLARE_REDIRECT_INGRESS_CERT_BASE64|Ken Deploy Production
+  source_authority: ken-production://ken-backend/CLOUDFLARE_REDIRECT_INGRESS_CERT_BASE64/Ken%20Deploy%20Production
+  kind: server_certificate_pair
+  locator: 185.183.35.189:/etc/letsencrypt/live/redirect-ingest.getken.dev
+- coordinate: ken-backend|CLOUDFLARE_REDIRECT_INGRESS_KEY_BASE64|Ken Deploy Production
+  source_authority: ken-production://ken-backend/CLOUDFLARE_REDIRECT_INGRESS_KEY_BASE64/Ken%20Deploy%20Production
+  kind: server_certificate_pair
+  locator: 185.183.35.189:/etc/letsencrypt/live/redirect-ingest.getken.dev
+- coordinate: ken-backend|CLOUDFLARE_REDIRECT_ORIGIN_PULL_CA_BASE64|Ken Deploy Production
+  source_authority: ken-production://ken-backend/CLOUDFLARE_REDIRECT_ORIGIN_PULL_CA_BASE64/Ken%20Deploy%20Production
+  kind: server_certificate
+  locator: 185.183.35.189:/etc/nginx/mtls/cloudflare-origin-pull-ca.pem
+- coordinate: ken-backend|KEN_REDIRECT_CLIENT_PFX_BASE64|Ken Deploy Production
+  source_authority: ken-production://ken-backend/KEN_REDIRECT_CLIENT_PFX_BASE64/Ken%20Deploy%20Production
+  kind: server_certificate_bundle
+  locator: 185.183.35.189:/etc/ken/credentials/ken-redirect-client.pfx
+- coordinate: ken-backend|REDIRECT_SYNC_CLIENT_CA_BASE64|Ken Deploy Production
+  source_authority: ken-production://ken-backend/REDIRECT_SYNC_CLIENT_CA_BASE64/Ken%20Deploy%20Production
+  kind: server_redirect_sync_bundle
+  locator: 185.183.35.189:/etc/nginx/redirect-sync-ingress
+- coordinate: ken-backend|REDIRECT_SYNC_SERVER_CERT_BASE64|Ken Deploy Production
+  source_authority: ken-production://ken-backend/REDIRECT_SYNC_SERVER_CERT_BASE64/Ken%20Deploy%20Production
+  kind: server_redirect_sync_bundle
+  locator: 185.183.35.189:/etc/nginx/redirect-sync-ingress
+- coordinate: ken-backend|REDIRECT_SYNC_SERVER_KEY_BASE64|Ken Deploy Production
+  source_authority: ken-production://ken-backend/REDIRECT_SYNC_SERVER_KEY_BASE64/Ken%20Deploy%20Production
+  kind: server_redirect_sync_bundle
+  locator: 185.183.35.189:/etc/nginx/redirect-sync-ingress
+- coordinate: ken-backend|REDIRECT_SYNC_SOURCE_ALLOWLIST_BASE64|Ken Deploy Production
+  source_authority: ken-production://ken-backend/REDIRECT_SYNC_SOURCE_ALLOWLIST_BASE64/Ken%20Deploy%20Production
+  kind: server_redirect_sync_bundle
+  locator: 185.183.35.189:/etc/nginx/redirect-sync-ingress
+- coordinate: ken-cms|POSTGRES_DB|Ken Deploy Production
+  source_authority: ken-production://ken-cms/POSTGRES_DB/Ken%20Deploy%20Production
+  kind: onepassword_secure_note_component
+- coordinate: ken-cms|POSTGRES_PASSWORD|Ken Deploy Production
+  source_authority: ken-production://ken-cms/POSTGRES_PASSWORD/Ken%20Deploy%20Production
+  kind: onepassword_secure_note_component
+- coordinate: ken-cms|POSTGRES_USER|Ken Deploy Production
+  source_authority: ken-production://ken-cms/POSTGRES_USER/Ken%20Deploy%20Production
+  kind: onepassword_secure_note_component
+- coordinate: ken-cms|SSH_PORT|Ken Deploy Production
+  source_authority: ken-production://ken-cms/SSH_PORT/Ken%20Deploy%20Production
+  kind: server_endpoint_metadata
+  locator: ken-do -> 174.138.6.248
+- coordinate: ken-help|DEPLOY_HOST|Ken Deploy Production
+  source_authority: ken-production://ken-help/DEPLOY_HOST/Ken%20Deploy%20Production
+  kind: active_frontend_deployment_metadata
+  locator: ken-do -> 174.138.6.248
+- coordinate: ken-help|DEPLOY_PATH|Ken Deploy Production
+  source_authority: ken-production://ken-help/DEPLOY_PATH/Ken%20Deploy%20Production
+  kind: active_frontend_deployment_metadata
+  locator: ken-do -> 174.138.6.248
+- coordinate: ken-help|DEPLOY_USER|Ken Deploy Production
+  source_authority: ken-production://ken-help/DEPLOY_USER/Ken%20Deploy%20Production
+  kind: active_frontend_deployment_metadata
+  locator: ken-do -> 174.138.6.248
+- coordinate: ken-search|ELASTICSEARCH_CERT_FINGERPRINT|Ken Deploy Production
+  source_authority: ken-production://ken-search/ELASTICSEARCH_CERT_FINGERPRINT/Ken%20Deploy%20Production
+  kind: server_certificate_derivation
+  locator: ken-search-root -> 167.235.8.250:/etc/elasticsearch/certs/http_ca.crt
