@@ -626,6 +626,295 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
             self.assertNotIn("-----begin", serialized)
             self.assertNotIn("private material", serialized)
 
+    def test_generation_retry_preserves_item_created_before_partial_failure(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            plan = root / "plan.yaml"
+            row = {
+                "coordinate": "fixture|GENERATED|Ken Deploy Production",
+                "action": "generate-random-additive",
+                "target_canonical": {
+                    "vault": "Ken Deploy Production",
+                    "item": "fixture-generated",
+                    "field": "GENERATED",
+                },
+            }
+            plan.write_text(yaml.safe_dump({"schema_version": 1, "rows": [row]}, sort_keys=False))
+            allowlist = root / "allowlist.yaml"
+            allowlist.write_text(yaml.safe_dump({"coordinates": [row["coordinate"]]}))
+            existing = False
+            run_calls = []
+
+            def run_json(**kwargs):
+                command = list(kwargs["argv"])
+                run_calls.append(command)
+                if command[:2] == ["whoami", "--format=json"]:
+                    return {
+                        "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                        "user_uuid": "writer-uuid",
+                        "user_type": "SERVICE_ACCOUNT",
+                        "ServiceAccountType": "SERVICE_ACCOUNT",
+                    }
+                if command[:3] == ["vault", "list", "--format=json"]:
+                    return [{"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"], "name": "Ken Deploy Production"}]
+                if command[:3] == ["item", "list", "--vault"]:
+                    return [{"id": "generated-id", "title": "fixture-generated"}] if existing else []
+                if command[:3] == ["item", "get", "generated-id"]:
+                    return {
+                        "id": "generated-id",
+                        "title": "fixture-generated",
+                        "vault": {"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"]},
+                        "fields": [{"label": "GENERATED", "type": "CONCEALED", "value": "existing-hidden"}],
+                        "sections": [],
+                    }
+                raise AssertionError(f"unexpected op command: {command}")
+
+            def fail_after_create(**_kwargs):
+                nonlocal existing
+                existing = True
+                raise tool.MigrationError("simulated rate limit")
+
+            with (
+                mock.patch.object(tool, "_validate_writer_scopes"),
+                mock.patch.object(tool._MIGRATION, "run_op_json", side_effect=run_json),
+                mock.patch.object(tool, "_generate_secret", return_value=("generated-once", None)) as generate,
+                mock.patch.object(tool, "_create_generated_item", side_effect=fail_after_create) as create,
+            ):
+                with self.assertRaises(tool.MigrationError):
+                    tool.generate_canonical_vaults(
+                        plan_path=plan,
+                        allowlist_path=allowlist,
+                        writer_source=tool.StaticWriterTokenSource(
+                            {
+                                "Ken CI Runtime": "writer-ci",
+                                "Ken Deploy Nonproduction": "writer-nonprod",
+                                "Ken Deploy Production": "writer-prod",
+                            }
+                        ),
+                        op_bin=root / "op",
+                        ledger_path=root / "ledger.yaml",
+                    )
+                result = tool.generate_canonical_vaults(
+                    plan_path=plan,
+                    allowlist_path=allowlist,
+                    writer_source=tool.StaticWriterTokenSource(
+                        {
+                            "Ken CI Runtime": "writer-ci",
+                            "Ken Deploy Nonproduction": "writer-nonprod",
+                            "Ken Deploy Production": "writer-prod",
+                        }
+                    ),
+                    op_bin=root / "op",
+                    ledger_path=root / "ledger.yaml",
+                )
+
+            self.assertTrue(result["ready"])
+            self.assertEqual(generate.call_count, 1)
+            self.assertEqual(create.call_count, 1)
+            self.assertTrue(any(command[:3] == ["item", "get", "generated-id"] for command in run_calls))
+
+    def test_existing_generated_item_is_verified_without_edit_or_secret_generation(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            row = {
+                "coordinate": "fixture|GENERATED|Ken Deploy Production",
+                "action": "generate-random-additive",
+                "target_canonical": {
+                    "vault": "Ken Deploy Production",
+                    "item": "fixture-generated",
+                    "field": "GENERATED",
+                },
+            }
+            plan = root / "plan.yaml"
+            plan.write_text(yaml.safe_dump({"schema_version": 1, "rows": [row]}, sort_keys=False))
+            allowlist = root / "allowlist.yaml"
+            allowlist.write_text(yaml.safe_dump({"coordinates": [row["coordinate"]]}))
+
+            def run_json(**kwargs):
+                command = list(kwargs["argv"])
+                if command[:2] == ["whoami", "--format=json"]:
+                    return {
+                        "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                        "user_uuid": "writer-uuid",
+                        "user_type": "SERVICE_ACCOUNT",
+                        "ServiceAccountType": "SERVICE_ACCOUNT",
+                    }
+                if command[:3] == ["vault", "list", "--format=json"]:
+                    return [{"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"], "name": "Ken Deploy Production"}]
+                if command[:3] == ["item", "list", "--vault"]:
+                    return [{"id": "generated-id", "title": "fixture-generated"}]
+                if command[:3] == ["item", "get", "generated-id"]:
+                    return {
+                        "id": "generated-id",
+                        "title": "fixture-generated",
+                        "vault": {"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"]},
+                        "fields": [{"label": "GENERATED", "type": "CONCEALED", "value": "existing-hidden"}],
+                        "sections": [],
+                    }
+                raise AssertionError(f"unexpected op command: {command}")
+
+            with (
+                mock.patch.object(tool, "_validate_writer_scopes"),
+                mock.patch.object(tool._MIGRATION, "run_op_json", side_effect=run_json),
+                mock.patch.object(tool, "_generate_secret", side_effect=AssertionError("must not rotate")),
+                mock.patch.object(tool._MIGRATION, "populate_item", side_effect=AssertionError("must not edit")),
+            ):
+                result = tool.generate_canonical_vaults(
+                    plan_path=plan,
+                    allowlist_path=allowlist,
+                    writer_source=tool.StaticWriterTokenSource(
+                        {
+                            "Ken CI Runtime": "writer-ci",
+                            "Ken Deploy Nonproduction": "writer-nonprod",
+                            "Ken Deploy Production": "writer-prod",
+                        }
+                    ),
+                    op_bin=root / "op",
+                    ledger_path=root / "ledger.yaml",
+                )
+            self.assertTrue(result["ready"])
+            self.assertEqual(
+                result["items"][0]["fields"],
+                [{"label": "GENERATED", "type": "CONCEALED", "status": "verified"}],
+            )
+
+    def test_existing_generated_item_with_wrong_field_type_fails_closed(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            row = {
+                "coordinate": "fixture|GENERATED|Ken Deploy Production",
+                "action": "generate-random-additive",
+                "target_canonical": {
+                    "vault": "Ken Deploy Production",
+                    "item": "fixture-generated",
+                    "field": "GENERATED",
+                },
+            }
+            plan = root / "plan.yaml"
+            plan.write_text(yaml.safe_dump({"schema_version": 1, "rows": [row]}, sort_keys=False))
+            allowlist = root / "allowlist.yaml"
+            allowlist.write_text(yaml.safe_dump({"coordinates": [row["coordinate"]]}))
+
+            def run_json(**kwargs):
+                command = list(kwargs["argv"])
+                if command[:2] == ["whoami", "--format=json"]:
+                    return {
+                        "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                        "user_uuid": "writer-uuid",
+                        "user_type": "SERVICE_ACCOUNT",
+                        "ServiceAccountType": "SERVICE_ACCOUNT",
+                    }
+                if command[:3] == ["vault", "list", "--format=json"]:
+                    return [{"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"], "name": "Ken Deploy Production"}]
+                if command[:3] == ["item", "list", "--vault"]:
+                    return [{"id": "generated-id", "title": "fixture-generated"}]
+                if command[:3] == ["item", "get", "generated-id"]:
+                    return {
+                        "id": "generated-id",
+                        "title": "fixture-generated",
+                        "vault": {"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"]},
+                        "fields": [{"label": "GENERATED", "type": "STRING", "value": "wrong-type"}],
+                        "sections": [],
+                    }
+                raise AssertionError(f"unexpected op command: {command}")
+
+            with (
+                mock.patch.object(tool, "_validate_writer_scopes"),
+                mock.patch.object(tool._MIGRATION, "run_op_json", side_effect=run_json),
+                mock.patch.object(tool, "_generate_secret", return_value=("must-not-persist", None)),
+                mock.patch.object(tool._MIGRATION, "populate_item", return_value={
+                    "coordinate": "fixture|generated",
+                    "status": "verified",
+                    "vault_id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"],
+                    "item_id": "generated-id",
+                    "fields": {"GENERATED": "CONCEALED"},
+                }),
+            ):
+                with self.assertRaisesRegex(tool.MigrationError, "item field shape mismatch"):
+                    tool.generate_canonical_vaults(
+                        plan_path=plan,
+                        allowlist_path=allowlist,
+                        writer_source=tool.StaticWriterTokenSource(
+                            {
+                                "Ken CI Runtime": "writer-ci",
+                                "Ken Deploy Nonproduction": "writer-nonprod",
+                                "Ken Deploy Production": "writer-prod",
+                            }
+                        ),
+                        op_bin=root / "op",
+                        ledger_path=root / "ledger.yaml",
+                    )
+
+    def test_existing_ssh_private_key_does_not_fabricate_public_registration(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            row = {
+                "coordinate": "fixture|SSH|Ken Deploy Production",
+                "action": "generate-ssh-additive",
+                "target_canonical": {
+                    "vault": "Ken Deploy Production",
+                    "item": "fixture-ssh",
+                    "field": "SSH_PRIVATE_KEY",
+                },
+            }
+            plan = root / "plan.yaml"
+            plan.write_text(yaml.safe_dump({"schema_version": 1, "rows": [row]}, sort_keys=False))
+            allowlist = root / "allowlist.yaml"
+            allowlist.write_text(yaml.safe_dump({"coordinates": [row["coordinate"]]}))
+
+            def run_json(**kwargs):
+                command = list(kwargs["argv"])
+                if command[:2] == ["whoami", "--format=json"]:
+                    return {
+                        "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                        "user_uuid": "writer-uuid",
+                        "user_type": "SERVICE_ACCOUNT",
+                        "ServiceAccountType": "SERVICE_ACCOUNT",
+                    }
+                if command[:3] == ["vault", "list", "--format=json"]:
+                    return [{"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"], "name": "Ken Deploy Production"}]
+                if command[:3] == ["item", "list", "--vault"]:
+                    return [{"id": "ssh-id", "title": "fixture-ssh"}]
+                if command[:3] == ["item", "get", "ssh-id"]:
+                    return {
+                        "id": "ssh-id",
+                        "title": "fixture-ssh",
+                        "vault": {"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"]},
+                        "fields": [{"label": "SSH_PRIVATE_KEY", "type": "CONCEALED", "value": "existing-private"}],
+                        "sections": [],
+                    }
+                raise AssertionError(f"unexpected op command: {command}")
+
+            artifact = root / "registration.json"
+            with (
+                mock.patch.object(tool, "_validate_writer_scopes"),
+                mock.patch.object(tool._MIGRATION, "run_op_json", side_effect=run_json),
+                mock.patch.object(tool, "_generate_secret", side_effect=AssertionError("must not fabricate public key")),
+                mock.patch.object(tool, "_create_generated_item", side_effect=AssertionError("must not write existing key")),
+            ):
+                result = tool.generate_canonical_vaults(
+                    plan_path=plan,
+                    allowlist_path=allowlist,
+                    writer_source=tool.StaticWriterTokenSource(
+                        {
+                            "Ken CI Runtime": "writer-ci",
+                            "Ken Deploy Nonproduction": "writer-nonprod",
+                            "Ken Deploy Production": "writer-prod",
+                        }
+                    ),
+                    op_bin=root / "op",
+                    ledger_path=root / "ledger.yaml",
+                    registration_artifact=artifact,
+                )
+            self.assertTrue(result["ready"])
+            registration = json.loads(artifact.read_text())
+            self.assertEqual(registration["status"], "pending")
+            self.assertEqual(registration["entries"], [])
+
     def test_generated_ssh_key_interoperates_with_ssh_keygen(self):
         tool = load_module()
         with tempfile.TemporaryDirectory() as temp:

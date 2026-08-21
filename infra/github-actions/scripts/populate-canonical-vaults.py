@@ -874,9 +874,14 @@ def _openssl_private_key() -> str:
 
 def _build_generation_groups(
     selected: Sequence[Mapping[str, Any]],
-) -> tuple[dict[tuple[str, str], dict[str, tuple[str, str, str, str | None]]], dict[tuple[str, str], list[dict[str, str]]]]:
-    grouped: dict[tuple[str, str], dict[str, tuple[str, str, str, str | None]]] = {}
-    registrations_by_item: dict[tuple[str, str], list[dict[str, str]]] = {}
+) -> dict[tuple[str, str], dict[str, tuple[str, str, Mapping[str, Any]]]]:
+    """Validate the generation plan without creating any secret material.
+
+    Values are deliberately generated only after the target has been inspected.
+    This makes a retry after a partial write safe: completed targets are verified
+    and skipped instead of being rotated.
+    """
+    grouped: dict[tuple[str, str], dict[str, tuple[str, str, Mapping[str, Any]]]] = {}
     for row in selected:
         target = row.get("target_canonical")
         if not isinstance(target, Mapping):
@@ -889,15 +894,126 @@ def _build_generation_groups(
         target_fields = grouped.setdefault((vault, item), {})
         prior = target_fields.get(field)
         if prior is None:
-            value, public = _generate_secret(row)
-            target_fields[field] = (action, profile, value, public)
-            if public is not None:
-                registrations_by_item.setdefault((vault, item), []).append(
-                    {"coordinate": row["coordinate"], "public_key": public.rstrip("\n")}
-                )
+            target_fields[field] = (action, profile, row)
         elif prior[0] != action or prior[1] != profile:
             raise MigrationError("generation target has conflicting actions")
-    return grouped, registrations_by_item
+    return grouped
+
+
+def _inspect_generation_target(
+    *,
+    op_bin: Path,
+    target_token: str,
+    expected_vault: str,
+    coordinate: str,
+    title: str,
+    fields: Mapping[str, tuple[str, str, Mapping[str, Any]]],
+    extra_env: Mapping[str, str] | None = None,
+) -> tuple[str, dict[str, Any] | None]:
+    """Return the reviewed vault ID and an existing, value-free item status."""
+    if expected_vault not in APPROVED_TARGET_VAULT_IDS:
+        raise MigrationError("target vault is not in the approved vault set")
+    identity = _MIGRATION.run_op_json(
+        op_bin=op_bin,
+        argv=["whoami", "--format=json"],
+        token=target_token,
+        extra_env=extra_env,
+    )
+    vaults = _MIGRATION.run_op_json(
+        op_bin=op_bin,
+        argv=["vault", "list", "--format=json"],
+        token=target_token,
+        extra_env=extra_env,
+    )
+    if not isinstance(identity, Mapping) or not isinstance(vaults, list):
+        raise MigrationError("service-account scope response is invalid")
+    _MIGRATION.validate_service_account_scope(identity, vaults, expected_vault)
+    vault_id = vaults[0].get("id")
+    if vault_id != APPROVED_TARGET_VAULT_IDS[expected_vault]:
+        raise MigrationError("service account vault ID is not the reviewed vault")
+    items = _MIGRATION.run_op_json(
+        op_bin=op_bin,
+        argv=["item", "list", "--vault", expected_vault, "--format=json"],
+        token=target_token,
+        extra_env=extra_env,
+    )
+    if not isinstance(items, list) or any(not isinstance(item, Mapping) for item in items):
+        raise MigrationError("item listing is invalid")
+    matches = [item for item in items if item.get("title") == title]
+    if len(matches) > 1:
+        raise MigrationError("duplicate item title")
+    if not matches:
+        return vault_id, None
+    item_id = matches[0].get("id")
+    if not isinstance(item_id, str) or not item_id:
+        raise MigrationError("existing item ID is invalid")
+    existing = _MIGRATION.run_op_json(
+        op_bin=op_bin,
+        argv=["item", "get", item_id, "--vault", expected_vault, "--format=json"],
+        token=target_token,
+        extra_env=extra_env,
+    )
+    if (
+        not isinstance(existing, Mapping)
+        or not isinstance(existing.get("vault"), Mapping)
+        or not isinstance(existing.get("fields"), list)
+        or not isinstance(existing.get("sections"), list)
+    ):
+        raise MigrationError("existing item response is invalid")
+    expected_fields = {field: "CONCEALED" for field in fields}
+    # verify_item_shape records only labels/types; concealed values never leave
+    # this process and are never included in the status or ledger.
+    return vault_id, _MIGRATION.verify_item_shape(
+        coordinate=coordinate,
+        item=existing,
+        expected_vault_id=vault_id,
+        expected_title=title,
+        expected_fields=expected_fields,
+    )
+
+
+def _create_generated_item(
+    *,
+    op_bin: Path,
+    target_token: str,
+    expected_vault: str,
+    expected_vault_id: str,
+    coordinate: str,
+    title: str,
+    concealed_fields: Mapping[str, str],
+    extra_env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Create a newly inspected target and verify its readback without editing."""
+    template = _MIGRATION.build_item_template(
+        title=title,
+        fields=concealed_fields,
+        text_fields={},
+    )
+    written = _MIGRATION.run_op_json(
+        op_bin=op_bin,
+        argv=["item", "create", "--vault", expected_vault, "--format=json", "-"],
+        token=target_token,
+        stdin_document=template,
+        extra_env=extra_env,
+    )
+    if not isinstance(written, Mapping) or not isinstance(written.get("id"), str):
+        raise MigrationError("item write response is invalid")
+    item_id = written["id"]
+    readback = _MIGRATION.run_op_json(
+        op_bin=op_bin,
+        argv=["item", "get", item_id, "--vault", expected_vault, "--format=json"],
+        token=target_token,
+        extra_env=extra_env,
+    )
+    if not isinstance(readback, Mapping):
+        raise MigrationError("item readback is invalid")
+    return _MIGRATION.verify_item_shape(
+        coordinate=coordinate,
+        item=readback,
+        expected_vault_id=expected_vault_id,
+        expected_title=title,
+        expected_fields={field: "CONCEALED" for field in concealed_fields},
+    )
 
 
 def generate_canonical_vaults(
@@ -948,31 +1064,66 @@ def generate_canonical_vaults(
         _write_failure_ledger(ledger_path, selected=len(selected), items=[], blocked=blocked or [{"coordinate": "generation|preflight", "status": "blocked", "reason": "generation preflight failed"}])
         raise
     try:
-        grouped, registrations_by_item = _build_generation_groups(selected)
+        grouped = _build_generation_groups(selected)
     except MigrationError:
         _write_failure_ledger(ledger_path, selected=len(selected), items=[], blocked=blocked or [{"coordinate": "generation|plan", "status": "blocked", "reason": "generation plan invalid"}])
         raise
-    if registrations_by_item:
+    ssh_targets = {
+        key
+        for key, fields in grouped.items()
+        if any(profile == "ssh-ed25519" for _action, profile, _row in fields.values())
+    }
+    if ssh_targets:
         if registration_artifact is None:
             raise MigrationError("SSH generation requires a protected registration artifact")
     items: list[dict[str, Any]] = []
     published_registrations: list[dict[str, str]] = []
+    registration_pending = False
     try:
         for (vault, item), fields in sorted(grouped.items()):
-            status = _MIGRATION.populate_item(
+            expected_vault_id, existing_status = _inspect_generation_target(
                 op_bin=op_bin,
-                target_token=writer_tokens[vault],
                 expected_vault=vault,
+                target_token=writer_tokens[vault],
                 coordinate=f"{vault}|{item}",
                 title=item,
-                concealed_fields={field: value[2] for field, value in fields.items()},
-                text_fields={},
+                fields=fields,
                 extra_env=extra_env,
             )
+            if existing_status is not None:
+                status = existing_status
+                if (vault, item) in ssh_targets:
+                    # A private key readback is not authority for a public-key
+                    # registration. Leave this target explicitly pending.
+                    registration_pending = True
+            else:
+                generated_fields: dict[str, str] = {}
+                generated_registrations: list[dict[str, str]] = []
+                for field, (_action, _profile, row) in fields.items():
+                    value, public = _generate_secret(row)
+                    generated_fields[field] = value
+                    if public is not None:
+                        generated_registrations.append(
+                            {"coordinate": row["coordinate"], "public_key": public.rstrip("\n")}
+                        )
+                status = _create_generated_item(
+                    op_bin=op_bin,
+                    target_token=writer_tokens[vault],
+                    expected_vault=vault,
+                    expected_vault_id=expected_vault_id,
+                    coordinate=f"{vault}|{item}",
+                    title=item,
+                    concealed_fields=generated_fields,
+                    extra_env=extra_env,
+                )
+                published_registrations.extend(generated_registrations)
             items.append(_report_item(vault, item, status))
-            published_registrations.extend(registrations_by_item.get((vault, item), []))
-            if published_registrations:
-                _write_registration_artifact(registration_artifact, published_registrations, status="pending")
+            if ssh_targets:
+                _write_registration_artifact(
+                    registration_artifact,
+                    published_registrations,
+                    status="pending",
+                )
             write_value_free_ledger(
                 ledger_path,
                 _ledger_document(status="in-progress", selected=len(selected), items=items, blocked=blocked),
@@ -980,8 +1131,12 @@ def generate_canonical_vaults(
     except (MigrationError, OSError):
         _write_failure_ledger(ledger_path, selected=len(selected), items=items, blocked=blocked or [{"coordinate": "generation|write", "status": "blocked", "reason": "generated item population failed"}])
         raise
-    if published_registrations:
-        _write_registration_artifact(registration_artifact, published_registrations, status="ready")
+    if ssh_targets:
+        _write_registration_artifact(
+            registration_artifact,
+            published_registrations,
+            status="pending" if registration_pending else "ready",
+        )
     result = _ledger_document(
         status="complete" if not blocked else "blocked", selected=len(selected), items=items, blocked=blocked
     )
