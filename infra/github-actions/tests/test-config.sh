@@ -66,6 +66,12 @@ run_inventory() {
     fail "concealed credential migration tests"
   fi
 
+  if (cd "${ROOT}" && PYTHONDONTWRITEBYTECODE=1 python3 infra/github-actions/tests/test-populate-canonical-vaults.py -q); then
+    pass "canonical vault population tests"
+  else
+    fail "canonical vault population tests"
+  fi
+
   echo "== inventory semantics =="
   if python3 - "${INV}" "${GA_ROOT}" <<'PY'
 import re
