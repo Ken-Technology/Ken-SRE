@@ -17,6 +17,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib.parse import unquote, urlsplit
 
 import yaml
 
@@ -526,8 +527,10 @@ def _parse_connection_string(raw: str) -> dict[str, str]:
         if "=" not in part:
             raise MigrationError("connection string is invalid")
         key, value = (piece.strip() for piece in part.split("=", 1))
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9 _-]*", key):
+            raise MigrationError("connection string is invalid")
         normalized = _CONNECTION_KEYS.get(key.casefold())
-        if normalized is None or not value or normalized in result:
+        if not value:
             raise MigrationError("connection string is invalid")
         if value[0] in {"'", '"'}:
             delimiter = value[0]
@@ -557,8 +560,37 @@ def _parse_connection_string(raw: str) -> dict[str, str]:
             value = inner.replace("}}", "}")
         if not value:
             raise MigrationError("connection string is invalid")
-        result[normalized] = value
+        if normalized is not None:
+            if normalized in result:
+                raise MigrationError("connection string is invalid")
+            result[normalized] = value
     return result
+
+
+def _parse_mongodb_database(raw: str) -> str:
+    if not isinstance(raw, str) or any(character in raw for character in "\r\n"):
+        raise MigrationError("mongodb connection string is invalid")
+    try:
+        parsed = urlsplit(raw)
+    except ValueError as exc:
+        raise MigrationError("mongodb connection string is invalid") from exc
+    if parsed.scheme not in {"mongodb", "mongodb+srv"} or not parsed.netloc:
+        raise MigrationError("mongodb connection string is invalid")
+    if parsed.query or parsed.fragment or not parsed.path.startswith("/"):
+        raise MigrationError("mongodb connection string is invalid")
+    if parsed.netloc.count("@") > 1:
+        raise MigrationError("mongodb connection string is invalid")
+    if parsed.username == "" or (parsed.password is not None and parsed.username is None):
+        raise MigrationError("mongodb connection string is invalid")
+    encoded_database = parsed.path[1:]
+    if not encoded_database or "/" in encoded_database:
+        raise MigrationError("mongodb connection string is invalid")
+    database = unquote(encoded_database)
+    if not database or "/" in database or any(
+        character in database for character in "\x00\r\n"
+    ):
+        raise MigrationError("mongodb connection string is invalid")
+    return database
 
 
 def _lookup_connection_component(document: Any, selector: str) -> str:
@@ -566,6 +598,8 @@ def _lookup_connection_component(document: Any, selector: str) -> str:
     if not match or match.group(2) not in _CONNECTION_COMPONENTS:
         raise MigrationError("connection component selector is invalid")
     raw = _lookup_exact_path(document, match.group(1))
+    if match.group(2) == "database" and re.match(r"^mongodb(?:\+srv)?://", raw):
+        return _parse_mongodb_database(raw)
     parsed = _parse_connection_string(raw)
     try:
         return parsed[match.group(2)]

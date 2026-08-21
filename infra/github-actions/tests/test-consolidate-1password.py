@@ -169,6 +169,61 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
             ):
                 tool._parse_connection_string(raw)
 
+    def test_connection_parser_ignores_valid_extra_options(self):
+        tool = load_module()
+
+        parsed = tool._parse_connection_string(
+            "Server=db;Database=ken;User ID=reader;Password=pw;SslMode=Required"
+        )
+
+        self.assertEqual(set(parsed), {"server", "database", "user", "password"})
+
+    def test_connection_parser_rejects_empty_or_malformed_option_keys(self):
+        tool = load_module()
+
+        for raw in (
+            "Server=db;=value",
+            "Server=db;SslMode",
+            "Server=db;Bad\nKey=value",
+        ):
+            with self.subTest(case=raw), self.assertRaisesRegex(
+                ValueError, "connection string"
+            ):
+                tool._parse_connection_string(raw)
+
+    def test_mongodb_database_parser_extracts_single_path_segment(self):
+        tool = load_module()
+
+        document = {
+            "MongoDbConfiguration": {
+                "ConnectionString": "mongodb://reader:password@db-a,db-b/ken%2Dprod"
+            }
+        }
+
+        self.assertEqual(
+            tool._lookup_connection_component(
+                document, "MongoDbConfiguration.ConnectionString[database]"
+            ),
+            "ken-prod",
+        )
+
+    def test_mongodb_database_parser_rejects_ambiguous_uri_shapes(self):
+        tool = load_module()
+        cases = (
+            "mongodb://reader:password@db-a",
+            "mongodb://reader:password@db-a/ken/other",
+            "mongodb://reader:password@db-a/ken?authSource=admin",
+            "mongodb://:password@db-a/ken",
+            "mongodb://reader:password@db-a/ken#fragment",
+            "mongodb://reader:password@db-a/ken%2Fother",
+        )
+        for raw in cases:
+            document = {"Mongo": raw}
+            with self.subTest(case=raw), self.assertRaisesRegex(
+                ValueError, "mongodb connection string"
+            ):
+                tool._lookup_connection_component(document, "Mongo[database]")
+
     def test_deployed_authority_rejects_shell_metacharacters(self):
         tool = load_module()
         shell_metacharacters = ";|&$`()<>*?!\\"
