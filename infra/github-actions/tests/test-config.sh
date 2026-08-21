@@ -40,6 +40,7 @@ run_inventory() {
   require_file "${INV}/repositories.yaml"
   require_file "${INV}/runners.yaml"
   require_file "${INV}/secrets.yaml"
+  require_file "${INV}/canonical-credentials.yaml"
   require_file "${INV}/input-manifest.yaml"
   require_file "${AUDIT}"
   require_file "${GA_ROOT}/runbooks/review-ledger.md"
@@ -50,6 +51,13 @@ run_inventory() {
     pass "focused Python collector tests"
   else
     fail "focused Python collector tests"
+  fi
+
+  echo "== canonical credential registry =="
+  if (cd "${ROOT}" && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest infra.github-actions.tests.test_canonical_credentials -q); then
+    pass "canonical credential registry tests"
+  else
+    fail "canonical credential registry tests"
   fi
 
   echo "== inventory semantics =="
