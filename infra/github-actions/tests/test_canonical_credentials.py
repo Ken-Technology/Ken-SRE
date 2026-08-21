@@ -222,7 +222,7 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
         }
         self.assertEqual(
             evidence["production-credential-comparison"]["sha256"],
-            "632bf2c744f6f83a6f231f14e6798c152e45cb91c656ae7fe31eb4bd2e7aedd7",
+            "4b2f27dbd8de06c2b8c725a8dd68d5e2b4cc9b77acce1494735bd34a0b1afe96",
         )
         self.assertEqual(
             evidence["unresolved-authority-resolution"]["sha256"],
@@ -235,6 +235,31 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
         candidate["reviewed_evidence"][0]["value_free_report_body_sha256"] = "must fail"
         with self.assertRaisesRegex(ValueError, "forbidden"):
             registry.validate_consolidation_rules(candidate)
+
+    def test_reviewed_artifacts_are_hashed_and_row_counted(self):
+        rules = registry.load_consolidation_rules(self.rules_path, verify_artifacts=True)
+        self.assertTrue(rules["reviewed_evidence"])
+
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "report.yaml"
+            artifact.write_text(
+                "value_disclosure: none\nrows:\n- id: one\n", encoding="utf-8"
+            )
+            candidate = copy.deepcopy(registry.minimal_consolidation_rules())
+            item = candidate["reviewed_evidence"][0]
+            item["artifact"] = str(artifact)
+            item["sha256"] = registry.artifact_sha256(artifact)
+            item["row_count"] = 1
+            registry.validate_reviewed_evidence_artifacts(candidate)
+
+            item["row_count"] = 1
+            artifact.write_text(
+                "value_disclosure: none\nrows:\n- id: one\n- id: two\n",
+                encoding="utf-8",
+            )
+            item["sha256"] = registry.artifact_sha256(artifact)
+            with self.assertRaisesRegex(ValueError, "row count"):
+                registry.validate_reviewed_evidence_artifacts(candidate)
 
     def test_final_shared_production_targets_are_applied(self) -> None:
         document = registry.load_registry(

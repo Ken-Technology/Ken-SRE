@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -75,12 +76,14 @@ class OpSourceAdapter(ProtectedSourceAdapter):
         *,
         op_bin: Path,
         source_token: str | None = None,
+        source_session: bool = False,
         extra_env: Mapping[str, str] | None = None,
     ):
-        if source_token is None:
-            raise MigrationError("source adapter token is required")
+        if (source_token is None) == (not source_session):
+            raise MigrationError("source adapter requires a token file or explicit session")
         self.op_bin = op_bin
         self.source_token = source_token
+        self.source_session = source_session
         self.extra_env = extra_env
 
     def resolve(self, authority: str) -> str:
@@ -109,6 +112,7 @@ class OpSourceAdapter(ProtectedSourceAdapter):
                     parsed["field"],
                 ],
                 token=self.source_token,
+                session=self.source_session,
                 extra_env=self.extra_env,
             )
             try:
@@ -122,6 +126,7 @@ class OpSourceAdapter(ProtectedSourceAdapter):
             op_bin=self.op_bin,
             argv=["item", "get", item, "--vault", vault, "--format=json"],
             token=self.source_token,
+            session=self.source_session,
             extra_env=self.extra_env,
         )
         if not isinstance(result, Mapping):
@@ -168,6 +173,7 @@ class DeployedSourceAdapter(ProtectedSourceAdapter):
         return _lookup_connection_component(document, parsed["selector"])
 
     def _read_file(self, host: str, remote_path: str) -> bytes:
+        _validate_deployed_path(remote_path)
         fixture = self.files.get((host, remote_path), self.files.get(host))
         if fixture is not None:
             path = Path(fixture)
@@ -179,8 +185,6 @@ class DeployedSourceAdapter(ProtectedSourceAdapter):
                 raise MigrationError("deployed source could not be read") from exc
         if self.ssh_bin.is_symlink() or not self.ssh_bin.is_file() or not os.access(self.ssh_bin, os.X_OK):
             raise MigrationError("SSH executable is unsafe")
-        if not remote_path.startswith("/") or "\n" in remote_path or "\x00" in remote_path:
-            raise MigrationError("deployed path is invalid")
         destination = f"{self.ssh_user}@{host}" if self.ssh_user else host
         argv: list[str] = []
         if self.ssh_key is not None:
@@ -595,11 +599,23 @@ def _minimal_env(token: str, extra_env: Mapping[str, str] | None = None) -> dict
     return env
 
 
+def _session_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Use an explicitly selected interactive ``op`` session without SA fallback."""
+    env = dict(os.environ)
+    env.pop("OP_SERVICE_ACCOUNT_TOKEN", None)
+    for key, value in (extra_env or {}).items():
+        if not isinstance(key, str) or not isinstance(value, str) or key == "OP_SERVICE_ACCOUNT_TOKEN":
+            raise MigrationError("extra environment is invalid")
+        env[key] = value
+    return env
+
+
 def run_op_json(
     *,
     op_bin: Path,
     argv: Sequence[str],
-    token: str,
+    token: str | None,
+    session: bool = False,
     stdin_document: Mapping[str, Any] | None = None,
     extra_env: Mapping[str, str] | None = None,
 ) -> Any:
@@ -614,7 +630,7 @@ def run_op_json(
         text=True,
         capture_output=True,
         check=False,
-        env=_minimal_env(token, extra_env),
+        env=_session_env(extra_env) if session else _minimal_env(token, extra_env),
     )
     payload = ""
     if completed.returncode != 0:
@@ -626,7 +642,8 @@ def run_op_bytes(
     *,
     op_bin: Path,
     argv: Sequence[str],
-    token: str,
+    token: str | None,
+    session: bool = False,
     extra_env: Mapping[str, str] | None = None,
 ) -> bytes:
     """Run a source attachment read without decoding or printing its bytes."""
@@ -639,7 +656,7 @@ def run_op_bytes(
         stdin=subprocess.DEVNULL,
         capture_output=True,
         check=False,
-        env=_minimal_env(token, extra_env),
+        env=_session_env(extra_env) if session else _minimal_env(token, extra_env),
     )
     if completed.returncode != 0:
         raise MigrationError("1Password attachment read failed")
@@ -797,6 +814,15 @@ _SOURCE_AUTHORITY_SCHEMES = _OP_AUTHORITY_SCHEMES + (
 _OP_SCHEME_NAMES = frozenset(scheme.removesuffix("://") for scheme in _OP_AUTHORITY_SCHEMES)
 _FIELD_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,127}$")
 _ITEM_TITLE = re.compile(r"^[a-z0-9][a-z0-9-]{0,126}[a-z0-9]$|^[a-z0-9]$")
+_DEPLOYED_PATH = re.compile(r"/[A-Za-z0-9][A-Za-z0-9._/-]*")
+
+
+def _validate_deployed_path(path: str) -> None:
+    """Allow only shell-safe absolute paths for SSH's remote command shell."""
+    if not isinstance(path, str) or not _DEPLOYED_PATH.fullmatch(path):
+        raise MigrationError("deployed path is invalid")
+    if any(part in {"", ".", ".."} for part in path.split("/")[1:]):
+        raise MigrationError("deployed path is invalid")
 
 
 def _parse_op_authority(authority: str) -> tuple[str, str, str]:
@@ -843,12 +869,10 @@ def _parse_source_authority(authority: str) -> dict[str, str]:
         path = "/" + path
         if (
             not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", host)
-            or not path.startswith("/")
             or not selector
-            or "//" in path
-            or "\n" in path
         ):
             raise MigrationError("deployed authority is structurally invalid")
+        _validate_deployed_path(path)
         return {"scheme": scheme, "host": host, "path": path, "selector": selector}
     if scheme == "evidence":
         if "#" not in remainder:
@@ -1354,6 +1378,32 @@ def _source_adapter_from_request(path: Path) -> ProtectedSourceAdapter:
     return MappingSourceAdapter(sources)
 
 
+def _read_protected_secret(path: Path) -> str:
+    """Read a source credential from a private, non-followed 0600 file."""
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise MigrationError("source token file could not be read") from exc
+    if not stat.S_ISREG(info.st_mode) or path.is_symlink() or info.st_nlink != 1:
+        raise MigrationError("source token file must be a regular nonsymlink file")
+    if stat.S_IMODE(info.st_mode) != 0o600:
+        raise MigrationError("source token file must have mode 0600")
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise MigrationError("source token file could not be read") from exc
+    if not raw or len(raw) > 64 * 1024:
+        raise MigrationError("source token file is invalid")
+    try:
+        token = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise MigrationError("source token file is not UTF-8") from exc
+    token = token.rstrip("\r\n")
+    if not token or any(character in token for character in "\r\n\x00"):
+        raise MigrationError("source token file is invalid")
+    return token
+
+
 def _source_adapter_from_options(
     args: argparse.Namespace,
     *,
@@ -1361,17 +1411,26 @@ def _source_adapter_from_options(
 ) -> ProtectedSourceAdapter:
     if request is not None:
         return _source_adapter_from_request(request)
-    source_token = getattr(args, "source_token", None)
+    source_token_file = getattr(args, "source_token_file", None)
+    source_session = bool(getattr(args, "source_session", False))
+    if source_token_file is not None and source_session:
+        raise MigrationError("source token file and source session are mutually exclusive")
+    source_token = (
+        _read_protected_secret(source_token_file)
+        if source_token_file is not None
+        else None
+    )
     op_adapter = None
-    if source_token is not None:
+    if source_token is not None or source_session:
         op_adapter = OpSourceAdapter(
             op_bin=getattr(args, "source_op_bin", Path("/usr/local/bin/op")),
             source_token=source_token,
+            source_session=source_session,
         )
     ssh_adapter = None
     ssh_bin = getattr(args, "source_ssh_bin", None)
     ssh_key = getattr(args, "source_ssh_key", None)
-    if source_token is not None or ssh_bin is not None or ssh_key is not None:
+    if ssh_bin is not None or ssh_key is not None:
         ssh_adapter = DeployedSourceAdapter(
             ssh_bin=ssh_bin or Path("/usr/bin/ssh"),
             source_token=source_token,
@@ -1492,7 +1551,7 @@ def _batch_input_from_stdin() -> Mapping[str, Any]:
 def _plan_batch_command(args: argparse.Namespace) -> int:
     source_adapter = (
         _source_adapter_from_options(args, request=args.request)
-        if args.request is not None or args.source_token is not None
+        if args.request is not None or args.source_token_file is not None or args.source_session
         else None
     )
     plan = plan_batch(registry_path=args.registry, source_adapter=source_adapter)
@@ -1510,7 +1569,7 @@ def _discover_command(args: argparse.Namespace) -> int:
 def _verify_command(args: argparse.Namespace) -> int:
     source_adapter = (
         _source_adapter_from_options(args, request=args.request)
-        if args.request is not None or args.source_token is not None
+        if args.request is not None or args.source_token_file is not None or args.source_session
         else None
     )
     document = _registry_document(registry_path=args.registry, registry=None)
@@ -1678,7 +1737,16 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     def add_source_options(command: argparse.ArgumentParser) -> None:
-        command.add_argument("--source-token", help="source-reader credential (never the target writer token)")
+        command.add_argument(
+            "--source-token-file",
+            type=Path,
+            help="0600 nonsymlink file containing the source-reader credential",
+        )
+        command.add_argument(
+            "--source-session",
+            action="store_true",
+            help="explicitly use the authenticated local 1Password session",
+        )
         command.add_argument("--source-op-bin", type=Path, default=Path("/usr/local/bin/op"))
         command.add_argument("--source-ssh-bin", type=Path)
         command.add_argument("--source-ssh-key", type=Path)

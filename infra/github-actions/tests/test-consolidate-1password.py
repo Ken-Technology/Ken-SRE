@@ -124,6 +124,75 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "connection string"):
                 tool._parse_connection_string("Server=db;Password=pw;Password=other")
 
+    def test_deployed_authority_rejects_shell_metacharacters(self):
+        tool = load_module()
+        shell_metacharacters = ";|&$`()<>*?!\\"
+        for character in shell_metacharacters:
+            authority = (
+                "deployed://host.example/var/www/appsettings.json"
+                f"{character}id#OpenAi.ApiKey"
+            )
+            with self.subTest(character=character), self.assertRaisesRegex(
+                ValueError, "deployed path"
+            ):
+                tool._parse_source_authority(authority)
+
+    def test_source_token_is_read_from_protected_file_not_cli_value(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            token_file = root / "source-token"
+            token_file.write_text("source-account-token\n")
+            token_file.chmod(0o600)
+            args = type(
+                "Args",
+                (),
+                {
+                    "source_token_file": token_file,
+                    "source_op_bin": Path("/usr/local/bin/op"),
+                    "source_ssh_bin": None,
+                    "source_ssh_key": None,
+                    "source_ssh_user": None,
+                    "evidence_root": None,
+                },
+            )()
+            adapter = tool._source_adapter_from_options(args)
+            self.assertEqual(adapter.op_adapter.source_token, "source-account-token")
+            self.assertFalse(hasattr(args, "source_token"))
+
+            token_file.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, "0600"):
+                tool._source_adapter_from_options(args)
+
+    def test_source_session_is_explicit_and_cannot_inherit_target_token(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_path = root / "source-session.json"
+            fake_op = root / "op"
+            fake_op.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os\n"
+                "json.dump({'has_service_token': 'OP_SERVICE_ACCOUNT_TOKEN' in os.environ}, open(os.environ['LOG'], 'w'))\n"
+                "print(json.dumps({'fields':[{'label':'username','value':'source-secret'}]}))\n"
+            )
+            fake_op.chmod(0o755)
+            adapter = tool.OpSourceAdapter(
+                op_bin=fake_op,
+                source_session=True,
+                extra_env={"LOG": str(log_path), "OP_SERVICE_ACCOUNT_TOKEN": "must-reject"},
+            )
+            with self.assertRaisesRegex(ValueError, "extra environment"):
+                adapter.resolve("op://Development/source/username")
+
+            adapter = tool.OpSourceAdapter(
+                op_bin=fake_op,
+                source_session=True,
+                extra_env={"LOG": str(log_path)},
+            )
+            adapter.resolve("op://Development/source/username")
+            self.assertFalse(json.loads(log_path.read_text())["has_service_token"])
+
     def test_source_and_target_tokens_are_distinct(self):
         tool = load_module()
         with self.assertRaises(TypeError):

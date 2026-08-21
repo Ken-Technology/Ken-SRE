@@ -8,7 +8,9 @@ evidence derived from its value.
 
 from __future__ import annotations
 
+import hashlib
 import re
+import stat
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -122,7 +124,7 @@ REVIEWED_EVIDENCE_ARTIFACTS = {
     },
     "production-credential-comparison": {
         "artifact": "/tmp/ken-production-credential-comparison.yaml",
-        "sha256": "632bf2c744f6f83a6f231f14e6798c152e45cb91c656ae7fe31eb4bd2e7aedd7",
+        "sha256": "4b2f27dbd8de06c2b8c725a8dd68d5e2b4cc9b77acce1494735bd34a0b1afe96",
         "row_count": 57,
     },
     "unresolved-authority-resolution": {
@@ -630,6 +632,75 @@ def _walk_rule_forbidden_keys(value: Any, path: str = "document") -> None:
             _walk_rule_forbidden_keys(child, f"{path}[{index}]")
 
 
+_ARTIFACT_FORBIDDEN_KEYS = frozenset(
+    {
+        "secret",
+        "secret_value",
+        "plaintext",
+        "credential_value",
+        "token_value",
+        "private_key",
+        "password",
+        "api_key",
+    }
+)
+
+
+def artifact_sha256(path: str | Path) -> str:
+    """Return a reviewed artifact digest without exposing its contents."""
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ValueError("reviewed evidence artifact could not be read") from exc
+
+
+def _validate_value_free_artifact(document: Any, path: str) -> None:
+    if not isinstance(document, Mapping):
+        raise ValueError(f"reviewed evidence artifact is not a mapping: {path}")
+    if "value_disclosure" in document and document["value_disclosure"] != "none":
+        raise ValueError(f"reviewed evidence artifact discloses values: {path}")
+
+    def walk(value: Any, location: str) -> None:
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                if isinstance(key, str) and key.casefold() in _ARTIFACT_FORBIDDEN_KEYS:
+                    raise ValueError(
+                        f"reviewed evidence artifact contains a value field: {location}.{key}"
+                    )
+                walk(child, f"{location}.{key}")
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, f"{location}[{index}]")
+
+    walk(document, "artifact")
+
+
+def validate_reviewed_evidence_artifacts(document: Mapping[str, Any]) -> None:
+    """Hash and structurally validate each approved evidence artifact."""
+    for item in document["reviewed_evidence"]:
+        artifact = Path(item["artifact"])
+        try:
+            info = artifact.lstat()
+        except OSError as exc:
+            raise ValueError(f"reviewed evidence artifact is missing: {artifact}") from exc
+        if not stat.S_ISREG(info.st_mode) or artifact.is_symlink() or info.st_nlink != 1:
+            raise ValueError(f"reviewed evidence artifact is not a regular file: {artifact}")
+        if artifact_sha256(artifact) != item["sha256"]:
+            raise ValueError(f"reviewed evidence artifact sha256 mismatch: {item['id']}")
+        try:
+            with artifact.open("r", encoding="utf-8") as stream:
+                artifact_document = yaml.load(stream, Loader=UniqueKeySafeLoader)
+        except (OSError, UnicodeError, yaml.YAMLError) as exc:
+            raise ValueError(f"reviewed evidence artifact is invalid: {item['id']}") from exc
+        _validate_value_free_artifact(artifact_document, str(artifact))
+        rows = artifact_document.get("rows") if isinstance(artifact_document, Mapping) else None
+        if rows is not None and not isinstance(rows, list):
+            raise ValueError(f"reviewed evidence artifact rows are invalid: {item['id']}")
+        actual_row_count = len(rows) if isinstance(rows, list) else 1
+        if actual_row_count != item["row_count"]:
+            raise ValueError(f"reviewed evidence artifact row count mismatch: {item['id']}")
+
+
 def _validate_rule_target(target: Any, path: str) -> None:
     if not isinstance(target, dict):
         raise ValueError(f"{path} must be a mapping")
@@ -792,12 +863,17 @@ def validate_consolidation_rules(document: Any) -> dict[str, Any]:
     return document
 
 
-def load_consolidation_rules(path: str | Path) -> dict[str, Any]:
-    """Load and validate the value-free reviewed consolidation rules."""
+def load_consolidation_rules(
+    path: str | Path, *, verify_artifacts: bool = False
+) -> dict[str, Any]:
+    """Load rules; hash external evidence only when explicitly requested."""
     rules_path = Path(path)
     with rules_path.open("r", encoding="utf-8") as stream:
         document = yaml.load(stream, Loader=UniqueKeySafeLoader)
-    return validate_consolidation_rules(document)
+    validated = validate_consolidation_rules(document)
+    if verify_artifacts:
+        validate_reviewed_evidence_artifacts(validated)
+    return validated
 
 
 def entry_target(entry: Mapping[str, Any]) -> tuple[Any, ...]:
