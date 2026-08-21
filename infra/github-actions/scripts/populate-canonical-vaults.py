@@ -48,6 +48,7 @@ GENERATION_ACTIONS = frozenset({"generate-random-additive", "generate-ssh-additi
 FIELD_TYPES = frozenset({"CONCEALED", "STRING"})
 APPROVED_PERSONAL_ACCOUNT_UUID = "PHLSEQ2HNVAALEWHKWGKZOAGSY"
 APPROVED_PERSONAL_VAULT_NAME = "Employee"
+APPROVED_PERSONAL_VAULT_ID = "crnj3w2djpvppe452icvu6fblm"
 APPROVED_WRITER_ITEMS = {
     "Ken CI Runtime": {
         "id": "j34dtkat667tgzeopkanjwbdau",
@@ -134,22 +135,34 @@ class PersonalWriterTokenSource:
 
     def load(self) -> dict[str, str]:
         tokens: dict[str, str] = {}
-        if self.personal_account:
-            identity = _run_personal_session_json(
+        def run_json(argv: Sequence[str]) -> Any:
+            command = _personal_account_argv(argv)
+            if self.personal_account:
+                return _run_personal_session_json(
+                    op_bin=self.op_bin, argv=command, extra_env=self.extra_env
+                )
+            return _MIGRATION.run_op_json(
                 op_bin=self.op_bin,
-                argv=["whoami", "--format=json"],
+                argv=command,
+                token=self.personal_token,
                 extra_env=self.extra_env,
             )
+
+        try:
+            identity = run_json(["whoami", "--format=json"])
+        except MigrationError:
+            identity = run_json(
+                ["account", "get", "--format=json"]
+            )
+            _validate_personal_account_record(identity)
+        else:
             _validate_personal_identity(identity)
-            vault = _run_personal_session_json(
-                op_bin=self.op_bin,
-                argv=["vault", "get", APPROVED_PERSONAL_VAULT_NAME, "--format=json"],
-                extra_env=self.extra_env,
-            )
-            _validate_personal_vault(vault)
+        vault = run_json(["vault", "get", APPROVED_PERSONAL_VAULT_NAME, "--format=json"])
+        personal_vault_id = _validate_personal_vault(vault)
         for vault in sorted(TARGET_VAULTS):
             item_id = self.token_items[vault]
-            argv = ["item", "get", item_id, "--vault", self.personal_vault, "--format=json"]
+            argv = ["item", "get", item_id, "--vault", personal_vault_id, "--format=json"]
+            argv = _personal_account_argv(argv)
             if self.personal_account:
                 response = _run_personal_session_json(
                     op_bin=self.op_bin, argv=argv, extra_env=self.extra_env
@@ -161,7 +174,7 @@ class PersonalWriterTokenSource:
                     token=self.personal_token,
                     extra_env=self.extra_env,
                 )
-            _validate_personal_token_item(response, vault, item_id)
+            _validate_personal_token_item(response, vault, item_id, personal_vault_id)
             token = _extract_personal_token(response)
             if token == self.personal_token:
                 raise MigrationError("personal source and writer token must be distinct")
@@ -178,13 +191,7 @@ def _run_personal_session_json(
         raise MigrationError("1Password executable is unsafe")
     if any(not isinstance(argument, str) or "\n" in argument for argument in argv):
         raise MigrationError("1Password argument is invalid")
-    environment = dict(os.environ)
-    service_account_env = "OP_" + "SERVICE_ACCOUNT_TOKEN"
-    environment.pop(service_account_env, None)
-    for key, value in (extra_env or {}).items():
-        if not isinstance(key, str) or not isinstance(value, str) or key == service_account_env:
-            raise MigrationError("personal session environment is invalid")
-        environment[key] = value
+    environment = _personal_session_environment(extra_env)
     try:
         completed = subprocess.run(
             [str(op_bin), *argv],
@@ -218,28 +225,74 @@ def _extract_personal_token(response: Any) -> str:
     return candidates[0]
 
 
+def _personal_account_argv(argv: Sequence[str]) -> list[str]:
+    return [*argv, "--account", APPROVED_PERSONAL_ACCOUNT_UUID]
+
+
+_PERSONAL_ENV_KEYS = frozenset({"HOME", "PATH", "LANG", "LC_ALL", "TMPDIR"})
+_PERSONAL_EXTRA_ENV_KEYS = frozenset({"LOG", "FAKE_OP_LOG", "OP_BIOMETRIC_UNLOCK_ENABLED"})
+
+
+def _personal_session_environment(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Build the narrowly-scoped environment needed by desktop ``op`` integration."""
+    environment = {
+        "HOME": os.environ.get("HOME") or "/nonexistent",
+        "PATH": os.environ.get("PATH") or "/usr/bin:/bin",
+        "LANG": os.environ.get("LANG") or "C.UTF-8",
+        "LC_ALL": os.environ.get("LC_ALL") or "C.UTF-8",
+        "TMPDIR": os.environ.get("TMPDIR") or "/tmp",
+    }
+    if set(environment) != _PERSONAL_ENV_KEYS:
+        raise MigrationError("personal session environment is invalid")
+    for key, value in (extra_env or {}).items():
+        if (
+            not isinstance(key, str)
+            or not isinstance(value, str)
+            or key not in _PERSONAL_EXTRA_ENV_KEYS
+            or key.startswith("OP_SESSION")
+            or key.startswith("OP_CONNECT")
+            or key in {"OP_" + "SERVICE_ACCOUNT_TOKEN", "OP_ACCOUNT"}
+        ):
+            raise MigrationError("personal session environment is invalid")
+        environment[key] = value
+    return environment
+
+
 def _validate_personal_identity(response: Any) -> None:
-    if not isinstance(response, Mapping) or response.get("id") != APPROVED_PERSONAL_ACCOUNT_UUID:
+    if not isinstance(response, Mapping) or response.get("account_uuid") != APPROVED_PERSONAL_ACCOUNT_UUID:
         raise MigrationError("personal account identity is not the reviewed account")
-    if str(response.get("type", "")).upper() not in {"USER", "PERSON"}:
+    if not isinstance(response.get("user_uuid"), str) or not response["user_uuid"]:
+        raise MigrationError("personal account identity is invalid")
+    if str(response.get("user_type", "")).upper() not in {"PERSON", "USER"}:
         raise MigrationError("personal account identity is invalid")
 
 
-def _validate_personal_vault(response: Any) -> None:
+def _validate_personal_account_record(response: Any) -> None:
+    if not isinstance(response, Mapping) or response.get("id") != APPROVED_PERSONAL_ACCOUNT_UUID:
+        raise MigrationError("personal account identity is not the reviewed account")
+    if str(response.get("type", "")).upper() != "TEAM":
+        raise MigrationError("personal account identity is invalid")
+    if str(response.get("state", "")).upper() != "ACTIVE":
+        raise MigrationError("personal account identity is invalid")
+
+
+def _validate_personal_vault(response: Any) -> str:
     if not isinstance(response, Mapping) or response.get("name") != APPROVED_PERSONAL_VAULT_NAME:
         raise MigrationError("personal source vault is not the reviewed vault")
-    vault_id = response.get("id")
-    if not isinstance(vault_id, str) or not vault_id:
-        raise MigrationError("personal source vault metadata is invalid")
+    if response.get("id") != APPROVED_PERSONAL_VAULT_ID:
+        raise MigrationError("personal source vault is not the reviewed vault")
+    return APPROVED_PERSONAL_VAULT_ID
 
 
-def _validate_personal_token_item(response: Any, vault: str, item_id: str) -> None:
+def _validate_personal_token_item(response: Any, vault: str, item_id: str, vault_id: str) -> None:
     expected = APPROVED_WRITER_ITEMS[vault]
     if not isinstance(response, Mapping) or response.get("id") != item_id:
         raise MigrationError("personal token item ID mismatch")
     if response.get("title") != expected["title"]:
         raise MigrationError("personal token item title mismatch")
-    if response.get("vault", {}).get("name") not in {None, APPROVED_PERSONAL_VAULT_NAME}:
+    if response.get("vault", {}).get("id") != vault_id:
+        raise MigrationError("personal token item vault mismatch")
+    if response.get("vault", {}).get("name") != APPROVED_PERSONAL_VAULT_NAME:
         raise MigrationError("personal token item vault mismatch")
     fields = response.get("fields")
     if not isinstance(fields, list):
@@ -643,13 +696,17 @@ def _allowlist(path: Path) -> set[str]:
 def _source_adapter_from_cli(args: argparse.Namespace) -> Any:
     source_token = None
     source_token_file = getattr(args, "source_token_file", None)
+    source_session = bool(getattr(args, "source_session", False))
+    if source_token_file is not None and source_session:
+        raise MigrationError("source token file and source session are mutually exclusive")
     if source_token_file is not None:
         source_token = _read_protected_token(source_token_file)
     op_adapter = None
-    if source_token is not None:
+    if source_token is not None or source_session:
         op_adapter = OpSourceAdapter(
             op_bin=args.source_op_bin,
             source_token=source_token,
+            source_session=source_session,
         )
     ssh_adapter = None
     if source_token is not None or args.source_ssh_bin is not None or args.source_ssh_key is not None:
@@ -938,6 +995,11 @@ def _cli() -> argparse.ArgumentParser:
     populate.add_argument("--personal-account", action="store_true")
     populate.add_argument("--personal-vault", default="Employee")
     populate.add_argument("--source-token-file", type=Path)
+    populate.add_argument(
+        "--source-session",
+        action="store_true",
+        help="read source authorities through the authenticated local 1Password desktop session",
+    )
     populate.add_argument("--source-op-bin", type=Path, default=Path("/usr/local/bin/op"))
     populate.add_argument("--source-ssh-bin", type=Path)
     populate.add_argument("--source-ssh-key", type=Path)

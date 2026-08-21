@@ -83,6 +83,8 @@ def write_fake_op(root):
         "#!/usr/bin/env python3\n"
         "import json, os, sys\n"
         "args = sys.argv[1:]\n"
+        "account = 'PHLSEQ2HNVAALEWHKWGKZOAGSY' if 'PHLSEQ2HNVAALEWHKWGKZOAGSY' in args else None\n"
+        "command = args[:args.index('--account')] if account else args\n"
         "token = os.environ.get('OP_SERVICE_ACCOUNT_TOKEN', '')\n"
         "state_path = os.path.join(os.path.dirname(sys.argv[0]), 'fake-state.json')\n"
         "try: state = json.load(open(state_path, encoding='utf-8'))\n"
@@ -93,20 +95,29 @@ def write_fake_op(root):
         "    with open(log, 'a', encoding='utf-8') as handle:\n"
         "        handle.write(json.dumps({'argv': args, 'token': token, 'stdin': stdin}) + '\\n')\n"
         "if token == 'personal-session':\n"
-        "    item_id = args[args.index('get') + 1]\n"
-        "    values = {'j34dtkat667tgzeopkanjwbdau': 'writer-ci', 'h5lsxmq25qrgk4x22wf4k57z24': 'writer-nonprod', '5ncmp2wtb44nmvdwmlo5coirq4': 'writer-prod'}\n"
-        "    titles = {'j34dtkat667tgzeopkanjwbdau': 'Service Account Auth Token: ken-ci-runtime', 'h5lsxmq25qrgk4x22wf4k57z24': 'Service Account Auth Token: ken-deploy-nonproduction', '5ncmp2wtb44nmvdwmlo5coirq4': 'Service Account Auth Token: ken-deploy-production'}\n"
-        "    print(json.dumps({'id': item_id, 'title': titles[item_id], 'vault': {'name': 'Employee'}, 'fields': [{'label': 'credential', 'type': 'CONCEALED', 'value': values[item_id]}]}))\n"
-        "elif token == '':\n"
-        "    if args[:2] == ['whoami', '--format=json']:\n"
-        "        print(json.dumps({'id': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'type': 'USER'}))\n"
-        "    elif args[:2] == ['vault', 'get']:\n"
-        "        print(json.dumps({'id': 'employee-vault-id', 'name': 'Employee'}))\n"
+        "    if command[:2] == ['whoami', '--format=json']:\n"
+        "        print(json.dumps({'account_uuid': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'user_uuid': 'user-uuid', 'user_type': 'PERSON'}))\n"
+        "    elif command[:2] == ['account', 'get']:\n"
+        "        print(json.dumps({'id': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'type': 'TEAM', 'state': 'ACTIVE'}))\n"
+        "    elif command[:2] == ['vault', 'get']:\n"
+        "        print(json.dumps({'id': 'crnj3w2djpvppe452icvu6fblm', 'name': 'Employee'}))\n"
         "    else:\n"
-        "        item_id = args[args.index('get') + 1]\n"
+        "        item_id = command[command.index('get') + 1]\n"
         "        values = {'j34dtkat667tgzeopkanjwbdau': 'writer-ci', 'h5lsxmq25qrgk4x22wf4k57z24': 'writer-nonprod', '5ncmp2wtb44nmvdwmlo5coirq4': 'writer-prod'}\n"
         "        titles = {'j34dtkat667tgzeopkanjwbdau': 'Service Account Auth Token: ken-ci-runtime', 'h5lsxmq25qrgk4x22wf4k57z24': 'Service Account Auth Token: ken-deploy-nonproduction', '5ncmp2wtb44nmvdwmlo5coirq4': 'Service Account Auth Token: ken-deploy-production'}\n"
-        "        print(json.dumps({'id': item_id, 'title': titles[item_id], 'vault': {'name': 'Employee'}, 'fields': [{'label': 'credential', 'type': 'CONCEALED', 'value': values[item_id]}]}))\n"
+        "        print(json.dumps({'id': item_id, 'title': titles[item_id], 'vault': {'id': 'crnj3w2djpvppe452icvu6fblm', 'name': 'Employee'}, 'fields': [{'label': 'credential', 'type': 'CONCEALED', 'value': values[item_id]}]}))\n"
+        "elif token == '':\n"
+        "    if command[:2] == ['whoami', '--format=json']:\n"
+        "        print(json.dumps({'account_uuid': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'user_uuid': 'user-uuid', 'user_type': 'PERSON'}))\n"
+        "    elif command[:2] == ['account', 'get']:\n"
+        "        print(json.dumps({'id': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'type': 'TEAM', 'state': 'ACTIVE'}))\n"
+        "    elif command[:2] == ['vault', 'get']:\n"
+        "        print(json.dumps({'id': 'crnj3w2djpvppe452icvu6fblm', 'name': 'Employee'}))\n"
+        "    else:\n"
+        "        item_id = command[command.index('get') + 1]\n"
+        "        values = {'j34dtkat667tgzeopkanjwbdau': 'writer-ci', 'h5lsxmq25qrgk4x22wf4k57z24': 'writer-nonprod', '5ncmp2wtb44nmvdwmlo5coirq4': 'writer-prod'}\n"
+        "        titles = {'j34dtkat667tgzeopkanjwbdau': 'Service Account Auth Token: ken-ci-runtime', 'h5lsxmq25qrgk4x22wf4k57z24': 'Service Account Auth Token: ken-deploy-nonproduction', '5ncmp2wtb44nmvdwmlo5coirq4': 'Service Account Auth Token: ken-deploy-production'}\n"
+        "        print(json.dumps({'id': item_id, 'title': titles[item_id], 'vault': {'id': 'crnj3w2djpvppe452icvu6fblm', 'name': 'Employee'}, 'fields': [{'label': 'credential', 'type': 'CONCEALED', 'value': values[item_id]}]}))\n"
         "elif token.startswith('source-'):\n"
         "    print(json.dumps({'title': 'source', 'fields': [{'label': 'credential', 'value': 'resolved-secret'}]}))\n"
         "elif args[:2] == ['whoami', '--format=json']:\n"
@@ -215,10 +226,13 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
             self.assertTrue(result["ready"])
             calls = [json.loads(line) for line in (root / "op.log").read_text().splitlines()]
             personal_reads = [
-                call for call in calls if call["argv"][:2] == ["item", "get"] and "Employee" in call["argv"]
+                call for call in calls if call["argv"][-2:] == ["--account", tool.APPROVED_PERSONAL_ACCOUNT_UUID]
+                and call["argv"][:2] == ["item", "get"]
+                and tool.APPROVED_PERSONAL_VAULT_ID in call["argv"]
             ]
             self.assertEqual(len(personal_reads), 6)
             self.assertTrue(all(call["token"] == "" for call in personal_reads))
+            self.assertTrue(all(call["argv"][-2:] == ["--account", tool.APPROVED_PERSONAL_ACCOUNT_UUID] for call in personal_reads))
             target_calls = [
                 call for call in calls
                 if call not in personal_reads
@@ -226,6 +240,83 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
             ]
             self.assertTrue(target_calls)
             self.assertTrue(all(call["token"] in set(tokens.values()) for call in target_calls))
+
+    def test_personal_authority_uses_real_whoami_schema_and_exact_vault_id(self):
+        tool = load_module()
+        self.assertEqual(tool.APPROVED_PERSONAL_VAULT_ID, "crnj3w2djpvppe452icvu6fblm")
+        with self.assertRaisesRegex(ValueError, "reviewed account"):
+            tool._validate_personal_identity({"id": tool.APPROVED_PERSONAL_ACCOUNT_UUID, "type": "USER"})
+        tool._validate_personal_identity(
+            {
+                "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                "user_uuid": "user-uuid",
+                "user_type": "PERSON",
+            }
+        )
+        self.assertEqual(
+            tool._validate_personal_vault(
+                {"id": tool.APPROVED_PERSONAL_VAULT_ID, "name": tool.APPROVED_PERSONAL_VAULT_NAME}
+            ),
+            tool.APPROVED_PERSONAL_VAULT_ID,
+        )
+        with self.assertRaisesRegex(ValueError, "reviewed vault"):
+            tool._validate_personal_vault({"id": "other", "name": "Employee"})
+
+    def test_personal_session_environment_is_allowlisted_and_strips_account_and_tokens(self):
+        tool = load_module()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "OP_SERVICE_ACCOUNT_TOKEN": "must-strip",
+                "OP_ACCOUNT": "must-strip",
+                "OP_SESSION_foo": "must-strip",
+                "OP_CONNECT_HOST": "must-strip",
+                "UNRELATED_SECRET": "must-strip",
+                "HOME": "/private/test-home",
+                "PATH": "/usr/bin:/bin",
+            },
+            clear=True,
+        ):
+            env = tool._personal_session_environment()
+        self.assertEqual(env["HOME"], "/private/test-home")
+        self.assertEqual(env["PATH"], "/usr/bin:/bin")
+        self.assertNotIn("OP_SERVICE_ACCOUNT_TOKEN", env)
+        self.assertNotIn("OP_ACCOUNT", env)
+        self.assertFalse(any(key.startswith("OP_SESSION") for key in env))
+        self.assertFalse(any(key.startswith("OP_CONNECT") for key in env))
+        self.assertNotIn("UNRELATED_SECRET", env)
+
+    def test_population_cli_exposes_explicit_source_session_and_rejects_token_file_pair(self):
+        tool = load_module()
+        args = tool._cli().parse_args(
+            [
+                "populate",
+                "--registry",
+                "registry.yaml",
+                "--ledger",
+                "ledger.yaml",
+                "--writer-token-items",
+                "items.yaml",
+                "--source-session",
+            ]
+        )
+        self.assertTrue(args.source_session)
+        with tempfile.TemporaryDirectory() as temp:
+            token_file = Path(temp) / "token"
+            token_file.write_text("source-token")
+            token_file.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+                tool._source_adapter_from_cli(
+                    mock.Mock(
+                        source_token_file=token_file,
+                        source_session=True,
+                        source_op_bin=Path("/bin/false"),
+                        source_ssh_bin=None,
+                        source_ssh_key=None,
+                        source_ssh_user=None,
+                        evidence_root=None,
+                    )
+                )
 
     def test_known_population_resolves_schemes_groups_fields_and_writes_value_only_to_stdin(self):
         tool = load_module()

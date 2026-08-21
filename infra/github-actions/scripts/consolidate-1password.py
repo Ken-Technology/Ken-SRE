@@ -35,6 +35,7 @@ class MigrationError(ValueError):
 APPROVED_VAULTS = frozenset(ALLOWED_VAULTS)
 _ITEM_DISPOSITIONS = frozenset({"canonical-item", "dedicated-item"})
 _FIELD_TYPES = frozenset({"CONCEALED", "STRING"})
+_PERSONAL_ACCOUNT_UUID = "PHLSEQ2HNVAALEWHKWGKZOAGSY"
 
 
 class ProtectedSourceAdapter:
@@ -103,7 +104,7 @@ class OpSourceAdapter(ProtectedSourceAdapter):
             _require_attachment(result, parsed["field"])
             raw = run_op_bytes(
                 op_bin=self.op_bin,
-                argv=[
+                argv=self._session_argv([
                     "item",
                     "get",
                     parsed["item"],
@@ -111,7 +112,7 @@ class OpSourceAdapter(ProtectedSourceAdapter):
                     parsed["vault"],
                     "--file",
                     parsed["field"],
-                ],
+                ]),
                 token=self.source_token,
                 session=self.source_session,
                 extra_env=self.extra_env,
@@ -125,7 +126,7 @@ class OpSourceAdapter(ProtectedSourceAdapter):
     def _get_item(self, vault: str, item: str) -> Mapping[str, Any]:
         result = run_op_json(
             op_bin=self.op_bin,
-            argv=["item", "get", item, "--vault", vault, "--format=json"],
+            argv=self._session_argv(["item", "get", item, "--vault", vault, "--format=json"]),
             token=self.source_token,
             session=self.source_session,
             extra_env=self.extra_env,
@@ -136,6 +137,11 @@ class OpSourceAdapter(ProtectedSourceAdapter):
         if returned_title is not None and returned_title != item:
             raise MigrationError("source item title mismatch")
         return result
+
+    def _session_argv(self, argv: Sequence[str]) -> list[str]:
+        if not self.source_session:
+            return list(argv)
+        return [*argv, "--account", _PERSONAL_ACCOUNT_UUID]
 
 
 class DeployedSourceAdapter(ProtectedSourceAdapter):
@@ -694,10 +700,30 @@ def _minimal_env(token: str, extra_env: Mapping[str, str] | None = None) -> dict
 
 def _session_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     """Use an explicitly selected interactive ``op`` session without SA fallback."""
-    env = dict(os.environ)
-    env.pop("OP_SERVICE_ACCOUNT_TOKEN", None)
+    env = {
+        "HOME": os.environ.get("HOME") or "/nonexistent",
+        "PATH": os.environ.get("PATH") or "/usr/bin:/bin",
+        "LANG": os.environ.get("LANG") or "C.UTF-8",
+        "LC_ALL": os.environ.get("LC_ALL") or "C.UTF-8",
+        "TMPDIR": os.environ.get("TMPDIR") or "/tmp",
+    }
+    allowed_extra = {
+        "LOG",
+        "FAKE_LOG",
+        "FAKE_OP_LOG",
+        "OP_LOG",
+        "SSH_LOG",
+        "OP_BIOMETRIC_UNLOCK_ENABLED",
+    }
     for key, value in (extra_env or {}).items():
-        if not isinstance(key, str) or not isinstance(value, str) or key == "OP_SERVICE_ACCOUNT_TOKEN":
+        if (
+            not isinstance(key, str)
+            or not isinstance(value, str)
+            or key not in allowed_extra
+            or key.startswith("OP_SESSION")
+            or key.startswith("OP_CONNECT")
+            or key in {"OP_SERVICE_ACCOUNT_TOKEN", "OP_ACCOUNT"}
+        ):
             raise MigrationError("extra environment is invalid")
         env[key] = value
     return env
