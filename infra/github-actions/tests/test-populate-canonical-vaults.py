@@ -457,6 +457,52 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
             self.assertEqual(result["blocked"][0]["coordinate"], entries[1]["coordinate"])
             self.assertNotIn("known-secret", json.dumps(result))
 
+    def test_live_scan_stale_authorities_stay_unresolved_and_known_only_excludes_them(self):
+        tool = load_module()
+        document = yaml.safe_load(
+            (ROOT / "inventory" / "canonical-credentials.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        expected = {
+            "ken-backend|AUTOMATIONS_WEBHOOK_SECRET_KEY|Ken Deploy Production": (
+                "ken-backend-automations-webhook-secret-key-production",
+                "AUTOMATIONS_WEBHOOK_SECRET_KEY",
+            ),
+            "ken-backend|CLOUDFLARE_REDIRECT_HMAC_KEY|Ken Deploy Production": (
+                "ken-backend-cloudflare-redirect-hmac-key-production",
+                "CLOUDFLARE_REDIRECT_HMAC_KEY",
+            ),
+            "ken-backend|CLOUDFLARE_REDIRECT_INTERNAL_BEARER|Ken Deploy Production": (
+                "ken-backend-cloudflare-redirect-internal-bearer-production",
+                "CLOUDFLARE_REDIRECT_INTERNAL_BEARER",
+            ),
+            "ken-backend|PLUSVIBE_API_KEY|Ken Deploy Production": (
+                "ken-backend-plusvibe-api-key-production",
+                "PLUSVIBE_API_KEY",
+            ),
+            "ken-brain|SSH_KEY|Ken Deploy Production": (
+                "ken-brain-ssh-key-production",
+                "SSH_KEY",
+            ),
+        }
+        entries = {entry["coordinate"]: entry for entry in document["entries"]}
+        for coordinate, (item, field) in expected.items():
+            with self.subTest(coordinate=coordinate):
+                current = entries[coordinate]
+                self.assertEqual(current["verification_status"], "unresolved")
+                self.assertIsNone(current["source_authority"])
+                self.assertEqual(
+                    (current["canonical_vault"], current["canonical_item"], current["canonical_field"]),
+                    ("Ken Deploy Production", item, field),
+                )
+
+        selected, blocked = tool._selected_entries(document, known_only=True)
+        selected_coordinates = {entry["coordinate"] for entry in selected}
+        blocked_coordinates = {entry["coordinate"] for entry in blocked}
+        self.assertTrue(expected.keys().isdisjoint(selected_coordinates))
+        self.assertTrue(expected.keys() <= blocked_coordinates)
+
     def test_population_refuses_unresolved_without_known_only_before_any_write(self):
         tool = load_module()
         entries = [
