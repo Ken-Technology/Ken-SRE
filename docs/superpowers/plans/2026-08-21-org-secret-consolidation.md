@@ -74,7 +74,7 @@ Add `discover`, `compare`, `populate`, and `verify` subcommands. `discover` read
 
 - [ ] **Step 3: Implement idempotent item population**
 
-Use `op item get --format=json` for metadata, `op item create --template=-` for new items, and `op item edit --template=-` for exact updates. Feed JSON templates through stdin. Never use `share_items`.
+Use `op item get --format=json` for metadata. Pipe JSON templates to `op item create --vault <vault> -` for new items and `op item edit <item-id> --vault <vault>` for exact updates. Never put sensitive assignments in arguments and never use item sharing.
 
 - [ ] **Step 4: Verify without values**
 
