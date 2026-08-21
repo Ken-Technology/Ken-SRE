@@ -1,3 +1,4 @@
+import copy
 import importlib.util
 import json
 import os
@@ -434,6 +435,72 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
         self.assertEqual(next(field for field in merged["fields"] if field["label"] == "ACCOUNT"), existing["fields"][1])
         self.assertEqual(next(field for field in merged["fields"] if field["label"] == "OPENAI_API_KEY")["value"], "new")
         self.assertNotIn("old", json.dumps(preserved))
+
+    def test_preservation_allows_only_root_level_1password_volatile_metadata(self):
+        tool = load_module()
+        existing = {
+            "id": "item-id",
+            "uuid": "item-uuid",
+            "category": "API_CREDENTIAL",
+            "title": "openai-production",
+            "vault": {"id": "vault-id"},
+            "createdat": "old-createdat",
+            "updatedat": "old-updatedat",
+            "created_at": "old-created_at",
+            "updated_at": "old-updated_at",
+            "revision": "old-revision",
+            "version": 1,
+            "fields": [
+                {"id": "openai-api-key", "label": "OPENAI_API_KEY", "type": "CONCEALED", "value": "old"},
+                {"id": "account", "label": "ACCOUNT", "type": "STRING", "value": "ken"},
+            ],
+            "sections": [
+                {
+                    "id": "custom",
+                    "label": "Custom",
+                    "fields": [
+                        {"id": "url", "label": "URL", "type": "STRING", "value": "https://example.test"}
+                    ],
+                }
+            ],
+            "notesPlain": "keep this note",
+        }
+        preserved = tool._preserved_item_structure(existing, {"OPENAI_API_KEY"})
+        for key, changed in (
+            ("id", "new-item-id"),
+            ("uuid", "new-item-uuid"),
+            ("vault", {"id": "new-vault-id"}),
+            ("createdat", "new-createdat"),
+            ("updatedat", "new-updatedat"),
+            ("created_at", "new-created_at"),
+            ("updated_at", "new-updated_at"),
+            ("revision", "new-revision"),
+            ("version", 2),
+        ):
+            mutated = copy.deepcopy(existing)
+            mutated[key] = changed
+            with self.subTest(key=key):
+                self.assertEqual(
+                    tool._preserved_item_structure(mutated, {"OPENAI_API_KEY"}), preserved
+                )
+
+        for mutate in (
+            lambda item: item["fields"][1].update({"label": "ACCOUNT_RENAMED"}),
+            lambda item: item["sections"][0].update({"label": "Renamed"}),
+            lambda item: item["sections"][0]["fields"][0].update({"updated_at": "new"}),
+        ):
+            mutated = copy.deepcopy(existing)
+            mutate(mutated)
+            with self.subTest(mutation=mutate):
+                with self.assertRaisesRegex(ValueError, "preserved item structure changed"):
+                    tool.verify_item_shape(
+                        coordinate="x",
+                        item=mutated,
+                        expected_vault_id="vault-id",
+                        expected_title="openai-production",
+                        expected_fields={"OPENAI_API_KEY": "CONCEALED"},
+                        preserved_structure=preserved,
+                    )
 
     def test_existing_passkey_item_is_rejected_before_edit(self):
         tool = load_module()

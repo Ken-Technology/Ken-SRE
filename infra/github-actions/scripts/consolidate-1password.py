@@ -819,7 +819,17 @@ def merge_item_template(
 
 
 def _preserved_item_structure(item: Mapping[str, Any], canonical_labels: set[str]) -> Any:
-    volatile = {"id", "uuid", "vault", "createdat", "updatedat", "revision"}
+    volatile = {
+        "id",
+        "uuid",
+        "vault",
+        "createdat",
+        "updatedat",
+        "created_at",
+        "updated_at",
+        "revision",
+        "version",
+    }
     projection = {
         str(key): value
         for key, value in item.items()
