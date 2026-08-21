@@ -13,15 +13,26 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import yaml
+
 _CANONICAL_LIB = Path(__file__).resolve().parent / "lib"
 if str(_CANONICAL_LIB) not in sys.path:
     sys.path.insert(0, str(_CANONICAL_LIB))
 
-from canonical_credentials import load_registry  # noqa: E402
+from canonical_credentials import (  # noqa: E402
+    ALLOWED_VAULTS,
+    UniqueKeySafeLoader,
+    load_registry,
+)
 
 
 class MigrationError(ValueError):
     """A fail-closed migration contract violation."""
+
+
+APPROVED_VAULTS = frozenset(ALLOWED_VAULTS)
+_ITEM_DISPOSITIONS = frozenset({"canonical-item", "dedicated-item"})
+_FIELD_TYPES = frozenset({"CONCEALED", "STRING"})
 
 
 class ProtectedSourceAdapter:
@@ -50,17 +61,28 @@ class MappingSourceAdapter(ProtectedSourceAdapter):
 
 
 class OpSourceAdapter(ProtectedSourceAdapter):
-    """Read a source 1Password field without exposing its value to the caller."""
+    """Read a source 1Password field without exposing its value to the caller.
+
+    The source token is deliberately separate from the target writer token.  A
+    caller may still pass ``token`` for compatibility with the library API,
+    but command-line execution never constructs this adapter from the target
+    envelope.
+    """
 
     def __init__(
         self,
         *,
         op_bin: Path,
-        token: str,
+        token: str | None = None,
+        source_token: str | None = None,
         extra_env: Mapping[str, str] | None = None,
     ):
+        if token is None and source_token is None:
+            raise MigrationError("source adapter token is required")
+        if token is not None and source_token is not None and token != source_token:
+            raise MigrationError("source adapter tokens do not match")
         self.op_bin = op_bin
-        self.token = token
+        self.token = source_token or token
         self.extra_env = extra_env
 
     def resolve(self, authority: str) -> str:
@@ -227,6 +249,8 @@ def populate_item(
     text_fields: Mapping[str, str],
     extra_env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    if expected_vault not in APPROVED_VAULTS:
+        raise MigrationError("target vault is not in the approved vault set")
     identity = run_op_json(
         op_bin=op_bin,
         argv=["whoami", "--format=json"],
@@ -342,24 +366,29 @@ _BATCH_VERIFICATION_STATUSES = frozenset(
     {"verified-readable", "verified-reconstructable", "existing-direct-reference"}
 )
 _OP_AUTHORITY_SCHEMES = ("op://", "op-env://", "op-file://", "op-title://")
-_FIELD_LABEL = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+_OP_SCHEME_NAMES = frozenset(scheme.removesuffix("://") for scheme in _OP_AUTHORITY_SCHEMES)
+_FIELD_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,127}$")
 _ITEM_TITLE = re.compile(r"^[a-z0-9][a-z0-9-]{0,126}[a-z0-9]$|^[a-z0-9]$")
 
 
 def _parse_op_authority(authority: str) -> tuple[str, str, str]:
     if not isinstance(authority, str) or not authority.startswith(_OP_AUTHORITY_SCHEMES):
         raise MigrationError("source authority is not an op reference")
-    _, remainder = authority.split("://", 1)
-    if "#" in remainder:
-        path, field = remainder.rsplit("#", 1)
+    scheme, remainder = authority.split("://", 1)
+    if not remainder or "/" not in remainder:
+        raise MigrationError("source authority is structurally invalid")
+    vault, path = remainder.split("/", 1)
+    if not vault or not path:
+        raise MigrationError("source authority is structurally invalid")
+    if "#" in path:
+        item, field = path.rsplit("#", 1)
     else:
-        path, field = remainder.rsplit("/", 1)
-    parts = path.split("/", 1)
-    if len(parts) != 2 or not all(parts) or not field:
+        item, field = path.rsplit("/", 1)
+    if not item or not field:
         raise MigrationError("source authority is structurally invalid")
-    if any(character.isspace() for character in authority):
-        raise MigrationError("source authority is structurally invalid")
-    return parts[0], parts[1], field
+    if scheme not in _OP_SCHEME_NAMES:
+        raise MigrationError("source authority is not an op reference")
+    return vault, item, field
 
 
 def _is_op_authority(authority: Any) -> bool:
@@ -399,7 +428,7 @@ def _registry_document(
     if (registry_path is None) == (registry is None):
         raise MigrationError("provide exactly one canonical registry")
     if registry_path is not None:
-        return load_registry(registry_path)
+        return _load_registry_with_forward_field_type(registry_path)
     if not isinstance(registry, Mapping):
         raise MigrationError("canonical registry is invalid")
     # Re-run the same strict validator for callers that already parsed a document.
@@ -410,7 +439,50 @@ def load_registry_from_document(document: Mapping[str, Any]) -> Mapping[str, Any
     """Validate an already parsed registry with the canonical registry loader."""
     from canonical_credentials import validate_registry
 
-    return validate_registry(document)
+    try:
+        return validate_registry(document)
+    except ValueError as exc:
+        # The schema agent is adding field_type to ENTRY_KEYS.  Keep this
+        # migration branch forward-compatible while that change is being
+        # integrated, but never make an absent field type implicit below.
+        if "field_type" not in str(exc) or not any(
+            isinstance(entry, Mapping) and "field_type" in entry
+            for entry in document.get("entries", [])
+        ):
+            raise
+        sanitized = dict(document)
+        sanitized["entries"] = [
+            {key: value for key, value in entry.items() if key != "field_type"}
+            if isinstance(entry, Mapping)
+            else entry
+            for entry in document.get("entries", [])
+        ]
+        validate_registry(sanitized)
+        return document
+
+
+def _load_registry_with_forward_field_type(path: str | Path) -> Mapping[str, Any]:
+    try:
+        return load_registry(path)
+    except ValueError as exc:
+        if "field_type" not in str(exc):
+            raise
+        registry_path = Path(path)
+        with registry_path.open("r", encoding="utf-8") as stream:
+            document = yaml.load(stream, Loader=UniqueKeySafeLoader)
+        if not isinstance(document, Mapping):
+            raise
+        return load_registry_from_document(document)
+
+
+def _entry_field_type(entry: Mapping[str, Any]) -> str:
+    raw = entry.get("field_type")
+    if not isinstance(raw, str) or not raw:
+        raise MigrationError("selected entry is missing a field type")
+    field_type = raw.upper()
+    if field_type not in _FIELD_TYPES:
+        raise MigrationError("selected entry has an unsupported field type")
+    return field_type
 
 
 def _eligible_entries(document: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -421,6 +493,8 @@ def _eligible_entries(document: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     for entry in entries:
         if not isinstance(entry, Mapping):
             raise MigrationError("canonical registry entry is invalid")
+        if entry.get("disposition") not in _ITEM_DISPOSITIONS:
+            continue
         status = entry.get("verification_status")
         if status == "unresolved":
             raise MigrationError("unresolved source authority")
@@ -446,6 +520,7 @@ def _validate_target_entry(
         raise MigrationError("selected entry has an invalid target field")
     if not _ITEM_TITLE.fullmatch(item):
         raise MigrationError("selected entry has an invalid target item")
+    _entry_field_type(entry)
     return vault, item, field
 
 
@@ -464,19 +539,21 @@ def _validate_batch_entries(
         if prior_vault != vault:
             raise MigrationError("canonical item is reused across vaults")
         target_sources.setdefault((vault, item, field), []).append(entry)
-        grouped.setdefault((vault, item), []).append(entry)
 
-    for _target, matches in target_sources.items():
-        if len(matches) < 2:
-            continue
-        sources = {entry["source_authority"] for entry in matches}
+    for (vault, item, _field), matches in target_sources.items():
+        # Multiple consumer rows may intentionally point at one canonical
+        # field.  Resolve each distinct source only in protected process
+        # memory, collapse equal values to one deterministic representative,
+        # and stop before any write when authorities disagree.
+        sources = sorted({entry["source_authority"] for entry in matches})
         if len(sources) > 1:
-            if source_adapter is not None:
-                values = [_resolve_source(source_adapter, source) for source in sorted(sources)]
-                if len(set(values)) > 1:
-                    raise MigrationError("conflicting values for duplicate target field")
-            raise MigrationError("duplicate target field with different sources")
-        raise MigrationError("duplicate target field")
+            if source_adapter is None:
+                raise MigrationError("duplicate target field requires a protected source adapter")
+            values = [_resolve_source(source_adapter, source) for source in sources]
+            if len(set(values)) > 1:
+                raise MigrationError("conflicting values for duplicate target field")
+        representative = min(matches, key=lambda row: row["coordinate"])
+        grouped.setdefault((vault, item), []).append(representative)
     return grouped
 
 
@@ -491,7 +568,7 @@ def _value_free_plan(
         fields = [
             {
                 "label": entry["canonical_field"],
-                "type": "CONCEALED",
+                "type": _entry_field_type(entry),
                 "coordinate": entry["coordinate"],
                 "source_authority": entry["source_authority"],
             }
@@ -620,7 +697,7 @@ def validate_batch_plan(plan: Mapping[str, Any]) -> None:
                 not isinstance(label, str)
                 or not _FIELD_LABEL.fullmatch(label)
                 or label in labels
-                or field.get("type") != "CONCEALED"
+                or field.get("type") not in _FIELD_TYPES
                 or not isinstance(field.get("coordinate"), str)
                 or not isinstance(field.get("source_authority"), str)
             ):
@@ -654,6 +731,7 @@ def execute_batch(
         if not isinstance(vault, str) or not isinstance(item, str) or not isinstance(fields, list):
             raise MigrationError("batch plan item coordinates are invalid")
         concealed: dict[str, str] = {}
+        text_fields: dict[str, str] = {}
         try:
             for field in fields:
                 if not isinstance(field, Mapping):
@@ -661,14 +739,20 @@ def execute_batch(
                 label = field.get("label")
                 authority = field.get("source_authority")
                 coordinate = field.get("coordinate")
+                field_type = field.get("type")
                 if (
                     not isinstance(label, str)
                     or not _FIELD_LABEL.fullmatch(label)
                     or not isinstance(authority, str)
                     or not isinstance(coordinate, str)
+                    or field_type not in _FIELD_TYPES
                 ):
                     raise MigrationError("batch plan field is invalid")
-                concealed[label] = _resolve_source(source_adapter, authority)
+                resolved = _resolve_source(source_adapter, authority)
+                if field_type == "CONCEALED":
+                    concealed[label] = resolved
+                else:
+                    text_fields[label] = resolved
             attempted += 1
             status = populate_item(
                 op_bin=op_bin,
@@ -677,7 +761,7 @@ def execute_batch(
                 coordinate=f"{vault}|{item}",
                 title=item,
                 concealed_fields=concealed,
-                text_fields={},
+                text_fields=text_fields,
                 extra_env=extra_env,
             )
             completed.append(
@@ -727,6 +811,88 @@ def _read_protected_json(path: Path) -> Mapping[str, Any]:
     return document
 
 
+def _source_adapter_from_request(path: Path) -> ProtectedSourceAdapter:
+    document = _read_protected_json(path)
+    if set(document) != {"sources"} or not isinstance(document["sources"], Mapping):
+        raise MigrationError("source request schema mismatch")
+    sources = document["sources"]
+    for authority, value in sources.items():
+        if not isinstance(authority, str) or not authority or not isinstance(value, str):
+            raise MigrationError("source request source is invalid")
+    return MappingSourceAdapter(sources)
+
+
+def _reject_value_bearing_metadata(value: Any) -> None:
+    forbidden = ("value", "secret", "hash", "digest", "prefix", "length")
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if any(fragment in str(key).lower() for fragment in forbidden):
+                raise MigrationError("metadata contains a value-derived field")
+            _reject_value_bearing_metadata(child)
+    elif isinstance(value, list):
+        for child in value:
+            _reject_value_bearing_metadata(child)
+
+
+def _read_metadata_document(path: Path) -> Any:
+    if path.is_symlink() or not path.is_file():
+        raise MigrationError("metadata must be a regular file")
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            document = yaml.safe_load(stream)
+    except (OSError, yaml.YAMLError) as exc:
+        raise MigrationError("metadata document is invalid") from exc
+    _reject_value_bearing_metadata(document)
+    return document
+
+
+def _validate_migration_ledger(ledger: Any, plan: Mapping[str, Any]) -> None:
+    if isinstance(ledger, list):
+        records = ledger
+    elif isinstance(ledger, Mapping) and isinstance(ledger.get("items"), list):
+        records = ledger["items"]
+    elif isinstance(ledger, Mapping) and isinstance(ledger.get("entries"), list):
+        records = ledger["entries"]
+    else:
+        raise MigrationError("migration ledger records are invalid")
+    expected = {
+        (item["vault"], item["item"]): {
+            field["label"]: field["type"] for field in item["fields"]
+        }
+        for item in plan["items"]
+    }
+    observed: set[tuple[str, str]] = set()
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise MigrationError("migration ledger record is invalid")
+        vault = record.get("vault")
+        title = record.get("item")
+        if not isinstance(vault, str) or not isinstance(title, str):
+            raise MigrationError("migration ledger target is invalid")
+        target = (vault, title)
+        if target in observed or target not in expected:
+            raise MigrationError("migration ledger target mismatch")
+        item_id = record.get("item_id")
+        if not isinstance(item_id, str) or not item_id:
+            raise MigrationError("migration ledger item ID is invalid")
+        fields = record.get("fields")
+        if isinstance(fields, list):
+            field_types = {
+                field.get("label"): field.get("type")
+                for field in fields
+                if isinstance(field, Mapping)
+            }
+        elif isinstance(fields, Mapping):
+            field_types = dict(fields)
+        else:
+            raise MigrationError("migration ledger fields are invalid")
+        if field_types != expected[target]:
+            raise MigrationError("migration ledger field shape mismatch")
+        observed.add(target)
+    if observed != set(expected):
+        raise MigrationError("migration ledger coverage mismatch")
+
+
 def _compare_command(args: argparse.Namespace) -> int:
     request = _read_protected_json(args.request)
     if set(request) != {"left", "right"}:
@@ -757,21 +923,62 @@ def _batch_input_from_stdin() -> Mapping[str, Any]:
 
 
 def _plan_batch_command(args: argparse.Namespace) -> int:
-    plan = plan_batch(registry_path=args.registry)
+    source_adapter = (
+        _source_adapter_from_request(args.request) if args.request is not None else None
+    )
+    plan = plan_batch(registry_path=args.registry, source_adapter=source_adapter)
     print(json.dumps(plan, separators=(",", ":"), sort_keys=True))
+    return 0
+
+
+def _discover_command(args: argparse.Namespace) -> int:
+    source_adapter = _source_adapter_from_request(args.request)
+    plan = plan_batch(registry_path=args.registry, source_adapter=source_adapter)
+    validate_batch_plan(plan)
+    report = {
+        "status": "discovered",
+        "item_count": plan["item_count"],
+        "field_count": plan["field_count"],
+        "items": plan["items"],
+    }
+    _reject_value_bearing_metadata(report)
+    print(json.dumps(report, separators=(",", ":"), sort_keys=True))
+    return 0
+
+
+def _verify_command(args: argparse.Namespace) -> int:
+    source_adapter = (
+        _source_adapter_from_request(args.request) if args.request is not None else None
+    )
+    document = _registry_document(registry_path=args.registry, registry=None)
+    selected = _eligible_entries(document)
+    grouped = _validate_batch_entries(selected, source_adapter)
+    plan = _value_free_plan(grouped, registry_path=args.registry)
+    validate_batch_plan(plan)
+    if args.ledger is not None:
+        ledger = _read_metadata_document(args.ledger)
+        _validate_migration_ledger(ledger, plan)
+    report = {
+        "status": "verified",
+        "item_count": plan["item_count"],
+        "field_count": plan["field_count"],
+    }
+    _reject_value_bearing_metadata(report)
+    print(json.dumps(report, separators=(",", ":"), sort_keys=True))
     return 0
 
 
 def _execute_batch_command(args: argparse.Namespace) -> int:
     input_document = _batch_input_from_stdin()
     sources = input_document.get("sources", {})
-    if sources:
+    if args.source_request is not None and sources:
+        raise MigrationError("provide one protected source input")
+    if args.source_request is not None:
+        source_adapter = _source_adapter_from_request(args.source_request)
+    elif sources:
         source_adapter: Any = MappingSourceAdapter(sources)
     else:
-        source_adapter = OpSourceAdapter(
-            op_bin=args.op_bin,
-            token=input_document["token"],
-        )
+        raise MigrationError("batch execution requires a protected source adapter")
     plan = plan_batch(registry_path=args.registry, source_adapter=source_adapter)
     report = execute_batch(
         plan=plan,
@@ -821,8 +1028,65 @@ def _secret_envelope_from_stdin() -> Mapping[str, Any]:
     return document
 
 
+def _registered_populate_target(
+    *, document: Mapping[str, Any], request: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    entries = document.get("entries")
+    items = document.get("canonical_items")
+    if not isinstance(entries, list) or not isinstance(items, list):
+        raise MigrationError("canonical registry target data is invalid")
+    matches = [
+        entry
+        for entry in entries
+        if isinstance(entry, Mapping)
+        and entry.get("coordinate") == request["coordinate"]
+        and entry.get("disposition") in _ITEM_DISPOSITIONS
+    ]
+    if len(matches) != 1:
+        raise MigrationError("populate target is not declared in the canonical registry")
+    entry = matches[0]
+    # Target declaration validation must not read a source authority.  The
+    # protected empty adapter merely permits non-op authorities here; source
+    # material is supplied separately by the caller's stdin envelope.
+    vault, item, _field = _validate_target_entry(
+        entry, source_adapter=MappingSourceAdapter({})
+    )
+    if request["vault"] != vault or request["title"] != item:
+        raise MigrationError("populate target does not match the canonical registry")
+    canonical_matches = [
+        candidate
+        for candidate in items
+        if isinstance(candidate, Mapping)
+        and candidate.get("id") == item
+        and candidate.get("vault") == vault
+    ]
+    if len(canonical_matches) != 1:
+        raise MigrationError("populate target item is not declared in the canonical registry")
+    requested_labels = set(request["concealed_fields"]) | set(request["text_fields"])
+    item_entries = [
+        candidate
+        for candidate in entries
+        if isinstance(candidate, Mapping)
+        and candidate.get("disposition") in _ITEM_DISPOSITIONS
+        and candidate.get("canonical_vault") == vault
+        and candidate.get("canonical_item") == item
+    ]
+    declared_labels = {candidate.get("canonical_field") for candidate in item_entries}
+    if not requested_labels or not requested_labels.issubset(declared_labels):
+        raise MigrationError("populate field is not declared in the canonical registry")
+    for candidate in item_entries:
+        if candidate.get("canonical_field") in requested_labels:
+            expected = _entry_field_type(candidate)
+            actual = "CONCEALED" if candidate["canonical_field"] in request["concealed_fields"] else "STRING"
+            if expected != actual:
+                raise MigrationError("populate field type does not match the canonical registry")
+    return entry
+
+
 def _populate_command(args: argparse.Namespace) -> int:
     request = _secret_envelope_from_stdin()
+    document = _registry_document(registry_path=args.registry, registry=None)
+    _registered_populate_target(document=document, request=request)
     status = populate_item(
         op_bin=args.op_bin,
         token=request["token"],
@@ -846,15 +1110,27 @@ def _parser() -> argparse.ArgumentParser:
         "plan", aliases=["batch-plan"], help="plan grouped canonical item writes"
     )
     plan.add_argument("--registry", type=Path, required=True)
+    plan.add_argument("--request", type=Path)
     plan.set_defaults(handler=_plan_batch_command)
+    discover = commands.add_parser("discover", help="discover approved sources through a protected request")
+    discover.add_argument("--registry", type=Path, required=True)
+    discover.add_argument("--request", type=Path, required=True)
+    discover.set_defaults(handler=_discover_command)
     execute = commands.add_parser(
         "execute", aliases=["batch-execute"], help="execute a grouped canonical item plan"
     )
     execute.add_argument("--registry", type=Path, required=True)
     execute.add_argument("--op-bin", type=Path, default=Path("/usr/local/bin/op"))
+    execute.add_argument("--source-request", type=Path)
     execute.set_defaults(handler=_execute_batch_command)
+    verify = commands.add_parser("verify", help="verify registry and migration metadata without values")
+    verify.add_argument("--registry", type=Path, required=True)
+    verify.add_argument("--ledger", type=Path)
+    verify.add_argument("--request", type=Path)
+    verify.set_defaults(handler=_verify_command)
     populate = commands.add_parser("populate", help="create or update one canonical item")
     populate.add_argument("--op-bin", type=Path, default=Path("/usr/local/bin/op"))
+    populate.add_argument("--registry", type=Path, required=True)
     populate.set_defaults(handler=_populate_command)
     return parser
 

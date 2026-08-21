@@ -289,8 +289,23 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "concealed_fields": {"OPENAI_API_KEY": "provider-secret"},
                 "text_fields": {},
             }
+            registry = self._single_target_registry(
+                coordinate="ken-scraping|OPENAI_API_KEY|Ken CI Runtime",
+                vault="Ken CI Runtime",
+                item="openai-ci",
+                field="OPENAI_API_KEY",
+            )
+            registry_path = root / "canonical.yaml"
+            registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
             completed = subprocess.run(
-                [str(SCRIPT), "populate", "--op-bin", str(fake_op)],
+                [
+                    str(SCRIPT),
+                    "populate",
+                    "--op-bin",
+                    str(fake_op),
+                    "--registry",
+                    str(registry_path),
+                ],
                 input=json.dumps(envelope),
                 check=False,
                 text=True,
@@ -327,6 +342,7 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                     "canonical_vault": "Ken Deploy Production",
                     "canonical_item": "shared-production",
                     "canonical_field": "FIRST_TOKEN",
+                    "field_type": "concealed",
                     "environment": "production",
                     "consumer_repositories": ["repo"],
                 },
@@ -340,12 +356,45 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                     "canonical_vault": "Ken Deploy Production",
                     "canonical_item": "shared-production",
                     "canonical_field": "SECOND_TOKEN",
+                    "field_type": "concealed",
                     "environment": "production",
                     "consumer_repositories": ["repo"],
                 },
             ],
         }
         return base
+
+    def _single_target_registry(self, *, coordinate, vault, item, field):
+        return {
+            "schema_version": 1,
+            "organization": "Ken-Technology",
+            "allowed_vaults": [
+                "Ken CI Runtime",
+                "Ken Deploy Nonproduction",
+                "Ken Deploy Production",
+            ],
+            "canonical_items": [{"id": item, "vault": vault, "aliases": []}],
+            "entries": [
+                {
+                    "coordinate": coordinate,
+                    "canonical_id": item,
+                    "aliases": [],
+                    "disposition": "dedicated-item",
+                    "verification_status": "verified-readable",
+                    "source_authority": "op://Development/source/value",
+                    "canonical_vault": vault,
+                    "canonical_item": item,
+                    "canonical_field": field,
+                    "field_type": "concealed",
+                    "environment": {
+                        "Ken CI Runtime": "ci",
+                        "Ken Deploy Nonproduction": "nonproduction",
+                        "Ken Deploy Production": "production",
+                    }[vault],
+                    "consumer_repositories": ["ken-scraping"],
+                }
+            ],
+        }
 
     def _write_registry(self, root, document):
         path = root / "canonical.yaml"
@@ -393,15 +442,221 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 ),
             )
 
-        with self.assertRaisesRegex(ValueError, "duplicate target field"):
+        plan = tool.plan_batch(
+            registry=self._batch_registry(entries=entries),
+            source_adapter=tool.MappingSourceAdapter(
+                {
+                    entries[0]["source_authority"]: "same-secret",
+                    entries[1]["source_authority"]: "same-secret",
+                }
+            ),
+        )
+        self.assertEqual(plan["field_count"], 1)
+
+    def test_batch_selector_ignores_verified_non_item_rows(self):
+        tool = load_module()
+        entries = self._batch_registry()["entries"]
+        entries.append(
+            {
+                "coordinate": "repo|CI_URL|no-1password-target",
+                "canonical_id": None,
+                "aliases": [],
+                "disposition": "github-variable",
+                "verification_status": "verified-readable",
+                "source_authority": "op://Development/source/url",
+                "canonical_vault": None,
+                "canonical_item": None,
+                "canonical_field": None,
+                "environment": "none",
+                "consumer_repositories": ["repo"],
+            }
+        )
+        plan = tool.plan_batch(
+            registry=self._batch_registry(entries=entries),
+            source_adapter=tool.MappingSourceAdapter(
+                {
+                    "op://Development/source/first": "first-secret",
+                    "op://Development/source/second": "second-secret",
+                }
+            ),
+        )
+        self.assertEqual(plan["item_count"], 1)
+        self.assertEqual(plan["field_count"], 2)
+
+    def test_missing_field_type_fails_closed(self):
+        tool = load_module()
+        entries = self._batch_registry()["entries"]
+        entries[0].pop("field_type")
+        with self.assertRaisesRegex(ValueError, "field type"):
             tool.plan_batch(
                 registry=self._batch_registry(entries=entries),
                 source_adapter=tool.MappingSourceAdapter(
                     {
-                        entries[0]["source_authority"]: "same-secret",
-                        entries[1]["source_authority"]: "same-secret",
+                        "op://Development/source/first": "first-secret",
+                        "op://Development/source/second": "second-secret",
                     }
                 ),
+            )
+
+    def test_op_authority_parser_supports_source_vault_titles_and_files(self):
+        tool = load_module()
+        self.assertEqual(
+            tool._parse_op_authority("op-env://Development/ken-agents-env#TOKEN"),
+            ("Development", "ken-agents-env", "TOKEN"),
+        )
+        self.assertEqual(
+            tool._parse_op_authority("op-title://Development/SSH deploy - user@host#username"),
+            ("Development", "SSH deploy - user@host", "username"),
+        )
+        self.assertEqual(
+            tool._parse_op_authority("op-file://Development/SSH deploy/deploy_key"),
+            ("Development", "SSH deploy", "deploy_key"),
+        )
+
+    def test_op_source_adapter_uses_explicit_source_token_for_spaced_authority(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_path = root / "source-call.json"
+            fake_op = root / "op"
+            fake_op.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "json.dump({'argv':sys.argv[1:], 'token':os.environ['OP_SERVICE_ACCOUNT_TOKEN']}, open(os.environ['LOG'], 'w'))\n"
+                "print(json.dumps({'fields':[{'label':'username','value':'source-secret'}]}))\n"
+            )
+            fake_op.chmod(0o755)
+            value = tool.OpSourceAdapter(
+                op_bin=fake_op,
+                source_token="source-account-token",
+                extra_env={"LOG": str(log_path)},
+            ).resolve("op-title://Development/SSH deploy - user@host#username")
+            self.assertEqual(value, "source-secret")
+            call = json.loads(log_path.read_text())
+            self.assertEqual(call["token"], "source-account-token")
+            self.assertEqual(
+                call["argv"],
+                [
+                    "item",
+                    "get",
+                    "SSH deploy - user@host",
+                    "--vault",
+                    "Development",
+                    "--format=json",
+                ],
+            )
+            self.assertNotIn("source-secret", json.dumps(call))
+
+    def test_discover_cli_reads_protected_source_request_without_printing_values(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            registry_path = root / "canonical.yaml"
+            registry_path.write_text(
+                yaml.safe_dump(self._single_target_registry(
+                    coordinate="repo|TOKEN|Ken Deploy Production",
+                    vault="Ken Deploy Production",
+                    item="service-production",
+                    field="TOKEN",
+                ), sort_keys=False)
+            )
+            request_path = root / "sources.json"
+            request_path.write_text(json.dumps({
+                "sources": {
+                    "deployed://185.183.35.189/config#TOKEN": "deployed-secret",
+                }
+            }))
+            request_path.chmod(0o600)
+            document = yaml.safe_load(registry_path.read_text())
+            document["entries"][0]["source_authority"] = "deployed://185.183.35.189/config#TOKEN"
+            registry_path.write_text(yaml.safe_dump(document, sort_keys=False))
+            completed = subprocess.run(
+                [str(SCRIPT), "discover", "--registry", str(registry_path), "--request", str(request_path)],
+                check=False,
+                text=True,
+                capture_output=True,
+                env={"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8"},
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(json.loads(completed.stdout)["status"], "discovered")
+            self.assertNotIn("deployed-secret", completed.stdout + completed.stderr)
+
+    def test_verify_cli_is_standalone_and_value_free(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            registry_path = root / "canonical.yaml"
+            registry_path.write_text(yaml.safe_dump(self._single_target_registry(
+                coordinate="repo|TOKEN|Ken Deploy Production",
+                vault="Ken Deploy Production",
+                item="service-production",
+                field="TOKEN",
+            ), sort_keys=False))
+            ledger_path = root / "ledger.yaml"
+            ledger_path.write_text(yaml.safe_dump({
+                "items": [{
+                    "vault": "Ken Deploy Production",
+                    "item": "service-production",
+                    "item_id": "item-id",
+                    "fields": {"TOKEN": "CONCEALED"},
+                }],
+            }, sort_keys=False))
+            completed = subprocess.run(
+                [
+                    str(SCRIPT),
+                    "verify",
+                    "--registry",
+                    str(registry_path),
+                    "--ledger",
+                    str(ledger_path),
+                ],
+                check=False,
+                text=True,
+                capture_output=True,
+                env={"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8"},
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(json.loads(completed.stdout)["status"], "verified")
+
+    def test_populate_cli_refuses_target_not_declared_in_registry(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            registry_path = root / "canonical.yaml"
+            registry_path.write_text(yaml.safe_dump(self._single_target_registry(
+                coordinate="repo|OTHER|Ken CI Runtime",
+                vault="Ken CI Runtime",
+                item="other",
+                field="OTHER",
+            ), sort_keys=False))
+            envelope = {
+                "token": "service-account-token",
+                "vault": "Ken CI Runtime",
+                "coordinate": "repo|TOKEN|Ken CI Runtime",
+                "title": "unregistered",
+                "concealed_fields": {"TOKEN": "provider-secret"},
+                "text_fields": {},
+            }
+            completed = subprocess.run(
+                [str(SCRIPT), "populate", "--registry", str(registry_path), "--op-bin", "/no/such/op"],
+                input=json.dumps(envelope),
+                check=False,
+                text=True,
+                capture_output=True,
+                env={"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8"},
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("registry", completed.stderr)
+            self.assertNotIn("provider-secret", completed.stdout + completed.stderr)
+
+    def test_populate_item_rejects_unapproved_vault_before_invoking_op(self):
+        tool = load_module()
+        with self.assertRaisesRegex(ValueError, "approved vault"):
+            tool.populate_item(
+                op_bin=Path("/no/such/op"),
+                token="service-account-token",
+                expected_vault="Other",
+                coordinate="repo|TOKEN|Other",
+                title="other",
+                concealed_fields={"TOKEN": "provider-secret"},
+                text_fields={},
             )
 
     def test_batch_plan_rejects_unresolved_and_unprotected_non_op_authorities(self):
