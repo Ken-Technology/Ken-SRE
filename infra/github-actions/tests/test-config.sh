@@ -72,6 +72,12 @@ run_inventory() {
     fail "canonical vault population tests"
   fi
 
+  if (cd "${ROOT}" && PYTHONDONTWRITEBYTECODE=1 python3 infra/github-actions/tests/test-production-secret-sources.py -q); then
+    pass "production secret source integration tests"
+  else
+    fail "production secret source integration tests"
+  fi
+
   echo "== inventory semantics =="
   if python3 - "${INV}" "${GA_ROOT}" <<'PY'
 import re

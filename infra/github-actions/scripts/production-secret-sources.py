@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import datetime
 import importlib.util
 import os
 import re
@@ -35,6 +36,52 @@ MAPPED_GROUPS_KEY = "mapped_groups"
 _COORDINATE_RE = re.compile(r"^[^|\r\n]+\|[^|\r\n]+\|[^|\r\n]+$")
 _LOCATOR_RE = re.compile(r"^(?:[^>]+->\s*)?([A-Za-z0-9_.:-]+):(/[^\r\n]+)$")
 _ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_TOP_LEVEL_KEYS = {
+    "schema_version",
+    "generated_at",
+    "scope",
+    "policy",
+    "status_counts",
+    "mapped_groups",
+    "partial_groups",
+    "unmapped_coordinates",
+}
+_SCOPE_KEYS = {"input_plan", "selected_action", "selected_count"}
+_POLICY_KEYS = {
+    "value_free",
+    "secret_values_read",
+    "environment_files_sourced",
+    "onepassword_writes",
+    "equivalent_names_consolidated",
+    "note",
+}
+_STATUS_COUNT_KEYS = {"mapped", "partial", "unmapped"}
+_GROUP_KEYS = {"status", "coordinates", "authority", "handling"}
+_PARTIAL_GROUP_KEYS = {"status", "coordinates", "authority", "blocker"}
+_AUTHORITY_KEYS = {
+    "server_file_component": {"kind", "locator", "component", "evidence"},
+    "server_certificate_pair": {"kind", "locator", "components", "evidence"},
+    "server_certificate": {"kind", "locator", "evidence"},
+    "server_certificate_bundle": {"kind", "locator", "evidence"},
+    "server_redirect_sync_bundle": {"kind", "locator", "components", "evidence"},
+    "onepassword_secure_note_component": {"kind", "vault", "item", "component", "evidence"},
+    "server_endpoint_metadata": {"kind", "locator", "component", "evidence"},
+    "active_frontend_deployment_metadata": {"kind", "locator", "components", "evidence"},
+    "server_certificate_derivation": {"kind", "locator", "component", "evidence"},
+    "server_host_key_derivation": {"kind", "locator", "component", "evidence"},
+    "active_frontend_route_metadata": {"kind", "locator", "component", "evidence"},
+    "onepassword_item_field": {"kind", "vault", "item", "component", "evidence"},
+}
+_COMPONENT_KEYS = {
+    "server_certificate_pair": {"certificate", "private_key"},
+    "server_redirect_sync_bundle": {
+        "client_ca",
+        "server_certificate",
+        "server_private_key",
+        "source_allowlist",
+    },
+    "active_frontend_deployment_metadata": {"host", "path", "user"},
+}
 
 
 def authority_for_coordinate(coordinate: str) -> str:
@@ -67,7 +114,11 @@ def _safe_source_map(path: Path) -> Mapping[str, Any]:
         raise ValueError("source map must be a regular mode-0600 file")
     try:
         with path.open("r", encoding="utf-8") as stream:
-            document = yaml.safe_load(stream)
+            document = yaml.load(stream, Loader=_MIGRATION.UniqueKeySafeLoader)
+    except ValueError as exc:
+        if "duplicate YAML mapping key" in str(exc):
+            raise ValueError("source map duplicate key") from exc
+        raise ValueError("source map is invalid") from exc
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
         raise ValueError("source map is invalid") from exc
     if not isinstance(document, Mapping):
@@ -75,10 +126,137 @@ def _safe_source_map(path: Path) -> Mapping[str, Any]:
     return document
 
 
+def _exact_keys(value: Any, expected: set[str], path: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise ValueError(f"{path} schema is invalid")
+    return value
+
+
+def _string(value: Any, path: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{path} must be a non-empty string")
+    return value
+
+
+def _integer(value: Any, path: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{path} must be a non-negative integer")
+    return value
+
+
+def _boolean(value: Any, path: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{path} must be boolean")
+    return value
+
+
+def _validate_components(value: Any, kind: str, path: str) -> None:
+    components = _exact_keys(value, _COMPONENT_KEYS[kind], path)
+    for key, component in components.items():
+        _string(component, f"{path}.{key}")
+
+
+def _validate_authority(value: Any, path: str) -> None:
+    authority = value
+    if not isinstance(authority, Mapping):
+        raise ValueError(f"{path} schema is invalid")
+    kind = authority.get("kind")
+    if kind not in _AUTHORITY_KEYS:
+        raise ValueError(f"{path}.kind is invalid")
+    authority = _exact_keys(authority, _AUTHORITY_KEYS[kind], path)
+    _string(authority["kind"], f"{path}.kind")
+    for key in ("locator", "vault", "item", "component", "evidence"):
+        if key in authority:
+            _string(authority[key], f"{path}.{key}")
+    if "components" in authority:
+        _validate_components(authority["components"], kind, f"{path}.components")
+
+
+def _validate_group(value: Any, expected_status: str, index: int) -> set[str]:
+    path = f"{expected_status}_groups[{index}]"
+    group = _exact_keys(value, _GROUP_KEYS if expected_status == "mapped" else _PARTIAL_GROUP_KEYS, path)
+    if group["status"] != expected_status:
+        raise ValueError(f"{path}.status is invalid")
+    coordinates = group["coordinates"]
+    if not isinstance(coordinates, list) or not coordinates:
+        raise ValueError(f"{path}.coordinates is invalid")
+    result: set[str] = set()
+    for coordinate in coordinates:
+        if not isinstance(coordinate, str) or not _COORDINATE_RE.fullmatch(coordinate):
+            raise ValueError(f"{path}.coordinates contains an invalid coordinate")
+        if coordinate in result:
+            raise ValueError(f"{path}.coordinates contains a duplicate")
+        result.add(coordinate)
+        if coordinate.split("|", 2)[2] != "Ken Deploy Production":
+            raise ValueError("source map environment is not production")
+    _validate_authority(group["authority"], f"{path}.authority")
+    if expected_status == "mapped":
+        _string(group["handling"], f"{path}.handling")
+    if expected_status == "partial":
+        _string(group["blocker"], f"{path}.blocker")
+    return result
+
+
+def _validate_source_map_document(document: Mapping[str, Any]) -> None:
+    root = _exact_keys(document, _TOP_LEVEL_KEYS, "source map")
+    if not isinstance(root["schema_version"], int) or isinstance(root["schema_version"], bool) or root["schema_version"] != 1:
+        raise ValueError("source map schema version is invalid")
+    try:
+        datetime.date.fromisoformat(_string(root["generated_at"], "generated_at"))
+    except ValueError as exc:
+        raise ValueError("generated_at must be an ISO date") from exc
+    scope = _exact_keys(root["scope"], _SCOPE_KEYS, "scope")
+    if _string(scope["input_plan"], "scope.input_plan") != "/tmp/ken-unresolved-creation-plan.yaml":
+        raise ValueError("scope.input_plan is not the reviewed plan")
+    if _string(scope["selected_action"], "scope.selected_action") != "keep-existing-blocked":
+        raise ValueError("scope.selected_action is invalid")
+    selected_count = _integer(scope["selected_count"], "scope.selected_count")
+    policy = _exact_keys(root["policy"], _POLICY_KEYS, "policy")
+    expected_policy = {
+        "value_free": True,
+        "secret_values_read": False,
+        "environment_files_sourced": False,
+        "onepassword_writes": False,
+        "equivalent_names_consolidated": True,
+    }
+    for key, expected in expected_policy.items():
+        if _boolean(policy[key], f"policy.{key}") != expected:
+            raise ValueError(f"policy.{key} is not current")
+    _string(policy["note"], "policy.note")
+    counts = _exact_keys(root["status_counts"], _STATUS_COUNT_KEYS, "status_counts")
+    for key in _STATUS_COUNT_KEYS:
+        _integer(counts[key], f"status_counts.{key}")
+    if not isinstance(root["mapped_groups"], list) or not isinstance(root["partial_groups"], list):
+        raise ValueError("source map group collections are invalid")
+    mapped = set()
+    for index, group in enumerate(root["mapped_groups"]):
+        mapped.update(_validate_group(group, "mapped", index))
+    partial = set()
+    for index, group in enumerate(root["partial_groups"]):
+        partial.update(_validate_group(group, "partial", index))
+    unmapped = root["unmapped_coordinates"]
+    if not isinstance(unmapped, list):
+        raise ValueError("unmapped_coordinates schema is invalid")
+    unmapped_set = set()
+    for coordinate in unmapped:
+        if not isinstance(coordinate, str) or not _COORDINATE_RE.fullmatch(coordinate):
+            raise ValueError("unmapped_coordinates contains an invalid coordinate")
+        if coordinate in unmapped_set:
+            raise ValueError("unmapped_coordinates contains a duplicate")
+        unmapped_set.add(coordinate)
+    if len(mapped) != counts["mapped"] or len(partial) != counts["partial"] or len(unmapped_set) != counts["unmapped"]:
+        raise ValueError("status_counts are inconsistent with source map coordinates")
+    if mapped & partial or mapped & unmapped_set or partial & unmapped_set:
+        raise ValueError("source map coordinate classifications overlap")
+    if selected_count != counts["mapped"] + counts["partial"] + counts["unmapped"]:
+        raise ValueError("scope.selected_count is inconsistent with status_counts")
+
+
 class ProductionSourceMap:
     """Validated, value-free authority metadata for one population run."""
 
     def __init__(self, document: Mapping[str, Any]):
+        _validate_source_map_document(document)
         self.document = copy.deepcopy(dict(document))
         groups = document.get(MAPPED_GROUPS_KEY)
         if not isinstance(groups, list):
@@ -104,11 +282,6 @@ class ProductionSourceMap:
                 coordinates[coordinate] = group
         if len(coordinates) != 18:
             raise ValueError("source map must contain exactly 18 mapped coordinates")
-        if document.get("schema_version") != 1:
-            raise ValueError("source map schema version is invalid")
-        policy = document.get("policy")
-        if not isinstance(policy, Mapping) or policy.get("value_free") is not True:
-            raise ValueError("source map value-free policy is invalid")
         self.coordinates = frozenset(coordinates)
         self._groups = coordinates
 
