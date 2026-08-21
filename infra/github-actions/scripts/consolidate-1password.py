@@ -1059,7 +1059,7 @@ def populate_item(
         )
         written = run_op_json(
             op_bin=op_bin,
-            argv=["item", "edit", item_id, "--vault", expected_vault],
+            argv=["item", "edit", item_id, "--vault", expected_vault, "--format=json"],
             token=writer_token,
             stdin_document=template,
             extra_env=extra_env,
@@ -1072,7 +1072,7 @@ def populate_item(
         )
         written = run_op_json(
             op_bin=op_bin,
-            argv=["item", "create", "--vault", expected_vault, "-"],
+            argv=["item", "create", "--vault", expected_vault, "--format=json", "-"],
             token=writer_token,
             stdin_document=template,
             extra_env=extra_env,

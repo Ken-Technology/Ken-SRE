@@ -534,7 +534,7 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "    result = [{'id':'vault-id','name':'Ken Deploy Production'}]\n"
                 "elif args == ['item', 'list', '--vault', 'Ken Deploy Production', '--format=json']:\n"
                 "    result = []\n"
-                "elif args == ['item', 'create', '--vault', 'Ken Deploy Production', '-']:\n"
+                "elif args == ['item', 'create', '--vault', 'Ken Deploy Production', '--format=json', '-']:\n"
                 "    template = json.loads(stdin)\n"
                 "    result = {'id':'item-id','title':template['title'],'vault':{'id':'vault-id'},'fields':template['fields']}\n"
                 "elif args == ['item', 'get', 'item-id', '--vault', 'Ken Deploy Production', '--format=json']:\n"
@@ -557,6 +557,10 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
             self.assertEqual(status["status"], "verified")
             calls = [json.loads(line) for line in log_path.read_text().splitlines()]
             create = next(call for call in calls if call["argv"][:2] == ["item", "create"])
+            self.assertEqual(
+                create["argv"],
+                ["item", "create", "--vault", "Ken Deploy Production", "--format=json", "-"],
+            )
             self.assertNotIn("provider-secret", " ".join(create["argv"]))
             self.assertEqual(
                 next(field for field in json.loads(create["stdin"])["fields"] if field["label"] == "OPENAI_API_KEY")["value"],
@@ -663,7 +667,7 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "    result = [{'id':'ci-id','name':'Ken CI Runtime'}]\n"
                 "elif args == ['item', 'list', '--vault', 'Ken CI Runtime', '--format=json']:\n"
                 "    result = []\n"
-                "elif args == ['item', 'create', '--vault', 'Ken CI Runtime', '-']:\n"
+                "elif args == ['item', 'create', '--vault', 'Ken CI Runtime', '--format=json', '-']:\n"
                 "    template = json.loads(stdin)\n"
                 "    result = {'id':'item-id','title':template['title'],'vault':{'id':'ci-id'},'fields':template['fields']}\n"
                 "elif args == ['item', 'get', 'item-id', '--vault', 'Ken CI Runtime', '--format=json']:\n"
@@ -1098,11 +1102,11 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "elif args == ['vault', 'list', '--format=json']: result = [{'id':'vault-id','name':'Ken Deploy Production'}]\n"
                 "elif args == ['item', 'list', '--vault', 'Ken Deploy Production', '--format=json']:\n"
                 "    result = [{'id': item['id'], 'title': item['title']} for item in state['items'].values()]\n"
-                "elif args[:2] == ['item', 'create']:\n"
+                "elif args[:2] == ['item', 'create'] and args[2:] == ['--vault', 'Ken Deploy Production', '--format=json', '-']:\n"
                 "    template = json.loads(stdin); item_id = 'item-' + str(len(state['items']) + 1)\n"
                 "    state['items'][item_id] = {'id':item_id, 'title':template['title'], 'vault':{'id':'vault-id'}, 'fields':template['fields']}\n"
                 "    result = state['items'][item_id]; json.dump(state, open(state_path, 'w'))\n"
-                "elif args[:2] == ['item', 'edit']:\n"
+                "elif args[:2] == ['item', 'edit'] and args[3:] == ['--vault', 'Ken Deploy Production', '--format=json']:\n"
                 "    template = json.loads(stdin); item_id = args[2]; state['items'][item_id].update({'title':template['title'], 'fields':template['fields']})\n"
                 "    result = state['items'][item_id]; json.dump(state, open(state_path, 'w'))\n"
                 "elif args[:2] == ['item', 'get']:\n"
@@ -1139,6 +1143,11 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
             calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
             writes = [call for call in calls if call["argv"][:2] in (["item", "create"], ["item", "edit"])]
             self.assertEqual([call["argv"][:2] for call in writes], [["item", "create"], ["item", "edit"]])
+            self.assertEqual(
+                writes[0]["argv"],
+                ["item", "create", "--vault", "Ken Deploy Production", "--format=json", "-"],
+            )
+            self.assertEqual(writes[1]["argv"][3:], ["--vault", "Ken Deploy Production", "--format=json"])
             joined_argv = json.dumps(calls)
             self.assertNotIn("first-secret", joined_argv)
             self.assertNotIn("second-secret", joined_argv)
@@ -1163,7 +1172,7 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "if args == ['whoami', '--format=json']: result = {'account_uuid':'PHLSEQ2HNVAALEWHKWGKZOAGSY','user_uuid':'writer-uuid','user_type':'SERVICE_ACCOUNT','ServiceAccountType':'SERVICE_ACCOUNT'}\n"
                 "elif args == ['vault', 'list', '--format=json']: result = [{'id':'vault-id','name':'Ken Deploy Production'}]\n"
                 "elif args == ['item', 'list', '--vault', 'Ken Deploy Production', '--format=json']: result = []\n"
-                "elif args[:2] == ['item', 'create']:\n"
+                "elif args[:2] == ['item', 'create'] and args[2:] == ['--vault', 'Ken Deploy Production', '--format=json', '-']:\n"
                 "    template = json.loads(stdin)\n"
                 "    if template['title'] == 'zz-second-production': raise SystemExit(8)\n"
                 "    result = {'id':'first-id','title':template['title'],'vault':{'id':'vault-id'},'fields':template['fields']}\n"
