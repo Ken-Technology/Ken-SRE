@@ -203,8 +203,8 @@ if type(task7) is not dict or type(task7.get("schema_version")) is not int or ta
     raise SystemExit("Task 7 transport authority is not final")
 task6_final = task7.get("task6_final") or {}
 if (task6_final.get("status") != "reviewed-final-bindings"
-        or task6_final.get("commit_sha") != "d03694d41c044985d406e74d434fdf2928bc4798"
-        or task6_final.get("tree_sha") != "71b57ed890f5f39ea3ee90eaccb59a8cf3666fb4"):
+        or task6_final.get("commit_sha") != "a7c554536e5c90092ecccdcacad3db5b2e01b1cf"
+        or task6_final.get("tree_sha") != "1f918bf0d5d58e61ce0b76d587233e02597b8ea6"):
     raise SystemExit("Task 7 Task 6 final authority mismatch")
 task6_artifacts = task6_final.get("artifacts") or {}
 if ((task6_artifacts.get("runtime_lock") or {}).get("sha256") != authority["broker_runtime_lock_sha256"]
@@ -689,11 +689,11 @@ runtime_lock_path = ga / authority["broker_runtime_lock_path"]
 broker_policy_path = ga / authority["op_broker_policy_path"]
 task7_path = ga / authority["action_transport_lock_path"]
 endpoint_policy_path = ga / authority["firewall_endpoint_policy_path"]
-require(authority.get("task6_commit") == "d03694d41c044985d406e74d434fdf2928bc4798", "Task 6 final commit drift")
+require(authority.get("task6_commit") == "a7c554536e5c90092ecccdcacad3db5b2e01b1cf", "Task 6 final commit drift")
 require(authority.get("broker_runtime_lock_sha256") == digest(runtime_lock_path), "Task 6 lock digest drift")
 require(authority.get("op_broker_policy_sha256") == digest(broker_policy_path), "Task 6 policy digest drift")
-require(authority.get("task7_commit") == "0dfa2b1ae721180b49f8ccf9d4c4dd7bdb027894", "Task 7 final manifest commit drift")
-require(authority.get("action_transport_lock_sha256") == "908c58e4fb0849bfadc0762f230fa94361bd73853db2a4ed4f40bb288fa3e4dc", "Task 7 final manifest digest drift")
+require(authority.get("task7_commit") == "25aa8bf32c3d5e3e4d33eac5fdd78cc97307f2d4", "Task 7 final manifest commit drift")
+require(authority.get("action_transport_lock_sha256") == "d82ac42ac8101915fb107f9141edc3547635c3456e9b676bec8bbfce34ccbe76", "Task 7 final manifest digest drift")
 require(authority.get("action_transport_lock_sha256") == digest(task7_path), "Task 7 transport file digest drift")
 require(authority.get("firewall_endpoint_policy_sha256") == digest(endpoint_policy_path), "firewall endpoint policy digest drift")
 for key in (
@@ -796,7 +796,7 @@ require(manifest["deploy_image"].get("task6_deploy_files") == expected_deploy_re
 task6_final = task7.get("task6_final") or {}
 require(task6_final.get("status") == "reviewed-final-bindings", "Task 7 final authority status drift")
 require(task6_final.get("commit_sha") == authority["task6_commit"], "Task 7 Task 6 commit cross-reference drift")
-require(task6_final.get("tree_sha") == "71b57ed890f5f39ea3ee90eaccb59a8cf3666fb4", "Task 7 Task 6 tree cross-reference drift")
+require(task6_final.get("tree_sha") == "1f918bf0d5d58e61ce0b76d587233e02597b8ea6", "Task 7 Task 6 tree cross-reference drift")
 
 authority_inputs = [
     manifest_path,

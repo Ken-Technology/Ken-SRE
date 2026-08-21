@@ -169,11 +169,11 @@ runtime_lock_path = ga / authority.get("broker_runtime_lock_path", "")
 broker_policy_path = ga / authority.get("op_broker_policy_path", "")
 task7_path = ga / authority.get("action_transport_lock_path", "")
 endpoint_policy_path = ga / authority.get("firewall_endpoint_policy_path", "")
-require(authority.get("task6_commit") == "d03694d41c044985d406e74d434fdf2928bc4798", "Task 6 final commit")
+require(authority.get("task6_commit") == "a7c554536e5c90092ecccdcacad3db5b2e01b1cf", "Task 6 final commit")
 require(authority.get("broker_runtime_lock_sha256") == sha(runtime_lock_path), "Task 6 lock digest")
 require(authority.get("op_broker_policy_sha256") == sha(broker_policy_path), "Task 6 policy digest")
-require(authority.get("task7_commit") == "0dfa2b1ae721180b49f8ccf9d4c4dd7bdb027894", "Task 7 final manifest commit")
-require(authority.get("action_transport_lock_sha256") == "908c58e4fb0849bfadc0762f230fa94361bd73853db2a4ed4f40bb288fa3e4dc", "Task 7 transport digest")
+require(authority.get("task7_commit") == "25aa8bf32c3d5e3e4d33eac5fdd78cc97307f2d4", "Task 7 final manifest commit")
+require(authority.get("action_transport_lock_sha256") == "d82ac42ac8101915fb107f9141edc3547635c3456e9b676bec8bbfce34ccbe76", "Task 7 transport digest")
 require(authority.get("action_transport_lock_sha256") == sha(task7_path), "Task 7 transport file digest")
 require(authority.get("firewall_endpoint_policy_sha256") == sha(endpoint_policy_path), "endpoint policy digest")
 require(authority.get("firewall_endpoint_generation_sha256") is None, "numeric generation digest must remain null")
@@ -226,8 +226,8 @@ require((manifest.get("ci_image") or {}).get("task6_ci_files") == [item["path"] 
 require((manifest.get("deploy_image") or {}).get("task6_deploy_files") == [item["path"] for item in runtime_lock["installed_files"] if item["source"].startswith("repo:") and "ken-deploy" in item["hosts"]], "deploy Task 6 files")
 transport = load_yaml(task7_path)
 require((transport.get("task6_final") or {}).get("status") == "reviewed-final-bindings", "Task 7 final Task 6 status")
-require((transport.get("task6_final") or {}).get("commit_sha") == "d03694d41c044985d406e74d434fdf2928bc4798", "Task 7 Task 6 commit binding")
-require((transport.get("task6_final") or {}).get("tree_sha") == "71b57ed890f5f39ea3ee90eaccb59a8cf3666fb4", "Task 7 Task 6 tree binding")
+require((transport.get("task6_final") or {}).get("commit_sha") == "a7c554536e5c90092ecccdcacad3db5b2e01b1cf", "Task 7 Task 6 commit binding")
+require((transport.get("task6_final") or {}).get("tree_sha") == "1f918bf0d5d58e61ce0b76d587233e02597b8ea6", "Task 7 Task 6 tree binding")
 require(manifest.get("firewall") == {
     "status": "blocked",
     "blocker": "missing-final-firewall-endpoint-generation",
@@ -475,7 +475,7 @@ root = Path(sys.argv[1])
 manifest = yaml.safe_load((root / "manifest.yaml").read_text())
 lock = yaml.safe_load((root / "lock.yaml").read_text())
 manifest["authority"]["plan_sha256"] = lock["plan_sha256"]
-manifest["authority"]["task6_commit"] = "d03694d41c044985d406e74d434fdf2928bc4798"
+manifest["authority"]["task6_commit"] = "a7c554536e5c90092ecccdcacad3db5b2e01b1cf"
 manifest["authority"]["broker_runtime_lock_sha256"] = hashlib.sha256((root / "lock.yaml").read_bytes()).hexdigest()
 manifest["authority"]["op_broker_policy_sha256"] = hashlib.sha256((root / "policy.yaml").read_bytes()).hexdigest()
 (root / "manifest.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False))
