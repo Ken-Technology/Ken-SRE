@@ -199,18 +199,93 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
     def test_reviewed_rules_are_value_free_and_cover_the_reviewed_groups(self) -> None:
         rules = registry.load_consolidation_rules(self.rules_path)
 
+        evidence = {
+            item["id"]: item for item in rules["reviewed_evidence"]
+        }
         self.assertEqual(
-            rules["reviewed_evidence"]["artifact"],
+            evidence["baseline-authority-resolution"]["artifact"],
             "/tmp/ken-secret-authority-resolution.yaml",
         )
         self.assertEqual(
-            rules["reviewed_evidence"]["sha256"],
+            evidence["baseline-authority-resolution"]["sha256"],
             "51113962b9cb1705f66ff51700afacf9f65da37753e215b3e0d4606d9211c5c0",
         )
-        self.assertEqual(rules["reviewed_evidence"]["value_disclosure"], "none")
+        self.assertEqual(evidence["baseline-authority-resolution"]["value_disclosure"], "none")
         self.assertGreaterEqual(len(rules["reviewed_groups"]), 15)
         self.assertGreaterEqual(len(rules["approved_same_identity"]), 15)
         self.assertGreaterEqual(len(rules["preserve_separately"]), 15)
+
+    def test_final_reports_are_registered_by_exact_sha_without_secret_hashes(self) -> None:
+        rules = registry.load_consolidation_rules(self.rules_path)
+        evidence = {
+            item["id"]: item for item in rules["reviewed_evidence"]
+        }
+        self.assertEqual(
+            evidence["production-credential-comparison"]["sha256"],
+            "632bf2c744f6f83a6f231f14e6798c152e45cb91c656ae7fe31eb4bd2e7aedd7",
+        )
+        self.assertEqual(
+            evidence["unresolved-authority-resolution"]["sha256"],
+            "b4668e1354d341a074a76d226a36632b44bbd60867bb44616b122559f95ebbb6",
+        )
+        self.assertEqual(evidence["production-credential-comparison"]["row_count"], 57)
+        self.assertEqual(evidence["unresolved-authority-resolution"]["row_count"], 124)
+
+        candidate = registry.minimal_consolidation_rules()
+        candidate["reviewed_evidence"][0]["value_free_report_body_sha256"] = "must fail"
+        with self.assertRaisesRegex(ValueError, "forbidden"):
+            registry.validate_consolidation_rules(candidate)
+
+    def test_final_shared_production_targets_are_applied(self) -> None:
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        rules = registry.load_consolidation_rules(self.rules_path)
+        registry.validate_consolidation(document, rules)
+        entries = {entry["coordinate"]: entry for entry in document["entries"]}
+
+        expected = {
+            "ken-backend|DOUBLEWORD_API_KEY|Ken Deploy Production": "doubleword-production",
+            "ken-frontend|DOUBLEWORD_API_KEY|Ken Deploy Production": "doubleword-production",
+            "ken-backend|FIREWORKS_AI_API_KEY|Ken Deploy Production": "fireworks-production",
+            "ken-frontend|FIREWORKS_API_KEY|Ken Deploy Production": "fireworks-production",
+            "ken-backend|KEN_SEARCH_INTERNAL_TOKEN|Ken Deploy Production": "ken-search-service-production",
+            "ken-search|KEN_SEARCH_INTERNAL_TOKEN|Ken Deploy Production": "ken-search-service-production",
+            "ken-backend|LANGFUSE_BASE_URL|no-1password-target": "langfuse-production",
+            "ken-frontend|LANGFUSE_BASE_URL|no-1password-target": "langfuse-production",
+            "ken-agents|LANGFUSE_PUBLIC_KEY|no-1password-target": "langfuse-production",
+            "ken-backend|LANGFUSE_PUBLIC_KEY|no-1password-target": "langfuse-production",
+            "ken-frontend|LANGFUSE_PUBLIC_KEY|no-1password-target": "langfuse-production",
+            "ken-agents|LANGFUSE_SECRET_KEY|Ken Deploy Production": "langfuse-production",
+            "ken-backend|LANGFUSE_SECRET_KEY|Ken Deploy Production": "langfuse-production",
+            "ken-frontend|LANGFUSE_SECRET_KEY|Ken Deploy Production": "langfuse-production",
+            "ken-ai-mcp|MONGO_CONNECTION_STRING|Ken Deploy Production": "ken-mongo-production",
+            "ken-backend|MONGO_CONNECTION_STRING2|Ken Deploy Production": "ken-mongo-production",
+            "ken-backend|OPEN_ROUTER_API_KEY|Ken Deploy Production": "openrouter-production",
+            "ken-frontend|OPENROUTER_API_KEY|Ken Deploy Production": "openrouter-production",
+            "ken-agents|XAI_API_KEY|Ken Deploy Production": "xai-production",
+            "ken-backend|xAI_API_KEY|Ken Deploy Production": "xai-production",
+            "ken-frontend|XAI_API_KEY|Ken Deploy Production": "xai-production",
+        }
+        for coordinate, canonical_id in expected.items():
+            self.assertEqual(entries[coordinate]["canonical_id"], canonical_id)
+
+    def test_final_resolution_special_cases_are_recorded(self) -> None:
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        entries = {entry["coordinate"]: entry for entry in document["entries"]}
+        backend_url = entries[
+            "ken-agents|KEN_AGENTS_BACKEND_URL|Ken Deploy Production"
+        ]
+        self.assertEqual(backend_url["verification_status"], "verified-readable")
+        self.assertEqual(
+            backend_url["source_authority"],
+            "deployed://185.183.35.189/var/www/ken-agents/.env#KEN_BACKEND_URL",
+        )
+        retired = entries["ken-scraping|TEST_API_KEY|Ken Deploy Production"]
+        self.assertEqual(retired["disposition"], "retired")
+        self.assertEqual(retired["verification_status"], "planned-secretless")
 
     def test_approved_same_identity_groups_collapse_to_one_target(self) -> None:
         document = registry.load_registry(

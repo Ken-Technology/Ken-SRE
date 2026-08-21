@@ -44,7 +44,19 @@ VERIFICATION_STATUSES = frozenset(
 )
 ENVIRONMENTS = frozenset({"ci", "nonproduction", "production", "none"})
 FIELD_TYPES = frozenset({"CONCEALED", "STRING"})
-RULE_STATUSES = frozenset({"same", "different", "unresolved"})
+RULE_STATUSES = frozenset(
+    {
+        "same",
+        "same-identity",
+        "same-value-scope-unproven",
+        "different",
+        "different-value",
+        "resolved-readable",
+        "scope-unproven",
+        "retire-or-secretless",
+        "unresolved",
+    }
+)
 RULE_ENVIRONMENT_SCOPES = frozenset({"matching", "different", "unproven", "unresolved"})
 RULE_REASONS = frozenset(
     {
@@ -55,6 +67,7 @@ RULE_REASONS = frozenset(
         "environment-split",
         "scope-conflict",
         "unresolved-authority",
+        "retire-or-secretless",
     }
 )
 REVIEWED_EVIDENCE_SHA256 = (
@@ -93,8 +106,31 @@ RULES_TOP_LEVEL_KEYS = frozenset(
     }
 )
 RULE_EVIDENCE_KEYS = frozenset(
-    {"artifact", "sha256", "value_disclosure", "comparison_boundary"}
+    {
+        "id",
+        "artifact",
+        "sha256",
+        "value_disclosure",
+        "comparison_boundary",
+        "row_count",
+    }
 )
+REVIEWED_EVIDENCE_ARTIFACTS = {
+    "baseline-authority-resolution": {
+        "artifact": "/tmp/ken-secret-authority-resolution.yaml",
+        "sha256": REVIEWED_EVIDENCE_SHA256,
+    },
+    "production-credential-comparison": {
+        "artifact": "/tmp/ken-production-credential-comparison.yaml",
+        "sha256": "632bf2c744f6f83a6f231f14e6798c152e45cb91c656ae7fe31eb4bd2e7aedd7",
+        "row_count": 57,
+    },
+    "unresolved-authority-resolution": {
+        "artifact": "/tmp/ken-unresolved-authority-resolution.yaml",
+        "sha256": "b4668e1354d341a074a76d226a36632b44bbd60867bb44616b122559f95ebbb6",
+        "row_count": 124,
+    },
+}
 REVIEWED_GROUP_KEYS = frozenset(
     {"id", "status", "source_coordinates", "environment_scope", "evidence_class"}
 )
@@ -564,10 +600,12 @@ def _walk_rule_forbidden_keys(value: Any, path: str = "document") -> None:
             normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", key).casefold()
             normalized = normalized.replace("-", "_")
             allowed_evidence_digest = (
-                path == "document.reviewed_evidence" and normalized == "sha256"
+                (path == "document.reviewed_evidence" or path.startswith("document.reviewed_evidence["))
+                and normalized == "sha256"
             )
             allowed_evidence_disclosure = (
-                path == "document.reviewed_evidence" and normalized == "value_disclosure"
+                (path == "document.reviewed_evidence" or path.startswith("document.reviewed_evidence["))
+                and normalized == "value_disclosure"
             )
             derived_suffixes = (
                 "_digest",
@@ -659,19 +697,39 @@ def validate_consolidation_rules(document: Any) -> dict[str, Any]:
         raise ValueError("consolidation rules organization must be Ken-Technology")
 
     evidence = document["reviewed_evidence"]
-    if not isinstance(evidence, dict):
-        raise ValueError("reviewed_evidence must be a mapping")
-    _require_exact_keys(evidence, RULE_EVIDENCE_KEYS, "reviewed_evidence")
-    if set(evidence) != RULE_EVIDENCE_KEYS:
-        raise ValueError("reviewed_evidence has an incomplete schema")
-    _require_string(evidence["artifact"], "reviewed_evidence.artifact")
-    _require_string(evidence["sha256"], "reviewed_evidence.sha256")
-    if evidence["sha256"] != REVIEWED_EVIDENCE_SHA256:
-        raise ValueError("reviewed evidence SHA does not match the approved artifact")
-    if evidence["value_disclosure"] != "none":
-        raise ValueError("reviewed evidence must declare value_disclosure: none")
-    if evidence["comparison_boundary"] != "single-process-memory-only":
-        raise ValueError("reviewed evidence comparison boundary is not approved")
+    if not isinstance(evidence, list) or not evidence:
+        raise ValueError("reviewed_evidence must be a non-empty list")
+    evidence_ids: set[str] = set()
+    for index, item in enumerate(evidence):
+        path = f"reviewed_evidence[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{path} must be a mapping")
+        _require_exact_keys(item, RULE_EVIDENCE_KEYS, path)
+        if set(item) != RULE_EVIDENCE_KEYS:
+            raise ValueError(f"{path} has an incomplete schema")
+        _require_string(item["id"], f"{path}.id")
+        if item["id"] in evidence_ids:
+            raise ValueError(f"duplicate reviewed evidence id: {item['id']}")
+        evidence_ids.add(item["id"])
+        _require_string(item["artifact"], f"{path}.artifact")
+        _require_string(item["sha256"], f"{path}.sha256")
+        if item["value_disclosure"] != "none":
+            raise ValueError("reviewed evidence must declare value_disclosure: none")
+        _require_string(item["comparison_boundary"], f"{path}.comparison_boundary")
+        if (
+            _is_bool(item["row_count"])
+            or not isinstance(item["row_count"], int)
+            or item["row_count"] <= 0
+        ):
+            raise ValueError(f"{path}.row_count must be a positive integer")
+        expected = REVIEWED_EVIDENCE_ARTIFACTS.get(item["id"])
+        if expected is None:
+            raise ValueError(f"unapproved reviewed evidence id: {item['id']}")
+        if item["artifact"] != expected["artifact"] or item["sha256"] != expected["sha256"]:
+            raise ValueError(f"reviewed evidence does not match approved artifact: {item['id']}")
+        expected_count = expected.get("row_count")
+        if expected_count is not None and item["row_count"] != expected_count:
+            raise ValueError(f"reviewed evidence row_count does not match approved artifact: {item['id']}")
 
     for key in ("reviewed_groups", "approved_same_identity", "preserve_separately"):
         if not isinstance(document[key], list):
@@ -805,12 +863,16 @@ def minimal_consolidation_rules() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "organization": "Ken-Technology",
-        "reviewed_evidence": {
-            "artifact": "authority-resolution",
-            "sha256": REVIEWED_EVIDENCE_SHA256,
-            "value_disclosure": "none",
-            "comparison_boundary": "single-process-memory-only",
-        },
+        "reviewed_evidence": [
+            {
+                "id": "baseline-authority-resolution",
+                "artifact": "/tmp/ken-secret-authority-resolution.yaml",
+                "sha256": REVIEWED_EVIDENCE_SHA256,
+                "value_disclosure": "none",
+                "comparison_boundary": "single-process-memory-only",
+                "row_count": 1,
+            }
+        ],
         "reviewed_groups": [
             {
                 "id": "reviewed-test",
