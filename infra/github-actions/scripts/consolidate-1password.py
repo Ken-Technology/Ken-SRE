@@ -9,9 +9,12 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -680,11 +683,13 @@ def _preserved_item_structure(item: Mapping[str, Any], canonical_labels: set[str
     return _structure_without_values(projection)
 
 
-def _minimal_env(token: str, extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
+def _minimal_env(
+    token: str, extra_env: Mapping[str, str] | None = None, *, home: str = "/nonexistent"
+) -> dict[str, str]:
     if not isinstance(token, str) or not token or "\n" in token or len(token) > 4096:
         raise MigrationError("service-account token is invalid")
     env = {
-        "HOME": "/nonexistent",
+        "HOME": home,
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "OP_SERVICE_ACCOUNT_TOKEN": token,
@@ -696,6 +701,16 @@ def _minimal_env(token: str, extra_env: Mapping[str, str] | None = None) -> dict
             raise MigrationError("extra environment is invalid")
         env[key] = value
     return env
+
+
+@contextmanager
+def _private_service_account_home() -> Any:
+    root = tempfile.mkdtemp(prefix="ken-op-home-", dir=os.environ.get("TMPDIR", "/tmp"))
+    try:
+        os.chmod(root, 0o700)
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def _session_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -743,14 +758,25 @@ def run_op_json(
     if any(not isinstance(argument, str) or "\n" in argument for argument in argv):
         raise MigrationError("1Password argument is invalid")
     payload = "" if stdin_document is None else json.dumps(stdin_document, separators=(",", ":"))
-    completed = subprocess.run(
-        [str(op_bin), *argv],
-        input=payload,
-        text=True,
-        capture_output=True,
-        check=False,
-        env=_session_env(extra_env) if session else _minimal_env(token, extra_env),
-    )
+    if session:
+        completed = subprocess.run(
+            [str(op_bin), *argv],
+            input=payload,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=_session_env(extra_env),
+        )
+    else:
+        with _private_service_account_home() as home:
+            completed = subprocess.run(
+                [str(op_bin), *argv],
+                input=payload,
+                text=True,
+                capture_output=True,
+                check=False,
+                env=_minimal_env(token, extra_env, home=home),
+            )
     payload = ""
     if completed.returncode != 0:
         raise MigrationError("1Password command failed")
@@ -770,13 +796,23 @@ def run_op_bytes(
         raise MigrationError("1Password executable is unsafe")
     if any(not isinstance(argument, str) or "\n" in argument for argument in argv):
         raise MigrationError("1Password argument is invalid")
-    completed = subprocess.run(
-        [str(op_bin), *argv],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-        env=_session_env(extra_env) if session else _minimal_env(token, extra_env),
-    )
+    if session:
+        completed = subprocess.run(
+            [str(op_bin), *argv],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            env=_session_env(extra_env),
+        )
+    else:
+        with _private_service_account_home() as home:
+            completed = subprocess.run(
+                [str(op_bin), *argv],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                check=False,
+                env=_minimal_env(token, extra_env, home=home),
+            )
     if completed.returncode != 0:
         raise MigrationError("1Password attachment read failed")
     if len(completed.stdout) > 16 * 1024 * 1024:

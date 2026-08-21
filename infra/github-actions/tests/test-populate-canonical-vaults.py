@@ -262,6 +262,34 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reviewed vault"):
             tool._validate_personal_vault({"id": "other", "name": "Employee"})
 
+    def test_personal_writer_item_requires_one_concealed_credential_field(self):
+        tool = load_module()
+        valid = {
+            "id": "j34dtkat667tgzeopkanjwbdau",
+            "title": "Service Account Auth Token: ken-ci-runtime",
+            "vault": {"id": tool.APPROVED_PERSONAL_VAULT_ID, "name": "Employee"},
+            "fields": [{"label": "credential", "type": "CONCEALED", "value": "writer"}],
+        }
+        tool._validate_personal_token_item(
+            valid, "Ken CI Runtime", "j34dtkat667tgzeopkanjwbdau", tool.APPROVED_PERSONAL_VAULT_ID
+        )
+        string_field = {**valid, "fields": [{"label": "credential", "type": "STRING", "value": "writer"}]}
+        with self.assertRaisesRegex(ValueError, "concealed"):
+            tool._validate_personal_token_item(
+                string_field, "Ken CI Runtime", "j34dtkat667tgzeopkanjwbdau", tool.APPROVED_PERSONAL_VAULT_ID
+            )
+        duplicate = {
+            **valid,
+            "fields": [
+                {"label": "credential", "type": "CONCEALED", "value": "one"},
+                {"label": "token", "type": "CONCEALED", "value": "two"},
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "one credential"):
+            tool._validate_personal_token_item(
+                duplicate, "Ken CI Runtime", "j34dtkat667tgzeopkanjwbdau", tool.APPROVED_PERSONAL_VAULT_ID
+            )
+
     def test_personal_session_environment_is_allowlisted_and_strips_account_and_tokens(self):
         tool = load_module()
         with mock.patch.dict(

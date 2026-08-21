@@ -338,9 +338,9 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
             fake_op = root / "op"
             fake_op.write_text(
                 "#!/usr/bin/env python3\n"
-                "import json, os, sys\n"
+                "import json, os, stat, sys\n"
                 "payload = sys.stdin.read()\n"
-                "json.dump({'argv': sys.argv[1:], 'env': dict(os.environ), 'stdin': payload}, open(os.environ['FAKE_LOG'], 'w'))\n"
+                "json.dump({'argv': sys.argv[1:], 'env': dict(os.environ), 'stdin': payload, 'home_mode': stat.S_IMODE(os.stat(os.environ['HOME']).st_mode)}, open(os.environ['FAKE_LOG'], 'w'))\n"
                 "print(json.dumps({'id':'item-id','vault':{'id':'vault-id'},'fields':[]}))\n"
             )
             fake_op.chmod(0o755)
@@ -353,6 +353,9 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
             )
             self.assertEqual(result["id"], "item-id")
             logged = json.loads(log_path.read_text())
+            self.assertNotEqual(logged["env"]["HOME"], "/nonexistent")
+            self.assertEqual(logged["home_mode"], 0o700)
+            self.assertFalse(Path(logged["env"]["HOME"]).exists())
             self.assertEqual(
                 logged["argv"],
                 ["item", "create", "--vault", "Ken Deploy Production", "-"],

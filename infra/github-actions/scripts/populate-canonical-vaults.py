@@ -297,6 +297,15 @@ def _validate_personal_token_item(response: Any, vault: str, item_id: str, vault
     fields = response.get("fields")
     if not isinstance(fields, list):
         raise MigrationError("personal token item response is invalid")
+    credential_fields = [
+        field
+        for field in fields
+        if isinstance(field, Mapping)
+        and str(field.get("label", "")).casefold()
+        in {"credential", "token", "password", "service_account_token"}
+    ]
+    if len(credential_fields) != 1 or credential_fields[0].get("type") != "CONCEALED":
+        raise MigrationError("personal token item must contain one credential field with type concealed")
 
 
 def _validate_writer_tokens(tokens: Mapping[str, str]) -> None:
