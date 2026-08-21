@@ -17,7 +17,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping, Sequence
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote_to_bytes, urlsplit
 
 import yaml
 
@@ -521,6 +521,7 @@ def _parse_connection_string(raw: str) -> dict[str, str]:
     parts.append("".join(current))
 
     result: dict[str, str] = {}
+    seen_keys: set[str] = set()
     for part in parts:
         if not part:
             continue
@@ -529,6 +530,10 @@ def _parse_connection_string(raw: str) -> dict[str, str]:
         key, value = (piece.strip() for piece in part.split("=", 1))
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9 _-]*", key):
             raise MigrationError("connection string is invalid")
+        raw_key = key.casefold()
+        if raw_key in seen_keys:
+            raise MigrationError("connection string is invalid")
+        seen_keys.add(raw_key)
         normalized = _CONNECTION_KEYS.get(key.casefold())
         if not value:
             raise MigrationError("connection string is invalid")
@@ -567,6 +572,16 @@ def _parse_connection_string(raw: str) -> dict[str, str]:
     return result
 
 
+def _strict_percent_decode(value: str) -> str:
+    for match in re.finditer(r"%", value):
+        if not re.match(r"[0-9A-Fa-f]{2}", value[match.start() + 1 : match.start() + 3]):
+            raise MigrationError("mongodb connection string is invalid")
+    try:
+        return unquote_to_bytes(value).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise MigrationError("mongodb connection string is invalid") from exc
+
+
 def _parse_mongodb_database(raw: str) -> str:
     if not isinstance(raw, str) or any(character in raw for character in "\r\n"):
         raise MigrationError("mongodb connection string is invalid")
@@ -578,6 +593,14 @@ def _parse_mongodb_database(raw: str) -> str:
         raise MigrationError("mongodb connection string is invalid")
     if parsed.query or parsed.fragment or not parsed.path.startswith("/"):
         raise MigrationError("mongodb connection string is invalid")
+    _strict_percent_decode(parsed.netloc)
+    _strict_percent_decode(parsed.path)
+    try:
+        host = parsed.hostname
+    except ValueError as exc:
+        raise MigrationError("mongodb connection string is invalid") from exc
+    if not host:
+        raise MigrationError("mongodb connection string is invalid")
     if parsed.netloc.count("@") > 1:
         raise MigrationError("mongodb connection string is invalid")
     if parsed.username == "" or (parsed.password is not None and parsed.username is None):
@@ -585,7 +608,7 @@ def _parse_mongodb_database(raw: str) -> str:
     encoded_database = parsed.path[1:]
     if not encoded_database or "/" in encoded_database:
         raise MigrationError("mongodb connection string is invalid")
-    database = unquote(encoded_database)
+    database = _strict_percent_decode(encoded_database)
     if not database or "/" in database or any(
         character in database for character in "\x00\r\n"
     ):

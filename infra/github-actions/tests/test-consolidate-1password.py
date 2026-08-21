@@ -178,6 +178,15 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
 
         self.assertEqual(set(parsed), {"server", "database", "user", "password"})
 
+    def test_connection_parser_rejects_duplicate_ignored_options_case_insensitively(self):
+        tool = load_module()
+
+        with self.assertRaisesRegex(ValueError, "connection string"):
+            tool._parse_connection_string(
+                "Server=db;Database=ken;User ID=reader;Password=pw;"
+                "SslMode=Required;sslmode=Preferred"
+            )
+
     def test_connection_parser_rejects_empty_or_malformed_option_keys(self):
         tool = load_module()
 
@@ -216,6 +225,11 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
             "mongodb://:password@db-a/ken",
             "mongodb://reader:password@db-a/ken#fragment",
             "mongodb://reader:password@db-a/ken%2Fother",
+            "mongodb://reader:password@/ken",
+            "mongodb://reader:password@db-a/ken%ZZ",
+            "mongodb://reader:password@db-a/ken%2",
+            "mongodb://reader:password@db-a/ken%FF",
+            "mongodb://reader%ZZ:password@db-a/ken",
         )
         for raw in cases:
             document = {"Mongo": raw}
