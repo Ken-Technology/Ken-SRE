@@ -1,0 +1,1193 @@
+schema_version: 1
+input: /private/tmp/ken-sre-ci-cutover/infra/github-actions/inventory/canonical-credentials.yaml
+sha256: 76e658ffe004635d380a29e754cec589edc933cf8a94c1529ea1b5a49665140d
+counts:
+  total: 124
+  by_status:
+    resolved-readable: 1
+    resolved-reconstructable: 0
+    retire-or-secretless: 1
+    scope-unproven: 14
+    unresolved: 108
+rows:
+- coordinate: ken-agents|CLICKUP_WEBHOOK_URL|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-agents-clickup-webhook-url-production in Ken Deploy Production
+    with field CLICKUP_WEBHOOK_URL only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: unknown-authority. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-agents|DEPLOY_HOST|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/SSH Backend - dbops/host
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-agents-deploy-host-production in
+    Ken Deploy Production with field DEPLOY_HOST.
+  evidence_class: readable-1password-ssh-candidate-target-user-unproven
+  notes: The readable SSH item host matches the explicitly authorized backend host, but its username is a scoped dbops identity
+    rather than a proven deploy identity; GitHub secret value equality and target user/scope remain unproven.
+- coordinate: ken-agents|DEPLOY_SSH_KEY|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/SSH Backend - dbops/private_key
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-agents-deploy-ssh-key-production
+    in Ken Deploy Production with field DEPLOY_SSH_KEY.
+  evidence_class: readable-1password-ssh-candidate-target-user-unproven
+  notes: The readable SSH item is for the authorized backend host, but the key's equality to the GitHub deploy secret and
+    its target user/scope are unproven. Do not reuse a dbops key for deploy.
+- coordinate: ken-agents|DEPLOY_USER|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/SSH Backend - dbops/username
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-agents-deploy-user-production in
+    Ken Deploy Production with field DEPLOY_USER.
+  evidence_class: readable-1password-ssh-candidate-target-user-unproven
+  notes: The readable SSH item is for the authorized backend host but its username is a scoped dbops identity; the GitHub
+    deploy user and target scope are not proven equivalent.
+- coordinate: ken-agents|KEN_AGENTS_BACKEND_URL|Ken Deploy Production
+  status: resolved-readable
+  source_authority: deployed://185.183.35.189/var/www/ken-agents/.env#KEN_BACKEND_URL
+  canonical_recommendation: Create the dedicated canonical item ken-agents-ken-agents-backend-url-production in Ken Deploy
+    Production with field KEN_AGENTS_BACKEND_URL from the read-only deployed authority; retain the old GitHub source until
+    live verification.
+  evidence_class: deployed-config-key-readback
+  notes: Read-only root inspection of the deployed ken-agents config found the production backend URL under the deployed key
+    KEN_BACKEND_URL; it is the runtime alias for the target field KEN_AGENTS_BACKEND_URL. The file was read without sourcing
+    or printing values.
+- coordinate: ken-agents|KEN_AGENTS_INTERNAL_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-agents-ken-agents-internal-key-production in Ken Deploy Production
+    with field KEN_AGENTS_INTERNAL_KEY only after an independent authority is supplied; retain the old GitHub source until
+    live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-agents|KEN_AGENTS_PLATFORM_DB_PASSWORD|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-agents-ken-agents-platform-db-password-production in Ken
+    Deploy Production with field KEN_AGENTS_PLATFORM_DB_PASSWORD only after an independent authority is supplied; retain the
+    old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-agents|LANGGRAPH_OAUTH_CLIENT_ID|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-agents-langgraph-oauth-client-id-production in Ken Deploy
+    Production with field LANGGRAPH_OAUTH_CLIENT_ID only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-agents|LANGGRAPH_OAUTH_CLIENT_SECRET|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-agents-langgraph-oauth-client-secret-production in Ken Deploy
+    Production with field LANGGRAPH_OAUTH_CLIENT_SECRET only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-agents|LANGSMITH_API_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-agents-langsmith-api-key-production in Ken Deploy Production
+    with field LANGSMITH_API_KEY only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-agents|OAUTH2_PROXY_COOKIE_SECRET_LANGGRAPH|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-agents-oauth2-proxy-cookie-secret-langgraph-production in
+    Ken Deploy Production with field OAUTH2_PROXY_COOKIE_SECRET_LANGGRAPH only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-agents|WORKSPACE_SETUP_CREDIT_COST|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-agents-workspace-setup-credit-cost-production in Ken Deploy
+    Production with field WORKSPACE_SETUP_CREDIT_COST only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: operator-supplied-config. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-ai-mcp|DB_PORT|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-ai-mcp-db-port-production in Ken Deploy Production with field
+    DB_PORT only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-ai-mcp|KEN_BACKEND_READ_TOKEN|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-ai-mcp-ken-backend-read-token-ci in Ken CI Runtime with field
+    KEN_BACKEND_READ_TOKEN only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-ai-mcp|KEN_BACKEND_READ_TOKEN|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-ai-mcp-ken-backend-read-token-production in Ken Deploy Production
+    with field KEN_BACKEND_READ_TOKEN only after an independent authority is supplied; retain the old GitHub source until
+    live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-ai-mcp|MCP_SMOKE_TOKEN|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-ai-mcp-mcp-smoke-token-production in Ken Deploy Production
+    with field MCP_SMOKE_TOKEN only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-analytics|DEPLOY_SSH_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-analytics-deploy-ssh-key-production in Ken Deploy Production
+    with field DEPLOY_SSH_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-analytics|DEPLOY_USER|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-analytics-deploy-user-production in Ken Deploy Production
+    with field DEPLOY_USER only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|CLOUDFLARE_EDGE_PHASE0_EVIDENCE_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-cloudflare-edge-phase0-evidence-base64-production
+    in Ken Deploy Production with field CLOUDFLARE_EDGE_PHASE0_EVIDENCE_BASE64 only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: operator-supplied-config. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|CLOUDFLARE_EDGE_PROVIDER_INVENTORY_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-cloudflare-edge-provider-inventory-base64-production
+    in Ken Deploy Production with field CLOUDFLARE_EDGE_PROVIDER_INVENTORY_BASE64 only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: operator-supplied-config. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|CLOUDFLARE_EDGE_RESOURCE_CONTRACT_VERSION|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-cloudflare-edge-resource-contract-version-production
+    in Ken Deploy Production with field CLOUDFLARE_EDGE_RESOURCE_CONTRACT_VERSION only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: operator-supplied-config. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|CLOUDFLARE_EDGE_RESOURCE_MANIFEST_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-cloudflare-edge-resource-manifest-base64-production
+    in Ken Deploy Production with field CLOUDFLARE_EDGE_RESOURCE_MANIFEST_BASE64 only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: operator-supplied-config. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|CLOUDFLARE_EDGE_SPEND_GUARD_API_TOKEN|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-cloudflare-edge-spend-guard-api-token-production
+    in Ken Deploy Production with field CLOUDFLARE_EDGE_SPEND_GUARD_API_TOKEN only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|CLOUDFLARE_REDIRECT_ACCESS_CLIENT_ID|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/Cloudflare Edge Production Secrets/CLOUDFLARE_EDGE_ACCESS_CLIENT_ID
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-backend-cloudflare-redirect-access-client-id-production
+    in Ken Deploy Production with field CLOUDFLARE_REDIRECT_ACCESS_CLIENT_ID.
+  evidence_class: readable-1password-near-match-scope-unproven
+  notes: A readable production Cloudflare item has an EDGE-prefixed access-client field, but the target is REDIRECT-prefixed.
+    The value, endpoint, resource scope, and deployment target were not proven equivalent.
+- coordinate: ken-backend|CLOUDFLARE_REDIRECT_ACCESS_CLIENT_SECRET|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/Cloudflare Edge Production Secrets/CLOUDFLARE_EDGE_ACCESS_CLIENT_SECRET
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-backend-cloudflare-redirect-access-client-secret-production
+    in Ken Deploy Production with field CLOUDFLARE_REDIRECT_ACCESS_CLIENT_SECRET.
+  evidence_class: readable-1password-near-match-scope-unproven
+  notes: A readable production Cloudflare item has an EDGE-prefixed access-client field, but the target is REDIRECT-prefixed.
+    The value, endpoint, resource scope, and deployment target were not proven equivalent.
+- coordinate: ken-backend|CLOUDFLARE_REDIRECT_INGRESS_CERT_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-cloudflare-redirect-ingress-cert-base64-production
+    in Ken Deploy Production with field CLOUDFLARE_REDIRECT_INGRESS_CERT_BASE64 only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|CLOUDFLARE_REDIRECT_INGRESS_KEY_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-cloudflare-redirect-ingress-key-base64-production
+    in Ken Deploy Production with field CLOUDFLARE_REDIRECT_INGRESS_KEY_BASE64 only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|CLOUDFLARE_REDIRECT_ORIGIN_ALLOWLIST_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-cloudflare-redirect-origin-allowlist-base64-production
+    in Ken Deploy Production with field CLOUDFLARE_REDIRECT_ORIGIN_ALLOWLIST_BASE64 only after an independent authority is
+    supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|CLOUDFLARE_REDIRECT_ORIGIN_PULL_CA_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-cloudflare-redirect-origin-pull-ca-base64-production
+    in Ken Deploy Production with field CLOUDFLARE_REDIRECT_ORIGIN_PULL_CA_BASE64 only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|KEN_REDIRECT_CLIENT_PFX_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-ken-redirect-client-pfx-base64-production in Ken
+    Deploy Production with field KEN_REDIRECT_CLIENT_PFX_BASE64 only after an independent authority is supplied; retain the
+    old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|REDIRECT_DEPLOY_HOST|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/SSH Dedicated Mail Server OVH/host
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-backend-redirect-deploy-host-production
+    in Ken Deploy Production with field REDIRECT_DEPLOY_HOST.
+  evidence_class: readable-1password-ssh-candidate-target-unproven
+  notes: A readable OVH SSH/server item is a possible target-specific candidate, but the redirector host, target user, and
+    GitHub secret equality were not proven.
+- coordinate: ken-backend|REDIRECT_DEPLOY_HOST_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-redirect-deploy-host-key-production in Ken Deploy
+    Production with field REDIRECT_DEPLOY_HOST_KEY only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|REDIRECT_DEPLOY_SSH_KEY|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/SSH Dedicated Mail Server OVH/private_key
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-backend-redirect-deploy-ssh-key-production
+    in Ken Deploy Production with field REDIRECT_DEPLOY_SSH_KEY.
+  evidence_class: readable-1password-ssh-candidate-target-unproven
+  notes: A readable OVH SSH/server item is a possible target-specific candidate, but the redirector host, target user, and
+    GitHub secret equality were not proven.
+- coordinate: ken-backend|REDIRECT_RELEASE_SIGNING_PRIVATE_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-redirect-release-signing-private-key-production in
+    Ken Deploy Production with field REDIRECT_RELEASE_SIGNING_PRIVATE_KEY only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-backend|REDIRECT_SYNC_CLIENT_CA_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-redirect-sync-client-ca-base64-production in Ken
+    Deploy Production with field REDIRECT_SYNC_CLIENT_CA_BASE64 only after an independent authority is supplied; retain the
+    old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|REDIRECT_SYNC_SERVER_CERT_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-redirect-sync-server-cert-base64-production in Ken
+    Deploy Production with field REDIRECT_SYNC_SERVER_CERT_BASE64 only after an independent authority is supplied; retain
+    the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|REDIRECT_SYNC_SERVER_KEY_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-redirect-sync-server-key-base64-production in Ken
+    Deploy Production with field REDIRECT_SYNC_SERVER_KEY_BASE64 only after an independent authority is supplied; retain the
+    old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|REDIRECT_SYNC_SOURCE_ALLOWLIST_BASE64|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-redirect-sync-source-allowlist-base64-production
+    in Ken Deploy Production with field REDIRECT_SYNC_SOURCE_ALLOWLIST_BASE64 only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|SCHEMA_TUNNEL_KNOWN_HOSTS|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-schema-tunnel-known-hosts-production in Ken Deploy
+    Production with field SCHEMA_TUNNEL_KNOWN_HOSTS only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-backend|STAGING_BACKEND_HOST|Ken Deploy Nonproduction
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-backend-staging-backend-host-nonproduction in Ken Deploy
+    Nonproduction with field STAGING_BACKEND_HOST only after an independent authority is supplied; retain the old GitHub source
+    until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-brain|SSH_KNOWN_HOSTS|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-brain-ssh-known-hosts-production in Ken Deploy Production
+    with field SSH_KNOWN_HOSTS only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-cms|OAUTH2_PROXY_CLIENT_ID|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-cms-oauth2-proxy-client-id-production in Ken Deploy Production
+    with field OAUTH2_PROXY_CLIENT_ID only after an independent authority is supplied; retain the old GitHub source until
+    live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-cms|OAUTH2_PROXY_CLIENT_SECRET|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-cms-oauth2-proxy-client-secret-production in Ken Deploy Production
+    with field OAUTH2_PROXY_CLIENT_SECRET only after an independent authority is supplied; retain the old GitHub source until
+    live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-cms|OAUTH2_PROXY_COOKIE_SECRET|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-cms-oauth2-proxy-cookie-secret-production in Ken Deploy Production
+    with field OAUTH2_PROXY_COOKIE_SECRET only after an independent authority is supplied; retain the old GitHub source until
+    live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-cms|POSTGRES_DB|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-cms-postgres-db-production in Ken Deploy Production with
+    field POSTGRES_DB only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-cms|POSTGRES_PASSWORD|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-cms-postgres-password-production in Ken Deploy Production
+    with field POSTGRES_PASSWORD only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-cms|POSTGRES_USER|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-cms-postgres-user-production in Ken Deploy Production with
+    field POSTGRES_USER only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-cms|SSH_HOST|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/Frontend Server/hostname
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-cms-ssh-host-production in Ken Deploy
+    Production with field SSH_HOST.
+  evidence_class: readable-1password-ssh-candidate-target-unproven
+  notes: A readable production-looking server item has hostname, username, and private-key fields, but no proof ties that
+    target to ken-cms or the GitHub secret.
+- coordinate: ken-cms|SSH_KEY|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/Frontend Server/private key
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-cms-ssh-key-production in Ken Deploy
+    Production with field SSH_KEY.
+  evidence_class: readable-1password-ssh-candidate-target-unproven
+  notes: A readable production-looking server item has a private-key field, but target host/user, provider identity, and GitHub
+    secret equality for ken-cms are unproven.
+- coordinate: ken-cms|SSH_PORT|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-cms-ssh-port-production in Ken Deploy Production with field
+    SSH_PORT only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-cms|SSH_USER|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/Frontend Server/username
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-cms-ssh-user-production in Ken Deploy
+    Production with field SSH_USER.
+  evidence_class: readable-1password-ssh-candidate-target-unproven
+  notes: A readable production-looking server item has a username field, but target host/user, provider identity, and GitHub
+    secret equality for ken-cms are unproven.
+- coordinate: ken-daily|CLICKUP_WEBHOOK_URL|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-daily-clickup-webhook-url-production in Ken Deploy Production
+    with field CLICKUP_WEBHOOK_URL only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: unknown-authority. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-daily|DEPLOY_HOST|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-daily-deploy-host-production in Ken Deploy Production with
+    field DEPLOY_HOST only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-daily|DEPLOY_SSH_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-daily-deploy-ssh-key-production in Ken Deploy Production
+    with field DEPLOY_SSH_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-daily|DEPLOY_USER|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-daily-deploy-user-production in Ken Deploy Production with
+    field DEPLOY_USER only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-frontend|CLICKUP_WEBHOOK_URL|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-frontend-clickup-webhook-url-production in Ken Deploy Production
+    with field CLICKUP_WEBHOOK_URL only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: unknown-authority. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-frontend|KEN_AGENTS_INTERNAL_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-frontend-ken-agents-internal-key-production in Ken Deploy
+    Production with field KEN_AGENTS_INTERNAL_KEY only after an independent authority is supplied; retain the old GitHub source
+    until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-frontend|NEXT_SERVER_ACTIONS_ENCRYPTION_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-frontend-next-server-actions-encryption-key-production in
+    Ken Deploy Production with field NEXT_SERVER_ACTIONS_ENCRYPTION_KEY only after an independent authority is supplied; retain
+    the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-frontend|POSTHOG_PERSONAL_API_KEY|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://ken-website/posthog/personal_api_key
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-frontend-posthog-personal-api-key-production
+    in Ken Deploy Production with field POSTHOG_PERSONAL_API_KEY.
+  evidence_class: readable-1password-provider-candidate-scope-unproven
+  notes: A readable PostHog item has a personal_api_key field, but it is in the ken-website vault; the PostHog account, project,
+    environment, and GitHub secret equality for ken-frontend are unproven.
+- coordinate: ken-frontend|POSTHOG_PROJECT_ID|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://ken-website/posthog/project_token
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-frontend-posthog-project-id-production
+    in Ken Deploy Production with field POSTHOG_PROJECT_ID.
+  evidence_class: readable-1password-provider-candidate-scope-unproven
+  notes: A readable PostHog item has a project_token field, not a proven project ID authority for ken-frontend; account, project,
+    environment, and GitHub secret equality remain unproven.
+- coordinate: ken-help|DEPLOY_HOST|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-help-deploy-host-production in Ken Deploy Production with
+    field DEPLOY_HOST only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-help|DEPLOY_KNOWN_HOSTS|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-help-deploy-known-hosts-production in Ken Deploy Production
+    with field DEPLOY_KNOWN_HOSTS only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-help|DEPLOY_PATH|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-help-deploy-path-production in Ken Deploy Production with
+    field DEPLOY_PATH only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-help|DEPLOY_SSH_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-help-deploy-ssh-key-production in Ken Deploy Production with
+    field DEPLOY_SSH_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-help|DEPLOY_USER|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-help-deploy-user-production in Ken Deploy Production with
+    field DEPLOY_USER only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-hermes-clickup|DEPLOY_HOST|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-hermes-clickup-deploy-host-production in Ken Deploy Production
+    with field DEPLOY_HOST only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-hermes-clickup|DEPLOY_SSH_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-hermes-clickup-deploy-ssh-key-production in Ken Deploy Production
+    with field DEPLOY_SSH_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-hermes-clickup|DEPLOY_SSH_KNOWN_HOSTS|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-hermes-clickup-deploy-ssh-known-hosts-production in Ken Deploy
+    Production with field DEPLOY_SSH_KNOWN_HOSTS only after an independent authority is supplied; retain the old GitHub source
+    until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-hermes-clickup|DEPLOY_USER|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-hermes-clickup-deploy-user-production in Ken Deploy Production
+    with field DEPLOY_USER only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|CRATES_IO_TOKEN|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-crates-io-token-production in Ken Deploy Production
+    with field CRATES_IO_TOKEN only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|EVAL_API_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-eval-api-key-production in Ken Deploy Production
+    with field EVAL_API_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-scraping|EVAL_API_URL|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-eval-api-url-production in Ken Deploy Production
+    with field EVAL_API_URL only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: operator-supplied-config. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|EVAL_BENCHMARK_EXPERIMENT_ID|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-eval-benchmark-experiment-id-production in Ken Deploy
+    Production with field EVAL_BENCHMARK_EXPERIMENT_ID only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: operator-supplied-config. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|FIRECRAWL_API_KEY|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-firecrawl-api-key-ci in Ken CI Runtime with field
+    FIRECRAWL_API_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|GOOGLE_GENERATIVE_AI_API_KEY|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-google-generative-ai-api-key-ci in Ken CI Runtime
+    with field GOOGLE_GENERATIVE_AI_API_KEY only after an independent authority is supplied; retain the old GitHub source
+    until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|GPG_SIGNING_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-gpg-signing-key-production in Ken Deploy Production
+    with field GPG_SIGNING_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|GPG_SIGNING_PASSWORD|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-gpg-signing-password-production in Ken Deploy Production
+    with field GPG_SIGNING_PASSWORD only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|HEX_API_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-hex-api-key-production in Ken Deploy Production
+    with field HEX_API_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|IDMUX_URL|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-idmux-url-ci in Ken CI Runtime with field IDMUX_URL
+    only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-scraping|MAVEN_PASSWORD|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-maven-password-production in Ken Deploy Production
+    with field MAVEN_PASSWORD only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|MAVEN_USERNAME|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-maven-username-production in Ken Deploy Production
+    with field MAVEN_USERNAME only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|NPM_TOKEN|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-npm-token-production in Ken Deploy Production with
+    field NPM_TOKEN only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|NUGET_API_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-nuget-api-key-production in Ken Deploy Production
+    with field NUGET_API_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OPENAI_API_KEY|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-openai-api-key-ci in Ken CI Runtime with field OPENAI_API_KEY
+    only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_DEPLOY_SSH_KEY|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/SSH Dedicated Mail Server OVH/private_key
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-scraping-ovh-deploy-ssh-key-production
+    in Ken Deploy Production with field OVH_DEPLOY_SSH_KEY.
+  evidence_class: readable-1password-ssh-candidate-target-unproven
+  notes: A readable OVH SSH item is a possible production candidate, but the ken-scraping target host/user and GitHub secret
+    equality were not proven.
+- coordinate: ken-scraping|OVH_ENV_BLOCK_MEDIA|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-block-media-production in Ken Deploy Production
+    with field OVH_ENV_BLOCK_MEDIA only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_BROWSER_POOL_SIZE|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-browser-pool-size-production in Ken Deploy
+    Production with field OVH_ENV_BROWSER_POOL_SIZE only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_CAPTCHA_API_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-captcha-api-key-production in Ken Deploy
+    Production with field OVH_ENV_CAPTCHA_API_KEY only after an independent authority is supplied; retain the old GitHub source
+    until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_CRAWL_CONCURRENT_REQUESTS|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-crawl-concurrent-requests-production in
+    Ken Deploy Production with field OVH_ENV_CRAWL_CONCURRENT_REQUESTS only after an independent authority is supplied; retain
+    the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_MAX_CONCURRENT_JOBS|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-max-concurrent-jobs-production in Ken Deploy
+    Production with field OVH_ENV_MAX_CONCURRENT_JOBS only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_MAX_CPU|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-max-cpu-production in Ken Deploy Production
+    with field OVH_ENV_MAX_CPU only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_MAX_RAM|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-max-ram-production in Ken Deploy Production
+    with field OVH_ENV_MAX_RAM only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_NUM_WORKERS_PER_QUEUE|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-num-workers-per-queue-production in Ken
+    Deploy Production with field OVH_ENV_NUM_WORKERS_PER_QUEUE only after an independent authority is supplied; retain the
+    old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_NUQ_WORKER_COUNT|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-nuq-worker-count-production in Ken Deploy
+    Production with field OVH_ENV_NUQ_WORKER_COUNT only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_POSTGRES_DB|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-postgres-db-production in Ken Deploy Production
+    with field OVH_ENV_POSTGRES_DB only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_POSTGRES_PASSWORD|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-postgres-password-production in Ken Deploy
+    Production with field OVH_ENV_POSTGRES_PASSWORD only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_POSTGRES_USER|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-postgres-user-production in Ken Deploy Production
+    with field OVH_ENV_POSTGRES_USER only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_PROXY_CHEAP_REFRESH_INTERVAL_MS|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-proxy-cheap-refresh-interval-ms-production
+    in Ken Deploy Production with field OVH_ENV_PROXY_CHEAP_REFRESH_INTERVAL_MS only after an independent authority is supplied;
+    retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_RABBITMQ_DEFAULT_PASS|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-rabbitmq-default-pass-production in Ken
+    Deploy Production with field OVH_ENV_RABBITMQ_DEFAULT_PASS only after an independent authority is supplied; retain the
+    old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_RABBITMQ_DEFAULT_USER|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-rabbitmq-default-user-production in Ken
+    Deploy Production with field OVH_ENV_RABBITMQ_DEFAULT_USER only after an independent authority is supplied; retain the
+    old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_REDIS_PASSWORD|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-redis-password-production in Ken Deploy
+    Production with field OVH_ENV_REDIS_PASSWORD only after an independent authority is supplied; retain the old GitHub source
+    until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_REDIS_RATE_LIMIT_URL|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-redis-rate-limit-url-production in Ken Deploy
+    Production with field OVH_ENV_REDIS_RATE_LIMIT_URL only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_REDIS_URL|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-redis-url-production in Ken Deploy Production
+    with field OVH_ENV_REDIS_URL only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_SEARXNG_ENDPOINT|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-searxng-endpoint-production in Ken Deploy
+    Production with field OVH_ENV_SEARXNG_ENDPOINT only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_SEARXNG_SECRET_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-searxng-secret-key-production in Ken Deploy
+    Production with field OVH_ENV_SEARXNG_SECRET_KEY only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_ENV_USE_DB_AUTHENTICATION|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-env-use-db-authentication-production in Ken
+    Deploy Production with field OVH_ENV_USE_DB_AUTHENTICATION only after an independent authority is supplied; retain the
+    old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|OVH_HOST_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ovh-host-key-production in Ken Deploy Production
+    with field OVH_HOST_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|PACKAGIST_TOKEN|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-packagist-token-production in Ken Deploy Production
+    with field PACKAGIST_TOKEN only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|PACKAGIST_USERNAME|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-packagist-username-production in Ken Deploy Production
+    with field PACKAGIST_USERNAME only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|PHP_SDK_DEPLOY_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-php-sdk-deploy-key-production in Ken Deploy Production
+    with field PHP_SDK_DEPLOY_KEY only after an independent authority is supplied; retain the old GitHub source until live
+    verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|PROXY_PASSWORD|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-proxy-password-ci in Ken CI Runtime with field PROXY_PASSWORD
+    only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: unknown-authority. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|PROXY_SERVER|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-proxy-server-ci in Ken CI Runtime with field PROXY_SERVER
+    only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: unknown-authority. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|PROXY_USERNAME|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-proxy-username-ci in Ken CI Runtime with field PROXY_USERNAME
+    only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: unknown-authority. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|PYPI_PASSWORD|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-pypi-password-production in Ken Deploy Production
+    with field PYPI_PASSWORD only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|PYPI_USERNAME|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-pypi-username-production in Ken Deploy Production
+    with field PYPI_USERNAME only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|RUBYGEMS_API_KEY|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-rubygems-api-key-production in Ken Deploy Production
+    with field RUBYGEMS_API_KEY only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|SCRAPE_EVALS_PAT|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-scrape-evals-pat-ci in Ken CI Runtime with field
+    SCRAPE_EVALS_PAT only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-scraping|TEST_API_KEY|Ken Deploy Production
+  status: retire-or-secretless
+  source_authority: null
+  canonical_recommendation: Retire the unused workflow reference; keep this coordinate secretless and do not create a canonical
+    item.
+  evidence_class: workflow-reference-removal
+  notes: The handoff marks this reference for workflow-reference-removal. Retire the unused reference and keep the resulting
+    path secretless; no replacement value or item is required.
+- coordinate: ken-scraping|TS_OAUTH_CLIENT_ID|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ts-oauth-client-id-ci in Ken CI Runtime with field
+    TS_OAUTH_CLIENT_ID only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-scraping|TS_OAUTH_SECRET|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-scraping-ts-oauth-secret-ci in Ken CI Runtime with field
+    TS_OAUTH_SECRET only after an independent authority is supplied; retain the old GitHub source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: independent-trust-authority. No exact readable 1Password field, permitted deployed configuration key, or target
+    readback was established. Do not invent an authority.'
+- coordinate: ken-search|DEEPSEEK_API_KEY|Ken Deploy Production
+  status: scope-unproven
+  source_authority: op://Development/DeepSeek/Dev API Key
+  canonical_recommendation: Do not consolidate from the candidate yet. Prove provider account, endpoint, environment, target
+    host/user, permission scope, and exact value equality, then create dedicated item ken-search-deepseek-api-key-production
+    in Ken Deploy Production with field DEEPSEEK_API_KEY.
+  evidence_class: deployed-config-and-1password-exact-match-scope-conflict
+  notes: In-memory comparison found an exact match between the deployed production ken-agents DEEPSEEK_API_KEY and this readable
+    1Password field. The field is labelled Dev API Key while the target is ken-search production, so provider account, endpoint,
+    and deployment scope are not proven; do not consolidate it yet.
+- coordinate: ken-search|ELASTICSEARCH_CERT_FINGERPRINT|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-search-elasticsearch-cert-fingerprint-production in Ken Deploy
+    Production with field ELASTICSEARCH_CERT_FINGERPRINT only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: target-system-readback. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-search|KEN_GITHUB_PACKAGES_READ_TOKEN|Ken CI Runtime
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-search-ken-github-packages-read-token-ci in Ken CI Runtime
+    with field KEN_GITHUB_PACKAGES_READ_TOKEN only after an independent authority is supplied; retain the old GitHub source
+    until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'
+- coordinate: ken-search|KEN_GITHUB_PACKAGES_READ_TOKEN|Ken Deploy Production
+  status: unresolved
+  source_authority: null
+  canonical_recommendation: Create or recover dedicated item ken-search-ken-github-packages-read-token-production in Ken Deploy
+    Production with field KEN_GITHUB_PACKAGES_READ_TOKEN only after an independent authority is supplied; retain the old GitHub
+    source until live verification.
+  evidence_class: no-readable-authority
+  notes: 'GitHub secret metadata exposes the name only; long-lived value is not recoverable through the GitHub API. Handoff
+    class: provider-rotation. No exact readable 1Password field, permitted deployed configuration key, or target readback
+    was established. Do not invent an authority.'

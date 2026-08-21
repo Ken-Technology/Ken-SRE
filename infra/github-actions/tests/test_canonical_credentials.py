@@ -7,6 +7,7 @@ import copy
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import yaml
@@ -204,7 +205,7 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
         }
         self.assertEqual(
             evidence["baseline-authority-resolution"]["artifact"],
-            "/tmp/ken-secret-authority-resolution.yaml",
+            "infra/github-actions/inventory/evidence/ken-secret-authority-resolution.yaml",
         )
         self.assertEqual(
             evidence["baseline-authority-resolution"]["sha256"],
@@ -226,7 +227,7 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             evidence["unresolved-authority-resolution"]["sha256"],
-            "b4668e1354d341a074a76d226a36632b44bbd60867bb44616b122559f95ebbb6",
+            "317b3ed71f1128d80b9b890059d5e7b0a4c0e6400779709c2ec178b31a77d250",
         )
         self.assertEqual(evidence["production-credential-comparison"]["row_count"], 57)
         self.assertEqual(evidence["unresolved-authority-resolution"]["row_count"], 124)
@@ -260,6 +261,57 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
             item["sha256"] = registry.artifact_sha256(artifact)
             with self.assertRaisesRegex(ValueError, "row count"):
                 registry.validate_reviewed_evidence_artifacts(candidate)
+
+    def test_reviewed_evidence_is_committed_and_repo_relative(self):
+        rules = registry.load_consolidation_rules(self.rules_path)
+        for item in rules["reviewed_evidence"]:
+            artifact = Path(item["artifact"])
+            self.assertFalse(artifact.is_absolute())
+            self.assertEqual(artifact.parts[:4], ("infra", "github-actions", "inventory", "evidence"))
+            self.assertTrue((ROOT / artifact).is_file())
+
+    def test_artifact_validation_is_mandatory_even_when_legacy_flag_is_false(self):
+        with mock.patch.object(
+            registry, "validate_reviewed_evidence_artifacts", side_effect=ValueError("must verify")
+        ) as validate:
+            with self.assertRaisesRegex(ValueError, "must verify"):
+                registry.load_consolidation_rules(self.rules_path, verify_artifacts=False)
+        validate.assert_called_once()
+
+    def test_repo_relative_artifact_paths_reject_traversal_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "evidence.yaml"
+            artifact.write_text("value_disclosure: none\nrows:\n- id: one\n", encoding="utf-8")
+            candidate = copy.deepcopy(registry.minimal_consolidation_rules())
+            item = candidate["reviewed_evidence"][0]
+            item["artifact"] = "evidence.yaml"
+            item["sha256"] = registry.artifact_sha256(artifact)
+            item["row_count"] = 1
+            registry.validate_reviewed_evidence_artifacts(candidate, base_dir=root)
+
+            item["artifact"] = "../evidence.yaml"
+            with self.assertRaisesRegex(ValueError, "relative|traversal"):
+                registry.validate_reviewed_evidence_artifacts(candidate, base_dir=root)
+
+            item["artifact"] = "link.yaml"
+            (root / "link.yaml").symlink_to(artifact)
+            with self.assertRaisesRegex(ValueError, "symlink|regular"):
+                registry.validate_reviewed_evidence_artifacts(candidate, base_dir=root)
+
+    def test_artifact_bytes_are_verified_not_just_row_counted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "evidence.yaml"
+            artifact.write_text("value_disclosure: none\nrows:\n- id: one\n", encoding="utf-8")
+            candidate = copy.deepcopy(registry.minimal_consolidation_rules())
+            item = candidate["reviewed_evidence"][0]
+            item["artifact"] = "evidence.yaml"
+            item["sha256"] = registry.artifact_sha256(artifact)
+            item["row_count"] = 1
+            artifact.write_text("value_disclosure: none\nrows:\n- id: two\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "sha256 mismatch"):
+                registry.validate_reviewed_evidence_artifacts(candidate, base_dir=root)
 
     def test_final_shared_production_targets_are_applied(self) -> None:
         document = registry.load_registry(

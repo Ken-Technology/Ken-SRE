@@ -9,6 +9,7 @@ evidence derived from its value.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import stat
 from pathlib import Path
@@ -75,6 +76,7 @@ RULE_REASONS = frozenset(
 REVIEWED_EVIDENCE_SHA256 = (
     "51113962b9cb1705f66ff51700afacf9f65da37753e215b3e0d4606d9211c5c0"
 )
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 TOP_LEVEL_KEYS = frozenset(
     {"schema_version", "organization", "allowed_vaults", "canonical_items", "entries"}
@@ -119,17 +121,17 @@ RULE_EVIDENCE_KEYS = frozenset(
 )
 REVIEWED_EVIDENCE_ARTIFACTS = {
     "baseline-authority-resolution": {
-        "artifact": "/tmp/ken-secret-authority-resolution.yaml",
+        "artifact": "infra/github-actions/inventory/evidence/ken-secret-authority-resolution.yaml",
         "sha256": REVIEWED_EVIDENCE_SHA256,
     },
     "production-credential-comparison": {
-        "artifact": "/tmp/ken-production-credential-comparison.yaml",
+        "artifact": "infra/github-actions/inventory/evidence/ken-production-credential-comparison.yaml",
         "sha256": "4b2f27dbd8de06c2b8c725a8dd68d5e2b4cc9b77acce1494735bd34a0b1afe96",
         "row_count": 57,
     },
     "unresolved-authority-resolution": {
-        "artifact": "/tmp/ken-unresolved-authority-resolution.yaml",
-        "sha256": "b4668e1354d341a074a76d226a36632b44bbd60867bb44616b122559f95ebbb6",
+        "artifact": "infra/github-actions/inventory/evidence/ken-unresolved-authority-resolution.yaml",
+        "sha256": "317b3ed71f1128d80b9b890059d5e7b0a4c0e6400779709c2ec178b31a77d250",
         "row_count": 124,
     },
 }
@@ -634,16 +636,55 @@ def _walk_rule_forbidden_keys(value: Any, path: str = "document") -> None:
 
 _ARTIFACT_FORBIDDEN_KEYS = frozenset(
     {
+        "api_key",
+        "bytes",
+        "checksum",
+        "digest",
+        "hash",
+        "length",
+        "prefix",
         "secret",
         "secret_value",
+        "sha",
+        "sha1",
+        "sha256",
         "plaintext",
         "credential_value",
         "token_value",
         "private_key",
         "password",
-        "api_key",
     }
 )
+
+
+def _resolve_reviewed_artifact_path(
+    artifact: str | Path, *, base_dir: str | Path | None
+) -> Path:
+    """Resolve an evidence path while keeping it inside the approved root."""
+    raw = Path(artifact)
+    if base_dir is not None and raw.is_absolute():
+        raise ValueError("reviewed evidence artifact must be repo-relative")
+    if not raw.is_absolute() and any(part in {"", ".", ".."} for part in raw.parts):
+        raise ValueError("reviewed evidence artifact path traversal is not allowed")
+
+    root = Path(base_dir).resolve() if base_dir is not None else REPOSITORY_ROOT
+    candidate = raw if raw.is_absolute() else root / raw
+    resolved = candidate.resolve(strict=False)
+    if not raw.is_absolute():
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("reviewed evidence artifact escapes repository root") from exc
+
+        current = root
+        for part in raw.parts:
+            current /= part
+            try:
+                if stat.S_ISLNK(current.lstat().st_mode):
+                    raise ValueError("reviewed evidence artifact path contains a symlink")
+            except FileNotFoundError:
+                break
+    return candidate
 
 
 def artifact_sha256(path: str | Path) -> str:
@@ -663,9 +704,18 @@ def _validate_value_free_artifact(document: Any, path: str) -> None:
     def walk(value: Any, location: str) -> None:
         if isinstance(value, Mapping):
             for key, child in value.items():
-                if isinstance(key, str) and key.casefold() in _ARTIFACT_FORBIDDEN_KEYS:
+                normalized = key.casefold().replace("-", "_") if isinstance(key, str) else ""
+                allowed_artifact_digest = location == "artifact" and normalized == "sha256"
+                if (
+                    isinstance(key, str)
+                    and not allowed_artifact_digest
+                    and (
+                        normalized in _ARTIFACT_FORBIDDEN_KEYS
+                        or normalized.endswith(("_hash", "_digest", "_sha", "_sha1", "_sha256", "_checksum", "_prefix", "_length", "_bytes"))
+                    )
+                ):
                     raise ValueError(
-                        f"reviewed evidence artifact contains a value field: {location}.{key}"
+                        f"reviewed evidence artifact contains value-derived metadata: {location}.{key}"
                     )
                 walk(child, f"{location}.{key}")
         elif isinstance(value, list):
@@ -675,22 +725,37 @@ def _validate_value_free_artifact(document: Any, path: str) -> None:
     walk(document, "artifact")
 
 
-def validate_reviewed_evidence_artifacts(document: Mapping[str, Any]) -> None:
+def validate_reviewed_evidence_artifacts(
+    document: Mapping[str, Any], *, base_dir: str | Path | None = None
+) -> None:
     """Hash and structurally validate each approved evidence artifact."""
     for item in document["reviewed_evidence"]:
-        artifact = Path(item["artifact"])
+        artifact = _resolve_reviewed_artifact_path(item["artifact"], base_dir=base_dir)
         try:
             info = artifact.lstat()
         except OSError as exc:
             raise ValueError(f"reviewed evidence artifact is missing: {artifact}") from exc
         if not stat.S_ISREG(info.st_mode) or artifact.is_symlink() or info.st_nlink != 1:
             raise ValueError(f"reviewed evidence artifact is not a regular file: {artifact}")
-        if artifact_sha256(artifact) != item["sha256"]:
+        try:
+            with artifact.open("rb") as stream:
+                before = os.fstat(stream.fileno())
+                raw = stream.read()
+                after = os.fstat(stream.fileno())
+        except OSError as exc:
+            raise ValueError(f"reviewed evidence artifact could not be read: {item['id']}") from exc
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise ValueError(f"reviewed evidence artifact changed while being read: {item['id']}")
+        if hashlib.sha256(raw).hexdigest() != item["sha256"]:
             raise ValueError(f"reviewed evidence artifact sha256 mismatch: {item['id']}")
         try:
-            with artifact.open("r", encoding="utf-8") as stream:
-                artifact_document = yaml.load(stream, Loader=UniqueKeySafeLoader)
-        except (OSError, UnicodeError, yaml.YAMLError) as exc:
+            artifact_document = yaml.load(raw.decode("utf-8"), Loader=UniqueKeySafeLoader)
+        except (UnicodeError, yaml.YAMLError) as exc:
             raise ValueError(f"reviewed evidence artifact is invalid: {item['id']}") from exc
         _validate_value_free_artifact(artifact_document, str(artifact))
         rows = artifact_document.get("rows") if isinstance(artifact_document, Mapping) else None
@@ -864,15 +929,17 @@ def validate_consolidation_rules(document: Any) -> dict[str, Any]:
 
 
 def load_consolidation_rules(
-    path: str | Path, *, verify_artifacts: bool = False
+    path: str | Path, *, verify_artifacts: bool | None = None
 ) -> dict[str, Any]:
-    """Load rules; hash external evidence only when explicitly requested."""
+    """Load rules and always verify their committed evidence bundle."""
     rules_path = Path(path)
     with rules_path.open("r", encoding="utf-8") as stream:
         document = yaml.load(stream, Loader=UniqueKeySafeLoader)
     validated = validate_consolidation_rules(document)
-    if verify_artifacts:
-        validate_reviewed_evidence_artifacts(validated)
+    # ``verify_artifacts`` remains accepted for callers from the initial
+    # migration tooling, but verification is intentionally never optional.
+    del verify_artifacts
+    validate_reviewed_evidence_artifacts(validated, base_dir=REPOSITORY_ROOT)
     return validated
 
 
@@ -942,7 +1009,7 @@ def minimal_consolidation_rules() -> dict[str, Any]:
         "reviewed_evidence": [
             {
                 "id": "baseline-authority-resolution",
-                "artifact": "/tmp/ken-secret-authority-resolution.yaml",
+                "artifact": "infra/github-actions/inventory/evidence/ken-secret-authority-resolution.yaml",
                 "sha256": REVIEWED_EVIDENCE_SHA256,
                 "value_disclosure": "none",
                 "comparison_boundary": "single-process-memory-only",
