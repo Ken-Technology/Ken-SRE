@@ -87,14 +87,15 @@ import yaml
 
 root = Path(sys.argv[1])
 expected = {
-    "secrets.yaml": "cd4aaa861064260e0857768361e301246681593b1dcf0c35950993f416c8587f",
-    "secret-handoff.yaml": "71c386d3382c1db06b14332f6e86525debe625ec1dafc708c5f0298665b88834",
+    "secrets.yaml": "33928b2be2bb30810d74400c0bc4b364f8fe81725708ef8bb14d198e3110331b",
+    "secret-handoff.yaml": "a60030e564fe75d66cde5a9ab098553d7581115ef2c99bd0ddad110d2abd3ab7",
 }
 for name, digest in expected.items():
     actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
     assert actual == digest, (name, actual)
 secrets = yaml.safe_load((root / "secrets.yaml").read_text())
 handoff = yaml.safe_load((root / "secret-handoff.yaml").read_text())
+repositories = yaml.safe_load((root / "repositories.yaml").read_text())
 assert len(secrets["entries"]) == 343
 assert len(secrets["direct_onepassword_entries"]) == 11
 assert len(secrets["broker_actions"]) == 4
@@ -112,6 +113,39 @@ assert beehiiv == {
     "BEEHIIV_API_KEY": "generate",
     "BEEHIIV_PUBLICATION_ID": "generate",
 }
+expected_broker_items = {
+    "SERVER_HOST": "vexa-mcp-auth-deploy-ssh-production",
+    "SERVER_PORT": "vexa-mcp-auth-deploy-ssh-production",
+    "SERVER_SSH_KEY": "vexa-mcp-auth-deploy-ssh-production",
+    "BEEHIIV_API_KEY": "beehiiv-production",
+    "BEEHIIV_PUBLICATION_ID": "beehiiv-production",
+    "DEPLOY_SSH_KEY": "blog-sync-deploy-production",
+    "WEBSITE_HOST": "deploy-ssh-production",
+    "WEBSITE_PORT": "deploy-ssh-production",
+    "WEBSITE_SSH_KEY": "deploy-ssh-production",
+}
+secret_broker_items = {
+    row["environment_name"]: row["target_item"]
+    for row in secrets["direct_onepassword_entries"]
+    if row.get("broker_action_id")
+}
+handoff_broker_items = {
+    row["environment_name"]: row["target_item"]
+    for row in handoff["rows"]
+    if row.get("reference_class") == "direct-onepassword"
+    and row.get("broker_action_id")
+}
+repository_broker_items = {
+    row["environment_name"]: row["target_item"]
+    for repository in repositories["repositories"]
+    for workflow in repository["workflows"]
+    for job in workflow["jobs"]
+    for row in job.get("direct_onepassword_references", [])
+    if row.get("broker_action_id")
+}
+assert secret_broker_items == expected_broker_items
+assert handoff_broker_items == expected_broker_items
+assert repository_broker_items == expected_broker_items
 direct = {row["environment_name"]: row for row in secrets["direct_onepassword_entries"] if row["repository"] == "ken-website" and row["workflow"] == ".github/workflows/deploy.yml"}
 assert direct["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"]["disposition"] == "github-variable"
 assert direct["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"]["delivery"] == "github-actions-variable"
@@ -333,6 +367,8 @@ assert generate["descriptor_set"] == ["authenticated-source-tree", "BEEHIIV_API_
 assert push["descriptor_set"] == ["root-verified-commit-input", "DEPLOY_SSH_KEY"]
 assert generate["template"]["fields"] == ["BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"]
 assert push["template"]["fields"] == ["DEPLOY_SSH_KEY"]
+assert generate["template"]["item"] == "beehiiv-production"
+assert push["template"]["item"] == "blog-sync-deploy-production"
 assert generate["network_profile"] == "beehiiv-api-fixed-target"
 assert push["network_profile"] == "github-ssh-ken-website-fixed-target"
 assert generate["executes_repository_code"] is True and push["executes_repository_code"] is False
@@ -356,6 +392,8 @@ assert actions["ken-vexa-mcp-auth-production-deploy"]["blocked_reason_code"] == 
 assert actions["ken-website-beehiiv-production-sync"]["blocked_reason_code"] == "beehiiv_live_runtime_required"
 assert actions["ken-website-production-deploy"]["blocked_reason_code"] == "website_host_key_and_runtime_identity_required"
 assert actions["ken-website-production-deploy"]["template"]["fields"] == ["WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"]
+assert actions["ken-website-production-deploy"]["template"]["item"] == "deploy-ssh-production"
+assert actions["ken-vexa-mcp-auth-production-deploy"]["template"]["item"] == "vexa-mcp-auth-deploy-ssh-production"
 for action in actions.values():
     execution = action["trusted_generation"]["transport"] if action["input_mode"] == "trusted_generation" else action["executor"]
     wrapper = execution["wrapper"]
@@ -767,6 +805,8 @@ class ProtocolTests(unittest.TestCase):
                 "wrong_cgroup_parent": lambda action: action["trusted_generation"]["phases"]["generate"].__setitem__("cgroup_template", "/system.slice/{transaction_slice}/ken-beehiiv-generate.scope"),
                 "deploy_key_to_generator": lambda action: action["trusted_generation"]["phases"]["generate"]["descriptor_set"].append("DEPLOY_SSH_KEY"),
                 "beehiiv_key_to_pusher": lambda action: action["trusted_generation"]["phases"]["push"]["descriptor_set"].append("BEEHIIV_API_KEY"),
+                "aggregate_generate_item": lambda action: action["trusted_generation"]["phases"]["generate"]["template"].__setitem__("item", "ken-website"),
+                "aggregate_push_item": lambda action: action["trusted_generation"]["phases"]["push"]["template"].__setitem__("item", "ken-website"),
                 "phase_overlap": lambda action: action["trusted_generation"].__setitem__("phase_overlap", "allowed"),
                 "transport_redeferred_without_clearing": lambda action: action["deferred_bindings"].append("trusted_generation.transport.phase_transport_sha256"),
                 "uid_bool": lambda action: action["trusted_generation"]["phases"]["generate"]["identity"].__setitem__("uid", True),

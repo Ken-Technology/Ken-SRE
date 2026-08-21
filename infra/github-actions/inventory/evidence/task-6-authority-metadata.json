@@ -222,17 +222,17 @@
         {
           "field_type": "string",
           "target_field": "SERVER_HOST",
-          "target_item": "ken-vexa-mcp-auth"
+          "target_item": "vexa-mcp-auth-deploy-ssh-production"
         },
         {
           "field_type": "string",
           "target_field": "SERVER_PORT",
-          "target_item": "ken-vexa-mcp-auth"
+          "target_item": "vexa-mcp-auth-deploy-ssh-production"
         },
         {
           "field_type": "concealed",
           "target_field": "SERVER_SSH_KEY",
-          "target_item": "ken-vexa-mcp-auth"
+          "target_item": "vexa-mcp-auth-deploy-ssh-production"
         }
       ],
       "result_contract": "stable-code-only",
@@ -291,12 +291,12 @@
             {
               "field_type": "concealed",
               "target_field": "BEEHIIV_API_KEY",
-              "target_item": "ken-website"
+              "target_item": "beehiiv-production"
             },
             {
               "field_type": "string",
               "target_field": "BEEHIIV_PUBLICATION_ID",
-              "target_item": "ken-website"
+              "target_item": "beehiiv-production"
             }
           ],
           "template": {
@@ -323,7 +323,7 @@
             {
               "field_type": "concealed",
               "target_field": "DEPLOY_SSH_KEY",
-              "target_item": "ken-website"
+              "target_item": "blog-sync-deploy-production"
             }
           ],
           "template": {
@@ -343,17 +343,17 @@
         {
           "field_type": "concealed",
           "target_field": "DEPLOY_SSH_KEY",
-          "target_item": "ken-website"
+          "target_item": "blog-sync-deploy-production"
         },
         {
           "field_type": "concealed",
           "target_field": "BEEHIIV_API_KEY",
-          "target_item": "ken-website"
+          "target_item": "beehiiv-production"
         },
         {
           "field_type": "string",
           "target_field": "BEEHIIV_PUBLICATION_ID",
-          "target_item": "ken-website"
+          "target_item": "beehiiv-production"
         }
       ],
       "result_contract": "stable-code-only",
@@ -404,17 +404,17 @@
         {
           "field_type": "string",
           "target_field": "WEBSITE_HOST",
-          "target_item": "ken-website"
+          "target_item": "deploy-ssh-production"
         },
         {
           "field_type": "string",
           "target_field": "WEBSITE_PORT",
-          "target_item": "ken-website"
+          "target_item": "deploy-ssh-production"
         },
         {
           "field_type": "concealed",
           "target_field": "WEBSITE_SSH_KEY",
-          "target_item": "ken-website"
+          "target_item": "deploy-ssh-production"
         }
       ],
       "result_contract": "stable-code-only",
@@ -455,11 +455,11 @@
       "source_item": "vexa-mcp-auth-deploy-ssh",
       "source_reference": "op://Development/vexa-mcp-auth-deploy-ssh/host",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://Development/vexa-mcp-auth-deploy-ssh/host directly into Ken Deploy Production/ken-vexa-mcp-auth/SERVER_HOST without displaying the value."
+        "Use task6-temporary-migration-writer to copy op://Development/vexa-mcp-auth-deploy-ssh/host directly into Ken Deploy Production/vexa-mcp-auth-deploy-ssh-production/SERVER_HOST without displaying the value."
       ],
       "source_vault": "Development",
       "target_field": "SERVER_HOST",
-      "target_item": "ken-vexa-mcp-auth",
+      "target_item": "vexa-mcp-auth-deploy-ssh-production",
       "target_vault": "Ken Deploy Production",
       "workflow": ".github/workflows/deploy.yml"
     },
@@ -488,11 +488,11 @@
       "source_item": "vexa-mcp-auth-deploy-ssh",
       "source_reference": "op://Development/vexa-mcp-auth-deploy-ssh/port",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://Development/vexa-mcp-auth-deploy-ssh/port directly into Ken Deploy Production/ken-vexa-mcp-auth/SERVER_PORT without displaying the value."
+        "Use task6-temporary-migration-writer to copy op://Development/vexa-mcp-auth-deploy-ssh/port directly into Ken Deploy Production/vexa-mcp-auth-deploy-ssh-production/SERVER_PORT without displaying the value."
       ],
       "source_vault": "Development",
       "target_field": "SERVER_PORT",
-      "target_item": "ken-vexa-mcp-auth",
+      "target_item": "vexa-mcp-auth-deploy-ssh-production",
       "target_vault": "Ken Deploy Production",
       "workflow": ".github/workflows/deploy.yml"
     },
@@ -521,11 +521,11 @@
       "source_item": "vexa-mcp-auth-deploy-ssh",
       "source_reference": "op://Development/vexa-mcp-auth-deploy-ssh/private_key",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://Development/vexa-mcp-auth-deploy-ssh/private_key directly into Ken Deploy Production/ken-vexa-mcp-auth/SERVER_SSH_KEY without displaying the value."
+        "Use task6-temporary-migration-writer to copy op://Development/vexa-mcp-auth-deploy-ssh/private_key directly into Ken Deploy Production/vexa-mcp-auth-deploy-ssh-production/SERVER_SSH_KEY without displaying the value."
       ],
       "source_vault": "Development",
       "target_field": "SERVER_SSH_KEY",
-      "target_item": "ken-vexa-mcp-auth",
+      "target_item": "vexa-mcp-auth-deploy-ssh-production",
       "target_vault": "Ken Deploy Production",
       "workflow": ".github/workflows/deploy.yml"
     },
@@ -555,11 +555,11 @@
       "source_item": "beehiiv",
       "source_reference": "op://ken-website/beehiiv/credential",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://ken-website/beehiiv/credential directly into Ken Deploy Production/ken-website/BEEHIIV_API_KEY without displaying the value."
+        "Use task6-temporary-migration-writer to copy op://ken-website/beehiiv/credential directly into Ken Deploy Production/beehiiv-production/BEEHIIV_API_KEY without displaying the value."
       ],
       "source_vault": "ken-website",
       "target_field": "BEEHIIV_API_KEY",
-      "target_item": "ken-website",
+      "target_item": "beehiiv-production",
       "target_vault": "Ken Deploy Production",
       "workflow": ".github/workflows/beehiiv-sync.yml"
     },
@@ -589,11 +589,11 @@
       "source_item": "beehiiv",
       "source_reference": "op://ken-website/beehiiv/publication_id",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://ken-website/beehiiv/publication_id directly into Ken Deploy Production/ken-website/BEEHIIV_PUBLICATION_ID without displaying the value."
+        "Use task6-temporary-migration-writer to copy op://ken-website/beehiiv/publication_id directly into Ken Deploy Production/beehiiv-production/BEEHIIV_PUBLICATION_ID without displaying the value."
       ],
       "source_vault": "ken-website",
       "target_field": "BEEHIIV_PUBLICATION_ID",
-      "target_item": "ken-website",
+      "target_item": "beehiiv-production",
       "target_vault": "Ken Deploy Production",
       "workflow": ".github/workflows/beehiiv-sync.yml"
     },
@@ -623,11 +623,11 @@
       "source_item": "blog-sync-deploy",
       "source_reference": "op://ken-website/blog-sync-deploy/private_key",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://ken-website/blog-sync-deploy/private_key directly into Ken Deploy Production/ken-website/DEPLOY_SSH_KEY without displaying the value."
+        "Use task6-temporary-migration-writer to copy op://ken-website/blog-sync-deploy/private_key directly into Ken Deploy Production/blog-sync-deploy-production/DEPLOY_SSH_KEY without displaying the value."
       ],
       "source_vault": "ken-website",
       "target_field": "DEPLOY_SSH_KEY",
-      "target_item": "ken-website",
+      "target_item": "blog-sync-deploy-production",
       "target_vault": "Ken Deploy Production",
       "workflow": ".github/workflows/beehiiv-sync.yml"
     },
@@ -718,11 +718,11 @@
       "source_item": "deploy-ssh",
       "source_reference": "op://ken-website/deploy-ssh/host",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://ken-website/deploy-ssh/host directly into Ken Deploy Production/ken-website/WEBSITE_HOST without displaying the value."
+        "Use task6-temporary-migration-writer to copy op://ken-website/deploy-ssh/host directly into Ken Deploy Production/deploy-ssh-production/WEBSITE_HOST without displaying the value."
       ],
       "source_vault": "ken-website",
       "target_field": "WEBSITE_HOST",
-      "target_item": "ken-website",
+      "target_item": "deploy-ssh-production",
       "target_vault": "Ken Deploy Production",
       "workflow": ".github/workflows/deploy.yml"
     },
@@ -751,11 +751,11 @@
       "source_item": "deploy-ssh",
       "source_reference": "op://ken-website/deploy-ssh/port",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://ken-website/deploy-ssh/port directly into Ken Deploy Production/ken-website/WEBSITE_PORT without displaying the value."
+        "Use task6-temporary-migration-writer to copy op://ken-website/deploy-ssh/port directly into Ken Deploy Production/deploy-ssh-production/WEBSITE_PORT without displaying the value."
       ],
       "source_vault": "ken-website",
       "target_field": "WEBSITE_PORT",
-      "target_item": "ken-website",
+      "target_item": "deploy-ssh-production",
       "target_vault": "Ken Deploy Production",
       "workflow": ".github/workflows/deploy.yml"
     },
@@ -784,11 +784,11 @@
       "source_item": "deploy-ssh",
       "source_reference": "op://ken-website/deploy-ssh/private_key",
       "source_to_target_steps": [
-        "Use task6-temporary-migration-writer to copy op://ken-website/deploy-ssh/private_key directly into Ken Deploy Production/ken-website/WEBSITE_SSH_KEY without displaying the value."
+        "Use task6-temporary-migration-writer to copy op://ken-website/deploy-ssh/private_key directly into Ken Deploy Production/deploy-ssh-production/WEBSITE_SSH_KEY without displaying the value."
       ],
       "source_vault": "ken-website",
       "target_field": "WEBSITE_SSH_KEY",
-      "target_item": "ken-website",
+      "target_item": "deploy-ssh-production",
       "target_vault": "Ken Deploy Production",
       "workflow": ".github/workflows/deploy.yml"
     }

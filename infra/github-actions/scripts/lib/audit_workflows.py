@@ -110,9 +110,9 @@ FIXED_BROKER_ACTION_POLICIES: dict[str, dict[str, Any]] = {
         "network_profile": "github-source-vexa-production-ssh-mcp-recordings",
         "required_fields": frozenset(
             {
-                ("ken-vexa-mcp-auth", "SERVER_HOST", "string"),
-                ("ken-vexa-mcp-auth", "SERVER_PORT", "string"),
-                ("ken-vexa-mcp-auth", "SERVER_SSH_KEY", "concealed"),
+                ("vexa-mcp-auth-deploy-ssh-production", "SERVER_HOST", "string"),
+                ("vexa-mcp-auth-deploy-ssh-production", "SERVER_PORT", "string"),
+                ("vexa-mcp-auth-deploy-ssh-production", "SERVER_SSH_KEY", "concealed"),
             }
         ),
     },
@@ -127,9 +127,9 @@ FIXED_BROKER_ACTION_POLICIES: dict[str, dict[str, Any]] = {
         "network_profile": "github-source-website-production-ssh-and-public-health",
         "required_fields": frozenset(
             {
-                ("ken-website", "WEBSITE_HOST", "string"),
-                ("ken-website", "WEBSITE_PORT", "string"),
-                ("ken-website", "WEBSITE_SSH_KEY", "concealed"),
+                ("deploy-ssh-production", "WEBSITE_HOST", "string"),
+                ("deploy-ssh-production", "WEBSITE_PORT", "string"),
+                ("deploy-ssh-production", "WEBSITE_SSH_KEY", "concealed"),
             }
         ),
     },
@@ -205,12 +205,12 @@ TRUSTED_GENERATION_ACTION_CONTRACT: dict[str, Any] = {
             },
             "required_fields": [
                 {
-                    "target_item": "ken-website",
+                    "target_item": "beehiiv-production",
                     "target_field": "BEEHIIV_API_KEY",
                     "field_type": "concealed",
                 },
                 {
-                    "target_item": "ken-website",
+                    "target_item": "beehiiv-production",
                     "target_field": "BEEHIIV_PUBLICATION_ID",
                     "field_type": "string",
                 },
@@ -230,7 +230,7 @@ TRUSTED_GENERATION_ACTION_CONTRACT: dict[str, Any] = {
             },
             "required_fields": [
                 {
-                    "target_item": "ken-website",
+                    "target_item": "blog-sync-deploy-production",
                     "target_field": "DEPLOY_SSH_KEY",
                     "field_type": "concealed",
                 }
@@ -242,17 +242,17 @@ TRUSTED_GENERATION_ACTION_CONTRACT: dict[str, Any] = {
     },
     "required_fields": [
         {
-            "target_item": "ken-website",
+            "target_item": "blog-sync-deploy-production",
             "target_field": "DEPLOY_SSH_KEY",
             "field_type": "concealed",
         },
         {
-            "target_item": "ken-website",
+            "target_item": "beehiiv-production",
             "target_field": "BEEHIIV_API_KEY",
             "field_type": "concealed",
         },
         {
-            "target_item": "ken-website",
+            "target_item": "beehiiv-production",
             "target_field": "BEEHIIV_PUBLICATION_ID",
             "field_type": "string",
         },

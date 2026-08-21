@@ -116,21 +116,21 @@ FORBIDDEN_SOURCE_PHRASES = (
 )
 TEMPLATE_CONTENT = {
     "ken-vexa-mcp-auth-production-deploy": (
-        "SERVER_HOST=op://Ken%20Deploy%20Production/ken-vexa-mcp-auth/SERVER_HOST\n"
-        "SERVER_PORT=op://Ken%20Deploy%20Production/ken-vexa-mcp-auth/SERVER_PORT\n"
-        "SERVER_SSH_KEY=op://Ken%20Deploy%20Production/ken-vexa-mcp-auth/SERVER_SSH_KEY\n"
+        "SERVER_HOST=op://Ken%20Deploy%20Production/vexa-mcp-auth-deploy-ssh-production/SERVER_HOST\n"
+        "SERVER_PORT=op://Ken%20Deploy%20Production/vexa-mcp-auth-deploy-ssh-production/SERVER_PORT\n"
+        "SERVER_SSH_KEY=op://Ken%20Deploy%20Production/vexa-mcp-auth-deploy-ssh-production/SERVER_SSH_KEY\n"
     ),
     "ken-website-beehiiv-production-sync.generate": (
-        "BEEHIIV_API_KEY=op://Ken%20Deploy%20Production/ken-website/BEEHIIV_API_KEY\n"
-        "BEEHIIV_PUBLICATION_ID=op://Ken%20Deploy%20Production/ken-website/BEEHIIV_PUBLICATION_ID\n"
+        "BEEHIIV_API_KEY=op://Ken%20Deploy%20Production/beehiiv-production/BEEHIIV_API_KEY\n"
+        "BEEHIIV_PUBLICATION_ID=op://Ken%20Deploy%20Production/beehiiv-production/BEEHIIV_PUBLICATION_ID\n"
     ),
     "ken-website-beehiiv-production-sync.push": (
-        "DEPLOY_SSH_KEY=op://Ken%20Deploy%20Production/ken-website/DEPLOY_SSH_KEY\n"
+        "DEPLOY_SSH_KEY=op://Ken%20Deploy%20Production/blog-sync-deploy-production/DEPLOY_SSH_KEY\n"
     ),
     "ken-website-production-deploy": (
-        "WEBSITE_HOST=op://Ken%20Deploy%20Production/ken-website/WEBSITE_HOST\n"
-        "WEBSITE_PORT=op://Ken%20Deploy%20Production/ken-website/WEBSITE_PORT\n"
-        "WEBSITE_SSH_KEY=op://Ken%20Deploy%20Production/ken-website/WEBSITE_SSH_KEY\n"
+        "WEBSITE_HOST=op://Ken%20Deploy%20Production/deploy-ssh-production/WEBSITE_HOST\n"
+        "WEBSITE_PORT=op://Ken%20Deploy%20Production/deploy-ssh-production/WEBSITE_PORT\n"
+        "WEBSITE_SSH_KEY=op://Ken%20Deploy%20Production/deploy-ssh-production/WEBSITE_SSH_KEY\n"
     ),
 }
 DIRECT_WRAPPER_ACTIONS = frozenset({
@@ -375,13 +375,19 @@ def _security_binding_missing(action: Mapping[str, Any]) -> list[str]:
 def _validate_template_shape(template: Mapping[str, Any], template_id: str, path: str, fields: list[str]) -> None:
     _require_exact_keys(template, {"path", "sha256", "vault", "item", "fields"}, set(), "policy_template_schema_invalid")
     content = TEMPLATE_CONTENT.get(template_id)
+    item = {
+        "ken-vexa-mcp-auth-production-deploy": "vexa-mcp-auth-deploy-ssh-production",
+        "ken-website-beehiiv-production-sync.generate": "beehiiv-production",
+        "ken-website-beehiiv-production-sync.push": "blog-sync-deploy-production",
+        "ken-website-production-deploy": "deploy-ssh-production",
+    }.get(template_id)
     if (template != {
             "path": path,
             "sha256": hashlib.sha256((content or "").encode()).hexdigest(),
             "vault": "Ken Deploy Production",
-            "item": "ken-website" if template_id.startswith("ken-website-") else "ken-vexa-mcp-auth",
+            "item": item,
             "fields": fields,
-        } or content is None):
+        } or content is None or item is None):
         raise Reject("policy_template_invalid")
 
 

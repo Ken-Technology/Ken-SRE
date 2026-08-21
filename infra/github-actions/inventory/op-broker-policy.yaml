@@ -253,7 +253,7 @@ actions:
     oidc: {audience: https://ken.so/actions/op-broker/production, subject: 'repo:Ken-Technology/ken-vexa-mcp-auth:ref:refs/heads/main', event_names: [push, workflow_dispatch], environment: '', ref_type: branch, reusable_workflow: false}
     job: {id: deploy, name: deploy, permissions: {actions: read, contents: read, id-token: write}}
     runner: {name: ken-deploy-production-01, uid: 21014, gid: 21014, id: 0, group_id: 0, group_name: Ken Private Deploy, labels: [self-hosted, linux, x64, ken-deploy, production], cgroup: /ken-actions-deploy.slice/ken-actions-deploy-listeners.slice/ken-runner@ken-deploy-production-01.service, executable: /usr/local/bin/ken-op-exec, listener_generation: 0}
-    template: {path: /etc/ken-op-broker/templates/ken-vexa-mcp-auth-production-deploy.env.op, sha256: 65e0d90d4803bc8ab69376404b6a77205a11f3da2fa748315a2318dae8526dac, vault: Ken Deploy Production, item: ken-vexa-mcp-auth, fields: [SERVER_HOST, SERVER_PORT, SERVER_SSH_KEY]}
+    template: {path: /etc/ken-op-broker/templates/ken-vexa-mcp-auth-production-deploy.env.op, sha256: ad5209c361c759cc7a2a3ee893389862f30fb2abd814ec71386e4889df810f55, vault: Ken Deploy Production, item: vexa-mcp-auth-deploy-ssh-production, fields: [SERVER_HOST, SERVER_PORT, SERVER_SSH_KEY]}
     executor: {name: ken-vexa-deploy, uid: 22101, gid: 22101, wrapper: /usr/local/libexec/ken-actions/ken-vexa-mcp-auth-production-deploy, wrapper_sha256: 491b1505adb8a69056dbdb288392ddd73065be94daff08cb5113bc31626dc853, operation_binding_sha256: 48e6ab4ac77940c7b0bea51516b4b284e33523b823a45357006da253cde51670, systemd_transaction_transport_sha256: 5e1641f88d90bd43ad1fb56cef41574c3cda29497d3c139aa1c040e0634500f2, known_hosts_path: /etc/ken-op-broker/known_hosts/ken-vexa-mcp-auth-production-deploy, known_hosts_sha256: null, timeout_seconds: 900, target_profile: vexa-mcp-auth-production-ssh-and-public-health, network_profile: vexa-production-fixed-target}
     artifact_input: {name_prefix: ken-vexa-mcp-auth-deploy-deploy-, sha_suffix: true, max_archive_bytes: 268435456, max_entries: 30000, max_extracted_bytes: 536870912, manifest_path: manifest.json}
     limits: {fetch_seconds: 120, pack_bytes: 268435456, objects: 100000, files: 30000, blob_bytes: 33554432, materialized_bytes: 536870912}
@@ -290,7 +290,7 @@ actions:
           request_subdirectory: generate
           cgroup_template: /ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-generate.scope
           descriptor_set: [authenticated-source-tree, BEEHIIV_API_KEY, BEEHIIV_PUBLICATION_ID]
-          template: {path: /etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.generate.env.op, sha256: bf6cdf98b523931ab9eb80ab112e4a31912f2e8e7a533de6c75ed951f1fdda58, vault: Ken Deploy Production, item: ken-website, fields: [BEEHIIV_API_KEY, BEEHIIV_PUBLICATION_ID]}
+          template: {path: /etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.generate.env.op, sha256: ee1530b139be67f357083d8504c9c001cd89c8693b49e90b463d68af448b8a2e, vault: Ken Deploy Production, item: beehiiv-production, fields: [BEEHIIV_API_KEY, BEEHIIV_PUBLICATION_ID]}
           network_profile: beehiiv-api-fixed-target
           executes_repository_code: true
           operation: pinned-dependency-install-and-beehiiv-generation
@@ -299,7 +299,7 @@ actions:
           request_subdirectory: push
           cgroup_template: /ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-push.scope
           descriptor_set: [root-verified-commit-input, DEPLOY_SSH_KEY]
-          template: {path: /etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.push.env.op, sha256: ccfa782c04e091fdce24b4f1079f96bccb5dcf5892c8cf364cc4de83e9be9fc0, vault: Ken Deploy Production, item: ken-website, fields: [DEPLOY_SSH_KEY]}
+          template: {path: /etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.push.env.op, sha256: 9c9d7ae9dd0596dabdfc3c112a67c9d32e1f075f76b842644b8f870c644cd10d, vault: Ken Deploy Production, item: blog-sync-deploy-production, fields: [DEPLOY_SSH_KEY]}
           network_profile: github-ssh-ken-website-fixed-target
           executes_repository_code: false
           operation: fixed-verified-commit-git-ssh-push
@@ -316,7 +316,7 @@ actions:
     oidc: {audience: https://ken.so/actions/op-broker/production, subject: 'repo:Ken-Technology/ken-website:ref:refs/heads/main', event_names: [push, workflow_dispatch], environment: '', ref_type: branch, reusable_workflow: false}
     job: {id: deploy, name: deploy, permissions: {actions: read, contents: read, id-token: write}}
     runner: {name: ken-deploy-production-01, uid: 21014, gid: 21014, id: 0, group_id: 0, group_name: Ken Private Deploy, labels: [self-hosted, linux, x64, ken-deploy, production], cgroup: /ken-actions-deploy.slice/ken-actions-deploy-listeners.slice/ken-runner@ken-deploy-production-01.service, executable: /usr/local/bin/ken-op-exec, listener_generation: 0}
-    template: {path: /etc/ken-op-broker/templates/ken-website-production-deploy.env.op, sha256: e4d8749fdf66efe020d5dee28873e0c34f55002b308564501ea9a2f2a1467cb5, vault: Ken Deploy Production, item: ken-website, fields: [WEBSITE_HOST, WEBSITE_PORT, WEBSITE_SSH_KEY]}
+    template: {path: /etc/ken-op-broker/templates/ken-website-production-deploy.env.op, sha256: b4f917adb90ae50e62fbc2d5ac97ccf02476a4ef4b794f94fe5b26283beaab9e, vault: Ken Deploy Production, item: deploy-ssh-production, fields: [WEBSITE_HOST, WEBSITE_PORT, WEBSITE_SSH_KEY]}
     executor: {name: ken-website-deploy, uid: 22103, gid: 22103, wrapper: /usr/local/libexec/ken-actions/ken-website-production-deploy, wrapper_sha256: 3d87a23d40bdd6a217b46e0b7bebb5ca47b48bb2b686f84c55776cbce005a34a, operation_binding_sha256: 7d2743ce1c66ffb5df97786fe9e35921ec41338e1d62f4450bce47467f68e6e5, systemd_transaction_transport_sha256: 5e1641f88d90bd43ad1fb56cef41574c3cda29497d3c139aa1c040e0634500f2, known_hosts_path: /etc/ken-op-broker/known_hosts/ken-website-production-deploy, known_hosts_sha256: null, timeout_seconds: 1200, target_profile: ken-website-production-ssh-and-public-health, network_profile: website-production-fixed-target}
     artifact_input: {name_prefix: ken-website-deploy-deploy-, sha_suffix: true, max_archive_bytes: 536870912, max_entries: 50000, max_extracted_bytes: 1073741824, manifest_path: manifest.json}
     limits: {fetch_seconds: 120, pack_bytes: 536870912, objects: 150000, files: 50000, blob_bytes: 67108864, materialized_bytes: 1073741824}

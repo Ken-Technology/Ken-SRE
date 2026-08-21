@@ -6293,7 +6293,7 @@ repositories:
         source_item: vexa-mcp-auth-deploy-ssh
         source_field: host
         target_vault: Ken Deploy Production
-        target_item: ken-vexa-mcp-auth
+        target_item: vexa-mcp-auth-deploy-ssh-production
         target_field: SERVER_HOST
         field_type: string
         consumer: ken-deploy-production
@@ -6307,7 +6307,7 @@ repositories:
         source_item: vexa-mcp-auth-deploy-ssh
         source_field: port
         target_vault: Ken Deploy Production
-        target_item: ken-vexa-mcp-auth
+        target_item: vexa-mcp-auth-deploy-ssh-production
         target_field: SERVER_PORT
         field_type: string
         consumer: ken-deploy-production
@@ -6321,7 +6321,7 @@ repositories:
         source_item: vexa-mcp-auth-deploy-ssh
         source_field: private_key
         target_vault: Ken Deploy Production
-        target_item: ken-vexa-mcp-auth
+        target_item: vexa-mcp-auth-deploy-ssh-production
         target_field: SERVER_SSH_KEY
         field_type: concealed
         consumer: ken-deploy-production
@@ -6417,7 +6417,7 @@ repositories:
         source_item: blog-sync-deploy
         source_field: private_key
         target_vault: Ken Deploy Production
-        target_item: ken-website
+        target_item: blog-sync-deploy-production
         target_field: DEPLOY_SSH_KEY
         field_type: concealed
         consumer: ken-deploy-production
@@ -6432,7 +6432,7 @@ repositories:
         source_item: beehiiv
         source_field: credential
         target_vault: Ken Deploy Production
-        target_item: ken-website
+        target_item: beehiiv-production
         target_field: BEEHIIV_API_KEY
         field_type: concealed
         consumer: ken-deploy-production
@@ -6447,7 +6447,7 @@ repositories:
         source_item: beehiiv
         source_field: publication_id
         target_vault: Ken Deploy Production
-        target_item: ken-website
+        target_item: beehiiv-production
         target_field: BEEHIIV_PUBLICATION_ID
         field_type: string
         consumer: ken-deploy-production
@@ -6588,7 +6588,7 @@ repositories:
         source_item: deploy-ssh
         source_field: host
         target_vault: Ken Deploy Production
-        target_item: ken-website
+        target_item: deploy-ssh-production
         target_field: WEBSITE_HOST
         field_type: string
         consumer: ken-deploy-production
@@ -6602,7 +6602,7 @@ repositories:
         source_item: deploy-ssh
         source_field: port
         target_vault: Ken Deploy Production
-        target_item: ken-website
+        target_item: deploy-ssh-production
         target_field: WEBSITE_PORT
         field_type: string
         consumer: ken-deploy-production
@@ -6616,7 +6616,7 @@ repositories:
         source_item: deploy-ssh
         source_field: private_key
         target_vault: Ken Deploy Production
-        target_item: ken-website
+        target_item: deploy-ssh-production
         target_field: WEBSITE_SSH_KEY
         field_type: concealed
         consumer: ken-deploy-production

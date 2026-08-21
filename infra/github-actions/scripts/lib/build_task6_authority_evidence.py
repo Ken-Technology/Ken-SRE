@@ -300,7 +300,19 @@ def _direct_onepassword_mapping(
         if broker_action_phase != expected_phase:
             raise ValueError("direct 1Password mapping requires exact broker action phase")
         target_vault = PRODUCTION_VAULT
-        target_item = repository
+        target_item = {
+            ("ken-vexa-mcp-auth-production-deploy", "SERVER_HOST"): "vexa-mcp-auth-deploy-ssh-production",
+            ("ken-vexa-mcp-auth-production-deploy", "SERVER_PORT"): "vexa-mcp-auth-deploy-ssh-production",
+            ("ken-vexa-mcp-auth-production-deploy", "SERVER_SSH_KEY"): "vexa-mcp-auth-deploy-ssh-production",
+            ("ken-website-beehiiv-production-sync", "BEEHIIV_API_KEY"): "beehiiv-production",
+            ("ken-website-beehiiv-production-sync", "BEEHIIV_PUBLICATION_ID"): "beehiiv-production",
+            ("ken-website-beehiiv-production-sync", "DEPLOY_SSH_KEY"): "blog-sync-deploy-production",
+            ("ken-website-production-deploy", "WEBSITE_HOST"): "deploy-ssh-production",
+            ("ken-website-production-deploy", "WEBSITE_PORT"): "deploy-ssh-production",
+            ("ken-website-production-deploy", "WEBSITE_SSH_KEY"): "deploy-ssh-production",
+        }.get((broker_action_id, environment_name))
+        if target_item is None:
+            raise ValueError("direct 1Password mapping has no reviewed canonical target item")
         delivery = "onepassword-broker"
         migration_action = "copy-direct-onepassword-reference"
         source_to_target_steps = [

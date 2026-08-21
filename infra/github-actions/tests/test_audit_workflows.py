@@ -523,6 +523,24 @@ jobs:
             self.assertTrue(row["retirement_steps"])
 
         by_name = {row["environment_name"]: row for row in mappings}
+        expected_target_items = {
+            "SERVER_HOST": "vexa-mcp-auth-deploy-ssh-production",
+            "SERVER_PORT": "vexa-mcp-auth-deploy-ssh-production",
+            "SERVER_SSH_KEY": "vexa-mcp-auth-deploy-ssh-production",
+            "BEEHIIV_API_KEY": "beehiiv-production",
+            "BEEHIIV_PUBLICATION_ID": "beehiiv-production",
+            "DEPLOY_SSH_KEY": "blog-sync-deploy-production",
+            "WEBSITE_HOST": "deploy-ssh-production",
+            "WEBSITE_PORT": "deploy-ssh-production",
+            "WEBSITE_SSH_KEY": "deploy-ssh-production",
+        }
+        self.assertEqual(
+            {
+                name: by_name[name]["target_item"]
+                for name in expected_target_items
+            },
+            expected_target_items,
+        )
         self.assertEqual(
             {
                 key: by_name["NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN"][key]
@@ -588,11 +606,11 @@ jobs:
         self.assertEqual(generate["identity"], {"name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102})
         self.assertEqual(push["identity"], {"name": "ken-beehiiv-push", "uid": 22104, "gid": 22104})
         self.assertEqual(generate["required_fields"], [
-            {"target_item": "ken-website", "target_field": "BEEHIIV_API_KEY", "field_type": "concealed"},
-            {"target_item": "ken-website", "target_field": "BEEHIIV_PUBLICATION_ID", "field_type": "string"},
+            {"target_item": "beehiiv-production", "target_field": "BEEHIIV_API_KEY", "field_type": "concealed"},
+            {"target_item": "beehiiv-production", "target_field": "BEEHIIV_PUBLICATION_ID", "field_type": "string"},
         ])
         self.assertEqual(push["required_fields"], [
-            {"target_item": "ken-website", "target_field": "DEPLOY_SSH_KEY", "field_type": "concealed"},
+            {"target_item": "blog-sync-deploy-production", "target_field": "DEPLOY_SSH_KEY", "field_type": "concealed"},
         ])
         self.assertTrue(set(map(str, generate["descriptor_set"])).isdisjoint(map(str, push["descriptor_set"])))
         self.assertNotEqual(generate["network_profile"], push["network_profile"])

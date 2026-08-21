@@ -612,7 +612,7 @@ installed_files:
   - ken-deploy
   source: repo:bin/ken-op-exec
 - path: /usr/local/bin/ken-op-broker
-  sha256: 84f38c9f8cc2dfaa45aec438230af1c948b6fd6ae71767f39ccc1f72974257df
+  sha256: 6d3af857cccd43be82a813846e1c4977b4d9a508ea57e06cd5cf23d6a5443127
   hosts:
   - ken-ci
   - ken-deploy
@@ -681,7 +681,7 @@ installed_files:
   hosts: [ken-ci, ken-deploy]
   source: repo:bin/runtime-known-answer.py
 - path: /etc/ken-op-broker/op-broker-policy.yaml
-  sha256: 383ea7d1d2beb7e0ced15ed68768ce41e9ec9abbae5f180b6ac29542970b1335
+  sha256: a0c9e849227ce0d6c8db5fd747913bfc244e6311d7b225427dabab6d5279b4d7
   hosts:
   - ken-ci
   - ken-deploy
