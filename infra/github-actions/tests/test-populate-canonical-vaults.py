@@ -121,7 +121,7 @@ def write_fake_op(root):
         "elif token.startswith('source-'):\n"
         "    print(json.dumps({'title': 'source', 'fields': [{'label': 'credential', 'value': 'resolved-secret'}]}))\n"
         "elif args[:2] == ['whoami', '--format=json']:\n"
-        "    print(json.dumps({'type': 'SERVICE_ACCOUNT', 'name': token}))\n"
+        "    print(json.dumps({'account_uuid': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'user_uuid': 'writer-uuid', 'user_type': 'SERVICE_ACCOUNT', 'ServiceAccountType': 'SERVICE_ACCOUNT'}))\n"
         "elif args[:3] == ['vault', 'list', '--format=json']:\n"
         "    names = {'writer-ci': ('istjrwyeqryhpv7rytbm34pfea', 'Ken CI Runtime'), 'writer-nonprod': ('wmb7rpm5xvl4ez4kur3s5l3hxe', 'Ken Deploy Nonproduction'), 'writer-prod': ('q7zdmdggp2ng7hvxozhzt4uupm', 'Ken Deploy Production')}\n"
         "    vault_id, name = names[token]\n"

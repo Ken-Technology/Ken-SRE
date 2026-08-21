@@ -823,8 +823,23 @@ def run_op_bytes(
 def validate_service_account_scope(
     identity: Mapping[str, Any], vaults: Sequence[Mapping[str, Any]], expected_vault: str
 ) -> None:
-    if str(identity.get("type", "")).upper() != "SERVICE_ACCOUNT":
+    if not isinstance(identity, Mapping):
         raise MigrationError("identity is not a service account")
+    if identity.get("account_uuid") != _PERSONAL_ACCOUNT_UUID:
+        raise MigrationError("service account account UUID is invalid")
+    for key in ("user_uuid", "user_type", "ServiceAccountType"):
+        value = identity.get(key)
+        if not isinstance(value, str) or not value:
+            raise MigrationError("service account identity field is invalid")
+    if identity["user_type"].upper() != "SERVICE_ACCOUNT":
+        raise MigrationError("identity is not a service account")
+    if identity["ServiceAccountType"].upper() != "SERVICE_ACCOUNT":
+        raise MigrationError("service account type is invalid")
+    legacy_type = identity.get("type")
+    if legacy_type is not None and (
+        not isinstance(legacy_type, str) or legacy_type.upper() != "SERVICE_ACCOUNT"
+    ):
+        raise MigrationError("conflicting service account type")
     if len(vaults) != 1 or vaults[0].get("name") != expected_vault:
         raise MigrationError("service account must see exactly one vault")
     if not isinstance(vaults[0].get("id"), str) or not vaults[0]["id"]:

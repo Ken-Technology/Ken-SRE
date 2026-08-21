@@ -377,13 +377,29 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
 
     def test_service_account_scope_requires_exactly_one_named_vault(self):
         tool = load_module()
-        identity = {"type": "SERVICE_ACCOUNT", "name": "ken-deploy-production"}
+        identity = {
+            "account_uuid": "PHLSEQ2HNVAALEWHKWGKZOAGSY",
+            "user_uuid": "writer-uuid",
+            "user_type": "SERVICE_ACCOUNT",
+            "ServiceAccountType": "SERVICE_ACCOUNT",
+        }
         vaults = [{"id": "prod-id", "name": "Ken Deploy Production"}]
         tool.validate_service_account_scope(identity, vaults, "Ken Deploy Production")
         with self.assertRaisesRegex(ValueError, "exactly one vault"):
             tool.validate_service_account_scope(identity, vaults + [{"id": "x", "name": "Other"}], "Ken Deploy Production")
         with self.assertRaisesRegex(ValueError, "service account"):
-            tool.validate_service_account_scope({"type": "USER"}, vaults, "Ken Deploy Production")
+            tool.validate_service_account_scope(
+                {"type": "SERVICE_ACCOUNT"}, vaults, "Ken Deploy Production"
+            )
+        for malformed in (
+            {**identity, "user_type": True},
+            {**identity, "ServiceAccountType": "USER"},
+            {**identity, "type": "USER"},
+            {key: value for key, value in identity.items() if key != "ServiceAccountType"},
+            {key: value for key, value in identity.items() if key != "account_uuid"},
+        ):
+            with self.assertRaises(ValueError):
+                tool.validate_service_account_scope(malformed, vaults, "Ken Deploy Production")
 
     def test_populate_item_validates_scope_and_writes_template_over_stdin(self):
         tool = load_module()
@@ -399,7 +415,7 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "with open(os.environ['FAKE_LOG'], 'a') as log:\n"
                 "    log.write(json.dumps({'argv': args, 'stdin': stdin}) + '\\n')\n"
                 "if args == ['whoami', '--format=json']:\n"
-                "    result = {'type':'SERVICE_ACCOUNT','name':'ken-deploy-production'}\n"
+                "    result = {'account_uuid':'PHLSEQ2HNVAALEWHKWGKZOAGSY','user_uuid':'writer-uuid','user_type':'SERVICE_ACCOUNT','ServiceAccountType':'SERVICE_ACCOUNT'}\n"
                 "elif args == ['vault', 'list', '--format=json']:\n"
                 "    result = [{'id':'vault-id','name':'Ken Deploy Production'}]\n"
                 "elif args == ['item', 'list', '--vault', 'Ken Deploy Production', '--format=json']:\n"
@@ -443,7 +459,7 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "import json, sys\n"
                 "args = sys.argv[1:]\n"
                 "if args == ['whoami', '--format=json']:\n"
-                "    result = {'type':'SERVICE_ACCOUNT','name':'ken-deploy-production'}\n"
+                "    result = {'account_uuid':'PHLSEQ2HNVAALEWHKWGKZOAGSY','user_uuid':'writer-uuid','user_type':'SERVICE_ACCOUNT','ServiceAccountType':'SERVICE_ACCOUNT'}\n"
                 "elif args == ['vault', 'list', '--format=json']:\n"
                 "    result = [{'id':'vault-id','name':'Ken Deploy Production'}]\n"
                 "elif args == ['item', 'list', '--vault', 'Ken Deploy Production', '--format=json']:\n"
@@ -528,7 +544,7 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "args = sys.argv[1:]\n"
                 "stdin = sys.stdin.read()\n"
                 "if args == ['whoami', '--format=json']:\n"
-                "    result = {'type':'SERVICE_ACCOUNT','name':'ken-ci-runtime'}\n"
+                "    result = {'account_uuid':'PHLSEQ2HNVAALEWHKWGKZOAGSY','user_uuid':'writer-uuid','user_type':'SERVICE_ACCOUNT','ServiceAccountType':'SERVICE_ACCOUNT'}\n"
                 "elif args == ['vault', 'list', '--format=json']:\n"
                 "    result = [{'id':'ci-id','name':'Ken CI Runtime'}]\n"
                 "elif args == ['item', 'list', '--vault', 'Ken CI Runtime', '--format=json']:\n"
@@ -964,7 +980,7 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "state_path = os.environ['STATE']\n"
                 "try: state = json.load(open(state_path))\n"
                 "except FileNotFoundError: state = {'items': {}}\n"
-                "if args == ['whoami', '--format=json']: result = {'type':'SERVICE_ACCOUNT'}\n"
+                "if args == ['whoami', '--format=json']: result = {'account_uuid':'PHLSEQ2HNVAALEWHKWGKZOAGSY','user_uuid':'writer-uuid','user_type':'SERVICE_ACCOUNT','ServiceAccountType':'SERVICE_ACCOUNT'}\n"
                 "elif args == ['vault', 'list', '--format=json']: result = [{'id':'vault-id','name':'Ken Deploy Production'}]\n"
                 "elif args == ['item', 'list', '--vault', 'Ken Deploy Production', '--format=json']:\n"
                 "    result = [{'id': item['id'], 'title': item['title']} for item in state['items'].values()]\n"
@@ -1030,7 +1046,7 @@ class ConsolidateOnePasswordTests(unittest.TestCase):
                 "#!/usr/bin/env python3\n"
                 "import json, sys\n"
                 "args = sys.argv[1:]; stdin = sys.stdin.read()\n"
-                "if args == ['whoami', '--format=json']: result = {'type':'SERVICE_ACCOUNT'}\n"
+                "if args == ['whoami', '--format=json']: result = {'account_uuid':'PHLSEQ2HNVAALEWHKWGKZOAGSY','user_uuid':'writer-uuid','user_type':'SERVICE_ACCOUNT','ServiceAccountType':'SERVICE_ACCOUNT'}\n"
                 "elif args == ['vault', 'list', '--format=json']: result = [{'id':'vault-id','name':'Ken Deploy Production'}]\n"
                 "elif args == ['item', 'list', '--vault', 'Ken Deploy Production', '--format=json']: result = []\n"
                 "elif args[:2] == ['item', 'create']:\n"
