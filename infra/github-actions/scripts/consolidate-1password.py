@@ -39,6 +39,7 @@ class ProtectedSourceAdapter:
     """In-process source reader; implementations must keep values private."""
 
     protected = True
+    source_token: str | None = None
 
     def resolve(self, authority: str) -> str:
         raise NotImplementedError
@@ -63,46 +64,440 @@ class MappingSourceAdapter(ProtectedSourceAdapter):
 class OpSourceAdapter(ProtectedSourceAdapter):
     """Read a source 1Password field without exposing its value to the caller.
 
-    The source token is deliberately separate from the target writer token.  A
-    caller may still pass ``token`` for compatibility with the library API,
-    but command-line execution never constructs this adapter from the target
-    envelope.
+    The source token is deliberately separate from the target writer token.
+    There is intentionally no ``token`` compatibility alias: accepting a
+    writer token here would make it possible to read a source vault with the
+    target credential by accident.
     """
 
     def __init__(
         self,
         *,
         op_bin: Path,
-        token: str | None = None,
         source_token: str | None = None,
         extra_env: Mapping[str, str] | None = None,
     ):
-        if token is None and source_token is None:
+        if source_token is None:
             raise MigrationError("source adapter token is required")
-        if token is not None and source_token is not None and token != source_token:
-            raise MigrationError("source adapter tokens do not match")
         self.op_bin = op_bin
-        self.token = source_token or token
+        self.source_token = source_token
         self.extra_env = extra_env
 
     def resolve(self, authority: str) -> str:
-        vault, item, field = _parse_op_authority(authority)
+        parsed = _parse_source_authority(authority)
+        if parsed["scheme"] == "op":
+            result = self._get_item(parsed["vault"], parsed["item"])
+            return _read_op_custom_field(result, parsed["field"])
+        if parsed["scheme"] == "op-env":
+            result = self._get_item(parsed["vault"], parsed["item"])
+            return _read_secure_note_env(result, parsed["field"])
+        if parsed["scheme"] == "op-title":
+            result = self._get_item(parsed["vault"], parsed["item"])
+            return _read_title_metadata(result, parsed["item"], parsed["field"])
+        if parsed["scheme"] == "op-file":
+            result = self._get_item(parsed["vault"], parsed["item"])
+            _require_attachment(result, parsed["field"])
+            raw = run_op_bytes(
+                op_bin=self.op_bin,
+                argv=[
+                    "item",
+                    "get",
+                    parsed["item"],
+                    "--vault",
+                    parsed["vault"],
+                    "--file",
+                    parsed["field"],
+                ],
+                token=self.source_token,
+                extra_env=self.extra_env,
+            )
+            try:
+                return raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise MigrationError("source attachment is not UTF-8") from exc
+        raise MigrationError("source authority is not an op reference")
+
+    def _get_item(self, vault: str, item: str) -> Mapping[str, Any]:
         result = run_op_json(
             op_bin=self.op_bin,
             argv=["item", "get", item, "--vault", vault, "--format=json"],
-            token=self.token,
+            token=self.source_token,
             extra_env=self.extra_env,
         )
-        if not isinstance(result, Mapping) or not isinstance(result.get("fields"), list):
+        if not isinstance(result, Mapping):
             raise MigrationError("source item response is invalid")
-        matches = [
+        returned_title = result.get("title")
+        if returned_title is not None and returned_title != item:
+            raise MigrationError("source item title mismatch")
+        return result
+
+
+class DeployedSourceAdapter(ProtectedSourceAdapter):
+    """Read a committed deployed JSON or env file through a fixed SSH cat.
+
+    The remote path is passed as an argument to ``cat``.  No shell profile,
+    ``.env`` file, or command substitution is sourced.  ``files`` is a
+    hermetic local fixture map used by tests; production callers use SSH.
+    """
+
+    def __init__(
+        self,
+        *,
+        ssh_bin: Path,
+        source_token: str | None = None,
+        ssh_user: str | None = None,
+        ssh_key: Path | None = None,
+        files: Mapping[Any, str | Path] | None = None,
+        extra_env: Mapping[str, str] | None = None,
+    ):
+        self.ssh_bin = ssh_bin
+        self.source_token = source_token
+        self.ssh_user = ssh_user
+        self.ssh_key = ssh_key
+        self.files = dict(files or {})
+        self.extra_env = extra_env
+
+    def resolve(self, authority: str) -> str:
+        parsed = _parse_source_authority(authority)
+        if parsed["scheme"] not in {"deployed", "deployed-component"}:
+            raise MigrationError("source authority is not a deployed reference")
+        raw = self._read_file(parsed["host"], parsed["path"])
+        document = _parse_deployed_document(raw, parsed["path"])
+        if parsed["scheme"] == "deployed":
+            return _lookup_deployed_value(document, parsed["selector"])
+        return _lookup_connection_component(document, parsed["selector"])
+
+    def _read_file(self, host: str, remote_path: str) -> bytes:
+        fixture = self.files.get((host, remote_path), self.files.get(host))
+        if fixture is not None:
+            path = Path(fixture)
+            if path.is_symlink() or not path.is_file():
+                raise MigrationError("deployed source fixture is not a regular file")
+            try:
+                return path.read_bytes()
+            except OSError as exc:
+                raise MigrationError("deployed source could not be read") from exc
+        if self.ssh_bin.is_symlink() or not self.ssh_bin.is_file() or not os.access(self.ssh_bin, os.X_OK):
+            raise MigrationError("SSH executable is unsafe")
+        if not remote_path.startswith("/") or "\n" in remote_path or "\x00" in remote_path:
+            raise MigrationError("deployed path is invalid")
+        destination = f"{self.ssh_user}@{host}" if self.ssh_user else host
+        argv: list[str] = []
+        if self.ssh_key is not None:
+            if self.ssh_key.is_symlink() or not self.ssh_key.is_file():
+                raise MigrationError("SSH key is unsafe")
+            argv.extend(["-i", str(self.ssh_key)])
+        argv.extend([destination, "cat", "--", remote_path])
+        try:
+            completed = subprocess.run(
+                [str(self.ssh_bin), *argv],
+                capture_output=True,
+                check=False,
+                env=_source_env(self.extra_env),
+            )
+        except OSError as exc:
+            raise MigrationError("SSH source command failed") from exc
+        if completed.returncode != 0:
+            raise MigrationError("SSH source command failed")
+        return completed.stdout
+
+
+class EvidenceSourceAdapter(ProtectedSourceAdapter):
+    """Resolve only exact, committed value-free evidence paths."""
+
+    def __init__(self, root: Path, *, allowed_files: Sequence[str] | None = None):
+        self.root = root
+        self.allowed_files = frozenset(allowed_files or ())
+
+    def resolve(self, authority: str) -> str:
+        parsed = _parse_source_authority(authority)
+        if parsed["scheme"] != "evidence":
+            raise MigrationError("source authority is not an evidence reference")
+        relative = parsed["path"]
+        if (
+            not relative
+            or Path(relative).is_absolute()
+            or "\\" in relative
+            or any(part in {"", ".", ".."} for part in relative.split("/"))
+            or (self.allowed_files and relative not in self.allowed_files)
+        ):
+            raise MigrationError("evidence path is not approved")
+        path = self.root / relative
+        if path.is_symlink() or not path.is_file():
+            raise MigrationError("evidence artifact is not a regular file")
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            raise MigrationError("evidence artifact could not be read") from exc
+        document = _parse_json_or_yaml(raw)
+        return _lookup_exact_path(document, parsed["selector"])
+
+
+class SourceOrchestrationAdapter(ProtectedSourceAdapter):
+    """Dispatch each committed authority to its scheme-specific reader."""
+
+    def __init__(
+        self,
+        *,
+        op_adapter: ProtectedSourceAdapter | None = None,
+        ssh_adapter: ProtectedSourceAdapter | None = None,
+        evidence_adapter: ProtectedSourceAdapter | None = None,
+    ):
+        self.op_adapter = op_adapter
+        self.ssh_adapter = ssh_adapter
+        self.evidence_adapter = evidence_adapter
+        self.source_token = None
+
+    def resolve(self, authority: str) -> str:
+        scheme = _parse_source_authority(authority)["scheme"]
+        if scheme.startswith("op"):
+            adapter = self.op_adapter
+        elif scheme.startswith("deployed"):
+            adapter = self.ssh_adapter
+        else:
+            adapter = self.evidence_adapter
+        if adapter is None:
+            raise MigrationError("source scheme has no protected adapter")
+        return _resolve_source(adapter, authority)
+
+
+def _source_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
+    env = {
+        "HOME": "/nonexistent",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "TMPDIR": os.environ.get("TMPDIR", "/tmp"),
+    }
+    for key, value in (extra_env or {}).items():
+        if (
+            not isinstance(key, str)
+            or not isinstance(value, str)
+            or key in env
+            or "\n" in key
+            or "\n" in value
+        ):
+            raise MigrationError("source environment is invalid")
+        env[key] = value
+    return env
+
+
+def _parse_json_or_yaml(raw: bytes) -> Any:
+    if len(raw) > 16 * 1024 * 1024:
+        raise MigrationError("source document is oversized")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise MigrationError("source document is not UTF-8") from exc
+    try:
+        return strict_json_loads(text)
+    except MigrationError:
+        if text.lstrip().startswith(("{", "[")):
+            raise MigrationError("source JSON is invalid")
+        try:
+            return yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise MigrationError("source document is invalid") from exc
+
+
+def _lookup_exact_path(document: Any, selector: str) -> str:
+    if not isinstance(selector, str) or not selector or ".." in selector:
+        raise MigrationError("source selector is invalid")
+    current = document
+    for part in selector.split("."):
+        if not part:
+            raise MigrationError("source selector is invalid")
+        if isinstance(current, Mapping):
+            if part not in current:
+                raise MigrationError("source selector was not found")
+            current = current[part]
+        elif isinstance(current, list) and part.isdigit():
+            index = int(part)
+            if index >= len(current):
+                raise MigrationError("source selector was not found")
+            current = current[index]
+        else:
+            raise MigrationError("source selector was not found")
+    if not isinstance(current, str):
+        raise MigrationError("source selector is not a string")
+    return current
+
+
+def _read_op_custom_field(item: Mapping[str, Any], field: str) -> str:
+    fields = item.get("fields")
+    if not isinstance(fields, list):
+        raise MigrationError("source item response is invalid")
+    matches = [
+        candidate
+        for candidate in fields
+        if isinstance(candidate, Mapping)
+        and (candidate.get("label") == field or candidate.get("id") == field)
+    ]
+    if len(matches) != 1 or not isinstance(matches[0].get("value"), str):
+        raise MigrationError("source field is not uniquely readable")
+    return matches[0]["value"]
+
+
+def _read_secure_note_env(item: Mapping[str, Any], field: str) -> str:
+    notes = item.get("notesPlain")
+    if not isinstance(notes, str):
+        notes_field = [
             candidate
-            for candidate in result["fields"]
-            if candidate.get("label") == field or candidate.get("id") == field
+            for candidate in item.get("fields", [])
+            if isinstance(candidate, Mapping) and candidate.get("label") == "notesPlain"
         ]
-        if len(matches) != 1 or not isinstance(matches[0].get("value"), str):
-            raise MigrationError("source field is not uniquely readable")
-        return matches[0]["value"]
+        if len(notes_field) == 1 and isinstance(notes_field[0].get("value"), str):
+            notes = notes_field[0]["value"]
+    if not isinstance(notes, str):
+        raise MigrationError("secure-note environment is not readable")
+    values: dict[str, str] = {}
+    for line in notes.splitlines():
+        if not line or line.lstrip().startswith("#"):
+            continue
+        if line.startswith("export ") or "=" not in line:
+            raise MigrationError("secure-note environment syntax is invalid")
+        key, value = line.split("=", 1)
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or key in values:
+            raise MigrationError("secure-note environment syntax is invalid")
+        values[key] = value
+    if field not in values:
+        raise MigrationError("secure-note environment key was not found")
+    return values[field]
+
+
+def _read_title_metadata(item: Mapping[str, Any], requested_title: str, field: str) -> str:
+    # Older ``op`` JSON fixtures omit the title while returning a custom
+    # ``username`` field.  A real title authority is strict whenever title
+    # metadata is present; the fixture compatibility keeps the source API
+    # useful for older callers without weakening mismatch checks.
+    if "title" not in item:
+        return _read_op_custom_field(item, field)
+    title = item.get("title", requested_title)
+    if not isinstance(title, str) or title != requested_title:
+        raise MigrationError("source item title mismatch")
+    match = re.fullmatch(r".+ - ([^@\s]+)@([^\s]+)", title)
+    if not match or field not in {"host", "username"}:
+        raise MigrationError("source title metadata is invalid")
+    return match.group(2) if field == "host" else match.group(1)
+
+
+def _require_attachment(item: Mapping[str, Any], name: str) -> None:
+    files = item.get("files")
+    if not isinstance(files, list):
+        raise MigrationError("source attachment metadata is invalid")
+    matches = [
+        candidate
+        for candidate in files
+        if isinstance(candidate, Mapping)
+        and (candidate.get("name") == name or candidate.get("id") == name)
+    ]
+    if len(matches) != 1:
+        raise MigrationError("source attachment is not uniquely readable")
+
+
+def _parse_deployed_document(raw: bytes, path: str) -> Any:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise MigrationError("deployed source is not UTF-8") from exc
+    if path.lower().endswith((".json", ".jsonc")) or text.lstrip().startswith(("{", "[")):
+        try:
+            return strict_json_loads(text)
+        except MigrationError as exc:
+            raise MigrationError("deployed JSON is invalid") from exc
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line or line.lstrip().startswith("#"):
+            continue
+        if line.startswith("export ") or "=" not in line:
+            raise MigrationError("deployed environment syntax is invalid")
+        key, value = line.split("=", 1)
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or key in values:
+            raise MigrationError("deployed environment syntax is invalid")
+        values[key] = value
+    return values
+
+
+def _lookup_deployed_value(document: Any, selector: str) -> str:
+    return _lookup_exact_path(document, selector)
+
+
+_CONNECTION_COMPONENTS = frozenset({"server", "database", "password", "user"})
+_CONNECTION_KEYS = {
+    "server": "server",
+    "host": "server",
+    "data source": "server",
+    "database": "database",
+    "initial catalog": "database",
+    "user": "user",
+    "user id": "user",
+    "uid": "user",
+    "password": "password",
+    "pwd": "password",
+}
+
+
+def _parse_connection_string(raw: str) -> dict[str, str]:
+    if not isinstance(raw, str) or not raw:
+        raise MigrationError("connection string is invalid")
+    result: dict[str, str] = {}
+    for part in raw.split(";"):
+        if not part:
+            continue
+        if part.count("=") != 1:
+            raise MigrationError("connection string is invalid")
+        key, value = (piece.strip() for piece in part.split("=", 1))
+        normalized = _CONNECTION_KEYS.get(key.casefold())
+        if normalized is None or not value or normalized in result:
+            raise MigrationError("connection string is invalid")
+        if any(character in value for character in "\r\n"):
+            raise MigrationError("connection string is invalid")
+        result[normalized] = value
+    return result
+
+
+def _lookup_connection_component(document: Any, selector: str) -> str:
+    match = re.fullmatch(r"(.+)\[([a-z]+)\]", selector)
+    if not match or match.group(2) not in _CONNECTION_COMPONENTS:
+        raise MigrationError("connection component selector is invalid")
+    raw = _lookup_exact_path(document, match.group(1))
+    parsed = _parse_connection_string(raw)
+    try:
+        return parsed[match.group(2)]
+    except KeyError as exc:
+        raise MigrationError("connection component is missing") from exc
+
+
+def _assert_distinct_source_target_tokens(
+    source_adapter: ProtectedSourceAdapter | None, target_token: str
+) -> None:
+    if not isinstance(target_token, str) or not target_token:
+        raise MigrationError("target writer token is invalid")
+    if source_adapter is None:
+        return
+    source_tokens: set[str] = set()
+    for candidate in (
+        source_adapter,
+        getattr(source_adapter, "op_adapter", None),
+        getattr(source_adapter, "ssh_adapter", None),
+        getattr(source_adapter, "evidence_adapter", None),
+    ):
+        source_token = getattr(candidate, "source_token", None)
+        if isinstance(source_token, str):
+            source_tokens.add(source_token)
+    if target_token in source_tokens:
+        raise MigrationError("source and target writer tokens must be distinct")
+
+
+def _writer_token(*, token: str | None, target_token: str | None) -> str:
+    if token is None and target_token is None:
+        raise MigrationError("target writer token is required")
+    if token is not None and target_token is not None and token != target_token:
+        raise MigrationError("target writer tokens do not match")
+    value = target_token or token
+    if not isinstance(value, str) or not value:
+        raise MigrationError("target writer token is invalid")
+    return value
 
 
 def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -227,6 +622,32 @@ def run_op_json(
     return strict_json_loads(completed.stdout)
 
 
+def run_op_bytes(
+    *,
+    op_bin: Path,
+    argv: Sequence[str],
+    token: str,
+    extra_env: Mapping[str, str] | None = None,
+) -> bytes:
+    """Run a source attachment read without decoding or printing its bytes."""
+    if not op_bin.is_file() or op_bin.is_symlink() or not os.access(op_bin, os.X_OK):
+        raise MigrationError("1Password executable is unsafe")
+    if any(not isinstance(argument, str) or "\n" in argument for argument in argv):
+        raise MigrationError("1Password argument is invalid")
+    completed = subprocess.run(
+        [str(op_bin), *argv],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        env=_minimal_env(token, extra_env),
+    )
+    if completed.returncode != 0:
+        raise MigrationError("1Password attachment read failed")
+    if len(completed.stdout) > 16 * 1024 * 1024:
+        raise MigrationError("source attachment is oversized")
+    return completed.stdout
+
+
 def validate_service_account_scope(
     identity: Mapping[str, Any], vaults: Sequence[Mapping[str, Any]], expected_vault: str
 ) -> None:
@@ -241,7 +662,8 @@ def validate_service_account_scope(
 def populate_item(
     *,
     op_bin: Path,
-    token: str,
+    token: str | None = None,
+    target_token: str | None = None,
     expected_vault: str,
     coordinate: str,
     title: str,
@@ -249,18 +671,19 @@ def populate_item(
     text_fields: Mapping[str, str],
     extra_env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    writer_token = _writer_token(token=token, target_token=target_token)
     if expected_vault not in APPROVED_VAULTS:
         raise MigrationError("target vault is not in the approved vault set")
     identity = run_op_json(
         op_bin=op_bin,
         argv=["whoami", "--format=json"],
-        token=token,
+        token=writer_token,
         extra_env=extra_env,
     )
     vaults = run_op_json(
         op_bin=op_bin,
         argv=["vault", "list", "--format=json"],
-        token=token,
+        token=writer_token,
         extra_env=extra_env,
     )
     if not isinstance(identity, Mapping) or not isinstance(vaults, list):
@@ -271,7 +694,7 @@ def populate_item(
     items = run_op_json(
         op_bin=op_bin,
         argv=["item", "list", "--vault", expected_vault, "--format=json"],
-        token=token,
+        token=writer_token,
         extra_env=extra_env,
     )
     if not isinstance(items, list):
@@ -292,7 +715,7 @@ def populate_item(
         written = run_op_json(
             op_bin=op_bin,
             argv=["item", "edit", item_id, "--vault", expected_vault],
-            token=token,
+            token=writer_token,
             stdin_document=template,
             extra_env=extra_env,
         )
@@ -300,7 +723,7 @@ def populate_item(
         written = run_op_json(
             op_bin=op_bin,
             argv=["item", "create", "--vault", expected_vault, "-"],
-            token=token,
+            token=writer_token,
             stdin_document=template,
             extra_env=extra_env,
         )
@@ -310,7 +733,7 @@ def populate_item(
     readback = run_op_json(
         op_bin=op_bin,
         argv=["item", "get", item_id, "--vault", expected_vault, "--format=json"],
-        token=token,
+        token=writer_token,
         extra_env=extra_env,
     )
     if not isinstance(readback, Mapping):
@@ -366,6 +789,11 @@ _BATCH_VERIFICATION_STATUSES = frozenset(
     {"verified-readable", "verified-reconstructable", "existing-direct-reference"}
 )
 _OP_AUTHORITY_SCHEMES = ("op://", "op-env://", "op-file://", "op-title://")
+_SOURCE_AUTHORITY_SCHEMES = _OP_AUTHORITY_SCHEMES + (
+    "deployed://",
+    "deployed-component://",
+    "evidence://",
+)
 _OP_SCHEME_NAMES = frozenset(scheme.removesuffix("://") for scheme in _OP_AUTHORITY_SCHEMES)
 _FIELD_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,127}$")
 _ITEM_TITLE = re.compile(r"^[a-z0-9][a-z0-9-]{0,126}[a-z0-9]$|^[a-z0-9]$")
@@ -391,11 +819,62 @@ def _parse_op_authority(authority: str) -> tuple[str, str, str]:
     return vault, item, field
 
 
+def _parse_source_authority(authority: str) -> dict[str, str]:
+    if not isinstance(authority, str):
+        raise MigrationError("source authority is structurally invalid")
+    scheme_marker = next(
+        (scheme for scheme in _SOURCE_AUTHORITY_SCHEMES if authority.startswith(scheme)),
+        None,
+    )
+    if scheme_marker is None:
+        raise MigrationError("source authority scheme is not approved")
+    scheme = scheme_marker.removesuffix("://")
+    remainder = authority[len(scheme_marker) :]
+    if not remainder or "\n" in remainder or "\x00" in remainder:
+        raise MigrationError("source authority is structurally invalid")
+    if scheme in _OP_SCHEME_NAMES:
+        vault, item, field = _parse_op_authority(authority)
+        return {"scheme": scheme, "vault": vault, "item": item, "field": field}
+    if scheme in {"deployed", "deployed-component"}:
+        if "/" not in remainder or "#" not in remainder:
+            raise MigrationError("deployed authority is structurally invalid")
+        host, path_and_selector = remainder.split("/", 1)
+        path, selector = path_and_selector.rsplit("#", 1)
+        path = "/" + path
+        if (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", host)
+            or not path.startswith("/")
+            or not selector
+            or "//" in path
+            or "\n" in path
+        ):
+            raise MigrationError("deployed authority is structurally invalid")
+        return {"scheme": scheme, "host": host, "path": path, "selector": selector}
+    if scheme == "evidence":
+        if "#" not in remainder:
+            raise MigrationError("evidence authority is structurally invalid")
+        path, selector = remainder.rsplit("#", 1)
+        if not path or not selector:
+            raise MigrationError("evidence authority is structurally invalid")
+        return {"scheme": scheme, "path": path, "selector": selector}
+    raise MigrationError("source authority scheme is not approved")
+
+
 def _is_op_authority(authority: Any) -> bool:
-    if not isinstance(authority, str) or not authority.startswith(_OP_AUTHORITY_SCHEMES):
+    if not isinstance(authority, str) or not authority.startswith(_SOURCE_AUTHORITY_SCHEMES):
         return False
     try:
-        _parse_op_authority(authority)
+        parsed = _parse_source_authority(authority)
+    except MigrationError:
+        return False
+    return parsed["scheme"] in _OP_SCHEME_NAMES
+
+
+def _is_approved_source_authority(authority: Any) -> bool:
+    if not isinstance(authority, str):
+        return False
+    try:
+        _parse_source_authority(authority)
     except MigrationError:
         return False
     return True
@@ -509,6 +988,8 @@ def _validate_target_entry(
     source = entry.get("source_authority")
     if not isinstance(source, str) or not source:
         raise MigrationError("selected entry has an unresolved authority")
+    if not _is_approved_source_authority(source):
+        raise MigrationError("selected entry has an invalid source authority")
     if not _is_op_authority(source) and getattr(source_adapter, "protected", False) is not True:
         raise MigrationError("non-op source requires a protected source adapter")
     vault = entry.get("canonical_vault")
@@ -525,7 +1006,10 @@ def _validate_target_entry(
 
 
 def _validate_batch_entries(
-    entries: Sequence[Mapping[str, Any]], source_adapter: Any | None
+    entries: Sequence[Mapping[str, Any]],
+    source_adapter: Any | None,
+    *,
+    resolve_duplicates: bool = True,
 ) -> dict[tuple[str, str], list[Mapping[str, Any]]]:
     grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     target_sources: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
@@ -541,12 +1025,15 @@ def _validate_batch_entries(
         target_sources.setdefault((vault, item, field), []).append(entry)
 
     for (vault, item, _field), matches in target_sources.items():
+        field_types = {_entry_field_type(entry) for entry in matches}
+        if len(field_types) != 1:
+            raise MigrationError("conflicting field type for duplicate target field")
         # Multiple consumer rows may intentionally point at one canonical
         # field.  Resolve each distinct source only in protected process
         # memory, collapse equal values to one deterministic representative,
         # and stop before any write when authorities disagree.
         sources = sorted({entry["source_authority"] for entry in matches})
-        if len(sources) > 1:
+        if len(sources) > 1 and resolve_duplicates:
             if source_adapter is None:
                 raise MigrationError("duplicate target field requires a protected source adapter")
             values = [_resolve_source(source_adapter, source) for source in sources]
@@ -602,6 +1089,48 @@ def plan_batch(
             raise MigrationError("non-op source requires a protected source adapter")
     grouped = _validate_batch_entries(selected, source_adapter)
     return _value_free_plan(grouped, registry_path=registry_path)
+
+
+def discover_batch(
+    *,
+    registry_path: str | Path | None = None,
+    registry: Mapping[str, Any] | None = None,
+    source_adapter: ProtectedSourceAdapter,
+) -> dict[str, Any]:
+    """Read every unique selected authority and return only structural metadata."""
+    if getattr(source_adapter, "protected", False) is not True:
+        raise MigrationError("discovery requires a protected source adapter")
+    document = _registry_document(registry_path=registry_path, registry=registry)
+    selected = _eligible_entries(document)
+    grouped = _validate_batch_entries(
+        selected, source_adapter, resolve_duplicates=False
+    )
+    values: dict[str, str] = {}
+    for authority in sorted({entry["source_authority"] for entry in selected}):
+        values[authority] = _resolve_source(source_adapter, authority)
+    for matches in _group_entries_by_target(selected).values():
+        source_values = {values[entry["source_authority"]] for entry in matches}
+        if len(source_values) > 1:
+            raise MigrationError("conflicting values for duplicate target field")
+    plan = _value_free_plan(grouped, registry_path=registry_path)
+    report = {
+        "status": "discovered",
+        "item_count": plan["item_count"],
+        "field_count": plan["field_count"],
+        "items": plan["items"],
+    }
+    _reject_value_bearing_metadata(report)
+    return report
+
+
+def _group_entries_by_target(
+    entries: Sequence[Mapping[str, Any]],
+) -> dict[tuple[str, str, str], list[Mapping[str, Any]]]:
+    grouped: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
+    for entry in entries:
+        vault, item, field = _validate_target_entry(entry, MappingSourceAdapter({}))
+        grouped.setdefault((vault, item, field), []).append(entry)
+    return grouped
 
 
 def _value_free_execution_report(
@@ -712,12 +1241,15 @@ def execute_batch(
     *,
     plan: Mapping[str, Any],
     op_bin: Path,
-    token: str,
+    token: str | None = None,
+    target_token: str | None = None,
     source_adapter: Any,
     extra_env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Execute each planned item through the existing stdin-only population path."""
     validate_batch_plan(plan)
+    writer_token = _writer_token(token=token, target_token=target_token)
+    _assert_distinct_source_target_tokens(source_adapter, writer_token)
     plan_items = plan["items"]
     failures: list[Mapping[str, Any]] = []
     completed: list[Mapping[str, Any]] = []
@@ -756,7 +1288,7 @@ def execute_batch(
             attempted += 1
             status = populate_item(
                 op_bin=op_bin,
-                token=token,
+                target_token=writer_token,
                 expected_vault=vault,
                 coordinate=f"{vault}|{item}",
                 title=item,
@@ -820,6 +1352,41 @@ def _source_adapter_from_request(path: Path) -> ProtectedSourceAdapter:
         if not isinstance(authority, str) or not authority or not isinstance(value, str):
             raise MigrationError("source request source is invalid")
     return MappingSourceAdapter(sources)
+
+
+def _source_adapter_from_options(
+    args: argparse.Namespace,
+    *,
+    request: Path | None = None,
+) -> ProtectedSourceAdapter:
+    if request is not None:
+        return _source_adapter_from_request(request)
+    source_token = getattr(args, "source_token", None)
+    op_adapter = None
+    if source_token is not None:
+        op_adapter = OpSourceAdapter(
+            op_bin=getattr(args, "source_op_bin", Path("/usr/local/bin/op")),
+            source_token=source_token,
+        )
+    ssh_adapter = None
+    ssh_bin = getattr(args, "source_ssh_bin", None)
+    ssh_key = getattr(args, "source_ssh_key", None)
+    if source_token is not None or ssh_bin is not None or ssh_key is not None:
+        ssh_adapter = DeployedSourceAdapter(
+            ssh_bin=ssh_bin or Path("/usr/bin/ssh"),
+            source_token=source_token,
+            ssh_user=getattr(args, "source_ssh_user", None),
+            ssh_key=ssh_key,
+        )
+    evidence_root = getattr(args, "evidence_root", None)
+    evidence_adapter = EvidenceSourceAdapter(evidence_root) if evidence_root is not None else None
+    if op_adapter is None and ssh_adapter is None and evidence_adapter is None:
+        raise MigrationError("a protected source reader is required")
+    return SourceOrchestrationAdapter(
+        op_adapter=op_adapter,
+        ssh_adapter=ssh_adapter,
+        evidence_adapter=evidence_adapter,
+    )
 
 
 def _reject_value_bearing_metadata(value: Any) -> None:
@@ -924,7 +1491,9 @@ def _batch_input_from_stdin() -> Mapping[str, Any]:
 
 def _plan_batch_command(args: argparse.Namespace) -> int:
     source_adapter = (
-        _source_adapter_from_request(args.request) if args.request is not None else None
+        _source_adapter_from_options(args, request=args.request)
+        if args.request is not None or args.source_token is not None
+        else None
     )
     plan = plan_batch(registry_path=args.registry, source_adapter=source_adapter)
     print(json.dumps(plan, separators=(",", ":"), sort_keys=True))
@@ -932,23 +1501,17 @@ def _plan_batch_command(args: argparse.Namespace) -> int:
 
 
 def _discover_command(args: argparse.Namespace) -> int:
-    source_adapter = _source_adapter_from_request(args.request)
-    plan = plan_batch(registry_path=args.registry, source_adapter=source_adapter)
-    validate_batch_plan(plan)
-    report = {
-        "status": "discovered",
-        "item_count": plan["item_count"],
-        "field_count": plan["field_count"],
-        "items": plan["items"],
-    }
-    _reject_value_bearing_metadata(report)
+    source_adapter = _source_adapter_from_options(args, request=args.request)
+    report = discover_batch(registry_path=args.registry, source_adapter=source_adapter)
     print(json.dumps(report, separators=(",", ":"), sort_keys=True))
     return 0
 
 
 def _verify_command(args: argparse.Namespace) -> int:
     source_adapter = (
-        _source_adapter_from_request(args.request) if args.request is not None else None
+        _source_adapter_from_options(args, request=args.request)
+        if args.request is not None or args.source_token is not None
+        else None
     )
     document = _registry_document(registry_path=args.registry, registry=None)
     selected = _eligible_entries(document)
@@ -978,7 +1541,8 @@ def _execute_batch_command(args: argparse.Namespace) -> int:
     elif sources:
         source_adapter: Any = MappingSourceAdapter(sources)
     else:
-        raise MigrationError("batch execution requires a protected source adapter")
+        source_adapter = _source_adapter_from_options(args)
+    _assert_distinct_source_target_tokens(source_adapter, input_document["token"])
     plan = plan_batch(registry_path=args.registry, source_adapter=source_adapter)
     report = execute_batch(
         plan=plan,
@@ -1071,15 +1635,24 @@ def _registered_populate_target(
         and candidate.get("canonical_vault") == vault
         and candidate.get("canonical_item") == item
     ]
-    declared_labels = {candidate.get("canonical_field") for candidate in item_entries}
-    if not requested_labels or not requested_labels.issubset(declared_labels):
-        raise MigrationError("populate field is not declared in the canonical registry")
+    declared: dict[str, str] = {}
     for candidate in item_entries:
-        if candidate.get("canonical_field") in requested_labels:
-            expected = _entry_field_type(candidate)
-            actual = "CONCEALED" if candidate["canonical_field"] in request["concealed_fields"] else "STRING"
-            if expected != actual:
-                raise MigrationError("populate field type does not match the canonical registry")
+        label = candidate.get("canonical_field")
+        if not isinstance(label, str) or not label:
+            raise MigrationError("canonical registry item field is invalid")
+        expected = _entry_field_type(candidate)
+        prior = declared.get(label)
+        if prior is not None and prior != expected:
+            raise MigrationError("canonical registry item has conflicting field types")
+        declared[label] = expected
+    if not declared or requested_labels != set(declared):
+        raise MigrationError("populate requires the exact complete item field set")
+    actual = {
+        **{label: "CONCEALED" for label in request["concealed_fields"]},
+        **{label: "STRING" for label in request["text_fields"]},
+    }
+    if actual != declared:
+        raise MigrationError("populate field type partition does not match the canonical registry")
     return entry
 
 
@@ -1103,6 +1676,15 @@ def _populate_command(args: argparse.Namespace) -> int:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+
+    def add_source_options(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--source-token", help="source-reader credential (never the target writer token)")
+        command.add_argument("--source-op-bin", type=Path, default=Path("/usr/local/bin/op"))
+        command.add_argument("--source-ssh-bin", type=Path)
+        command.add_argument("--source-ssh-key", type=Path)
+        command.add_argument("--source-ssh-user")
+        command.add_argument("--evidence-root", type=Path)
+
     compare = commands.add_parser("compare", help="classify two in-memory values")
     compare.add_argument("--request", type=Path, required=True)
     compare.set_defaults(handler=_compare_command)
@@ -1111,10 +1693,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--registry", type=Path, required=True)
     plan.add_argument("--request", type=Path)
+    add_source_options(plan)
     plan.set_defaults(handler=_plan_batch_command)
     discover = commands.add_parser("discover", help="discover approved sources through a protected request")
     discover.add_argument("--registry", type=Path, required=True)
-    discover.add_argument("--request", type=Path, required=True)
+    discover.add_argument("--request", type=Path)
+    add_source_options(discover)
     discover.set_defaults(handler=_discover_command)
     execute = commands.add_parser(
         "execute", aliases=["batch-execute"], help="execute a grouped canonical item plan"
@@ -1122,11 +1706,13 @@ def _parser() -> argparse.ArgumentParser:
     execute.add_argument("--registry", type=Path, required=True)
     execute.add_argument("--op-bin", type=Path, default=Path("/usr/local/bin/op"))
     execute.add_argument("--source-request", type=Path)
+    add_source_options(execute)
     execute.set_defaults(handler=_execute_batch_command)
     verify = commands.add_parser("verify", help="verify registry and migration metadata without values")
     verify.add_argument("--registry", type=Path, required=True)
     verify.add_argument("--ledger", type=Path)
     verify.add_argument("--request", type=Path)
+    add_source_options(verify)
     verify.set_defaults(handler=_verify_command)
     populate = commands.add_parser("populate", help="create or update one canonical item")
     populate.add_argument("--op-bin", type=Path, default=Path("/usr/local/bin/op"))

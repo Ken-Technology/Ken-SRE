@@ -24,6 +24,161 @@ def load_module():
 
 
 class ConsolidateOnePasswordTests(unittest.TestCase):
+    def test_source_authority_dispatch_reads_each_committed_scheme(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            op_log = root / "op-log.jsonl"
+            fake_op = root / "op"
+            fake_op.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "args = sys.argv[1:]\n"
+                "with open(os.environ['OP_LOG'], 'a') as log: log.write(json.dumps(args) + '\\n')\n"
+                "if '--file' in args:\n"
+                "    sys.stdout.buffer.write(b'PRIVATE KEY BYTES\\n')\n"
+                "elif 'SSH deploy - deploy@host.example' in args:\n"
+                "    print(json.dumps({'title':'SSH deploy - deploy@host.example', 'notesPlain':'TOKEN=env-secret\\n', 'files':[{'name':'deploy_key'}]}))\n"
+                "else:\n"
+                "    print(json.dumps({'notesPlain':'TOKEN=env-secret\\n', 'fields':[{'label':'credential','value':'field-secret'}]}))\n"
+            )
+            fake_op.chmod(0o755)
+            evidence = root / "hosts.json"
+            evidence.write_text(json.dumps({"worldstream": {"host": "host.example"}}))
+            adapter = tool.SourceOrchestrationAdapter(
+                op_adapter=tool.OpSourceAdapter(
+                    op_bin=fake_op,
+                    source_token="source-token",
+                    extra_env={"OP_LOG": str(op_log)},
+                ),
+                ssh_adapter=tool.DeployedSourceAdapter(
+                    ssh_bin=fake_op,
+                    source_token="ssh-source-token",
+                    files={"185.183.35.189": root / "deployed.json"},
+                ),
+                evidence_adapter=tool.EvidenceSourceAdapter(root),
+            )
+            (root / "deployed.json").write_text(
+                json.dumps({"OpenAi": {"ApiKey": "deployed-secret"}})
+            )
+            self.assertEqual(
+                adapter.resolve("op://Development/source/credential"), "field-secret"
+            )
+            self.assertEqual(
+                adapter.resolve("op-env://Development/source#TOKEN"), "env-secret"
+            )
+            self.assertEqual(
+                adapter.resolve("op-title://Development/SSH deploy - deploy@host.example#host"),
+                "host.example",
+            )
+            self.assertEqual(
+                adapter.resolve("op-file://Development/SSH deploy - deploy@host.example/deploy_key"),
+                "PRIVATE KEY BYTES\n",
+            )
+            self.assertEqual(
+                adapter.resolve(
+                    "deployed://185.183.35.189/var/www/appsettings.json#OpenAi.ApiKey"
+                ),
+                "deployed-secret",
+            )
+            self.assertEqual(
+                adapter.resolve("evidence://hosts.json#worldstream.host"), "host.example"
+            )
+            calls = [json.loads(line) for line in op_log.read_text().splitlines()]
+            self.assertEqual(calls[0][:2], ["item", "get"])
+            self.assertEqual(calls[-1][-1], "deploy_key")
+
+    def test_deployed_reader_uses_fixed_ssh_cat_and_strict_component_parser(self):
+        tool = load_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log = root / "ssh.log"
+            fake_ssh = root / "ssh"
+            fake_ssh.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "args = sys.argv[1:]\n"
+                "open(os.environ['SSH_LOG'], 'a').write(json.dumps(args) + '\\n')\n"
+                "if args[-1] != '/etc/appsettings.json': raise SystemExit(2)\n"
+                "print(json.dumps({'OpenAi': {'ApiKey': 'deployed-secret'}, 'ConnectionStrings': {'Db': 'Server=db;Database=ken;User Id=reader;Password=pw'}}))\n"
+            )
+            fake_ssh.chmod(0o755)
+            adapter = tool.DeployedSourceAdapter(
+                ssh_bin=fake_ssh,
+                ssh_user="reader",
+                extra_env={"SSH_LOG": str(log)},
+            )
+            self.assertEqual(
+                adapter.resolve("deployed://host.example/etc/appsettings.json#OpenAi.ApiKey"),
+                "deployed-secret",
+            )
+            self.assertEqual(
+                adapter.resolve(
+                    "deployed-component://host.example/etc/appsettings.json#ConnectionStrings.Db[password]"
+                ),
+                "pw",
+            )
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertEqual(calls[0], ["reader@host.example", "cat", "--", "/etc/appsettings.json"])
+            self.assertTrue(all("source" not in arg for call in calls for arg in call))
+            with self.assertRaisesRegex(ValueError, "connection string"):
+                tool._parse_connection_string("Server=db;Password=pw;Password=other")
+
+    def test_source_and_target_tokens_are_distinct(self):
+        tool = load_module()
+        with self.assertRaises(TypeError):
+            tool.OpSourceAdapter(op_bin=Path("/no/such/op"), token="same")
+        adapter = tool.MappingSourceAdapter({"authority": "secret"})
+        adapter.source_token = "writer-token"
+        with self.assertRaisesRegex(ValueError, "distinct"):
+            tool._assert_distinct_source_target_tokens(adapter, "writer-token")
+
+    def test_discovery_resolves_every_unique_selected_authority(self):
+        tool = load_module()
+        entries = self._batch_registry()["entries"]
+        entries[1]["source_authority"] = entries[0]["source_authority"]
+        calls = []
+
+        class Spy(tool.ProtectedSourceAdapter):
+            def resolve(self, authority):
+                calls.append(authority)
+                return "same-secret"
+
+        result = tool.discover_batch(
+            registry=self._batch_registry(entries=entries), source_adapter=Spy()
+        )
+        self.assertEqual(result["status"], "discovered")
+        self.assertEqual(set(calls), {entries[0]["source_authority"]})
+        self.assertNotIn("same-secret", json.dumps(result))
+
+    def test_shared_target_rejects_mixed_field_types(self):
+        tool = load_module()
+        entries = self._batch_registry()["entries"]
+        entries[1]["canonical_field"] = entries[0]["canonical_field"]
+        entries[1]["field_type"] = "string"
+        with self.assertRaisesRegex(ValueError, "field type"):
+            tool.plan_batch(
+                registry=self._batch_registry(entries=entries),
+                source_adapter=tool.MappingSourceAdapter(
+                    {entry["source_authority"]: "same" for entry in entries}
+                ),
+            )
+
+    def test_populate_registry_requires_exact_item_field_partition(self):
+        tool = load_module()
+        registry = self._batch_registry()
+        registry["entries"][1]["canonical_field"] = "SECOND_TOKEN"
+        request = {
+            "token": "writer-token",
+            "vault": "Ken Deploy Production",
+            "coordinate": registry["entries"][0]["coordinate"],
+            "title": "shared-production",
+            "concealed_fields": {"FIRST_TOKEN": "secret"},
+            "text_fields": {},
+        }
+        with self.assertRaisesRegex(ValueError, "exact.*field|complete"):
+            tool._registered_populate_target(document=registry, request=request)
+
     def test_duplicate_json_keys_are_rejected(self):
         tool = load_module()
         with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
