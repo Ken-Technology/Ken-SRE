@@ -43,6 +43,23 @@ VERIFICATION_STATUSES = frozenset(
     }
 )
 ENVIRONMENTS = frozenset({"ci", "nonproduction", "production", "none"})
+FIELD_TYPES = frozenset({"CONCEALED", "STRING"})
+RULE_STATUSES = frozenset({"same", "different", "unresolved"})
+RULE_ENVIRONMENT_SCOPES = frozenset({"matching", "different", "unproven", "unresolved"})
+RULE_REASONS = frozenset(
+    {
+        "different-value",
+        "environment-conflict",
+        "scope-unproven",
+        "account-unproven",
+        "environment-split",
+        "scope-conflict",
+        "unresolved-authority",
+    }
+)
+REVIEWED_EVIDENCE_SHA256 = (
+    "51113962b9cb1705f66ff51700afacf9f65da37753e215b3e0d4606d9211c5c0"
+)
 
 TOP_LEVEL_KEYS = frozenset(
     {"schema_version", "organization", "allowed_vaults", "canonical_items", "entries"}
@@ -51,6 +68,7 @@ ITEM_KEYS = frozenset({"id", "vault", "aliases"})
 ENTRY_KEYS = frozenset(
     {
         "coordinate",
+        "field_type",
         "canonical_id",
         "aliases",
         "disposition",
@@ -62,6 +80,46 @@ ENTRY_KEYS = frozenset(
         "environment",
         "consumer_repositories",
     }
+)
+ENTRY_REQUIRED_KEYS = ENTRY_KEYS - {"field_type"}
+RULES_TOP_LEVEL_KEYS = frozenset(
+    {
+        "schema_version",
+        "organization",
+        "reviewed_evidence",
+        "reviewed_groups",
+        "approved_same_identity",
+        "preserve_separately",
+    }
+)
+RULE_EVIDENCE_KEYS = frozenset(
+    {"artifact", "sha256", "value_disclosure", "comparison_boundary"}
+)
+REVIEWED_GROUP_KEYS = frozenset(
+    {"id", "status", "source_coordinates", "environment_scope", "evidence_class"}
+)
+APPROVED_GROUP_KEYS = frozenset(
+    {
+        "id",
+        "source_coordinates",
+        "handoff_coordinates",
+        "environment_scope",
+        "target",
+        "evidence_group",
+    }
+)
+PRESERVED_GROUP_KEYS = frozenset(
+    {
+        "id",
+        "source_coordinates",
+        "handoff_coordinates",
+        "status",
+        "reason",
+        "evidence_group",
+    }
+)
+RULE_TARGET_KEYS = frozenset(
+    {"disposition", "environment", "vault", "item", "field"}
 )
 
 # A registry may describe labels and references, but not anything calculated
@@ -210,12 +268,14 @@ def _validate_entry(
     item_by_id: Mapping[str, Mapping[str, Any]],
     seen_coordinates: set[str],
     seen_aliases: set[str],
+    *,
+    require_field_type: bool = False,
 ) -> None:
     path = f"entries[{index}]"
     if not isinstance(entry, dict):
         raise ValueError(f"{path} must be a mapping")
     _require_exact_keys(entry, ENTRY_KEYS, path)
-    if set(entry) != ENTRY_KEYS:
+    if set(entry) not in {ENTRY_KEYS, ENTRY_REQUIRED_KEYS}:
         raise ValueError(
             f"{path} must contain exactly: {', '.join(sorted(ENTRY_KEYS))}"
         )
@@ -225,6 +285,12 @@ def _validate_entry(
     if coordinate in seen_coordinates:
         raise ValueError(f"duplicate coordinate: {coordinate}")
     seen_coordinates.add(coordinate)
+
+    field_type = entry.get("field_type")
+    if field_type is not None:
+        _require_string(field_type, f"{path}.field_type")
+        if field_type not in FIELD_TYPES:
+            raise ValueError(f"unsupported field_type at {path}.field_type")
 
     canonical_id = entry["canonical_id"]
     _require_string(canonical_id, f"{path}.canonical_id", allow_none=True)
@@ -291,6 +357,19 @@ def _validate_entry(
             raise ValueError(
                 f"item disposition requires canonical coordinates at {path}"
             )
+        if require_field_type and field_type not in FIELD_TYPES:
+            raise ValueError(f"item disposition requires field_type at {path}")
+    elif disposition == "github-variable":
+        if (
+            canonical_id is not None
+            or canonical_vault is not None
+            or canonical_item is not None
+        ):
+            raise ValueError(
+                f"github-variable cannot have canonical item coordinates at {path}"
+            )
+        if canonical_field is not None:
+            _require_string(canonical_field, f"{path}.canonical_field")
     else:
         if (
             canonical_id is not None
@@ -350,7 +429,14 @@ def validate_registry(
 
     seen_coordinates: set[str] = set()
     for index, entry in enumerate(document["entries"]):
-        _validate_entry(entry, index, item_by_id, seen_coordinates, seen_aliases)
+        _validate_entry(
+            entry,
+            index,
+            item_by_id,
+            seen_coordinates,
+            seen_aliases,
+            require_field_type=handoff is not None,
+        )
     if handoff is not None:
         validate_complete_coverage(document, handoff)
     return document
@@ -386,10 +472,7 @@ def validate_complete_coverage(
         raise ValueError("handoff.rows must be a list")
     expected = [canonical_coordinate(row) for row in rows]
     actual = [entry.get("coordinate") for entry in registry.get("entries", [])]
-    declared_count = (
-        handoff.get("counts", {}).get("rows") if isinstance(handoff, Mapping) else None
-    )
-    if declared_count == 308 and len(expected) != 308:
+    if len(expected) != 308:
         raise ValueError(f"handoff must contain exactly 308 rows, got {len(expected)}")
     if len(actual) != len(set(actual)):
         raise ValueError("registry contains duplicate coordinates")
@@ -406,6 +489,28 @@ def validate_complete_coverage(
         if len(expected_set) != len(expected):
             details.append("handoff contains duplicate coordinates")
         raise ValueError("registry coordinate coverage mismatch: " + "; ".join(details))
+
+    handoff_types = {
+        canonical_coordinate(row): row.get("field_type")
+        for row in rows
+    }
+    registry_entries = {
+        entry.get("coordinate"): entry
+        for entry in registry.get("entries", [])
+        if isinstance(entry, Mapping)
+    }
+    for coordinate, expected_type in handoff_types.items():
+        if expected_type is None:
+            continue
+        normalized_type = str(expected_type).upper()
+        if normalized_type not in FIELD_TYPES:
+            raise ValueError(f"unsupported handoff field_type at {coordinate}")
+        actual_type = registry_entries[coordinate].get("field_type")
+        if actual_type != normalized_type:
+            raise ValueError(
+                f"registry field_type mismatch at {coordinate}: "
+                f"expected {normalized_type}, got {actual_type}"
+            )
 
 
 def load_registry(
@@ -430,6 +535,7 @@ def minimal_document() -> dict[str, Any]:
         "entries": [
             {
                 "coordinate": "test|TOKEN|Ken Deploy Production",
+                "field_type": "CONCEALED",
                 "canonical_id": "test-item",
                 "aliases": ["TEST_TOKEN"],
                 "disposition": "dedicated-item",
@@ -442,4 +548,293 @@ def minimal_document() -> dict[str, Any]:
                 "consumer_repositories": ["test"],
             }
         ],
+    }
+
+
+def _walk_rule_forbidden_keys(value: Any, path: str = "document") -> None:
+    """Reject value-bearing or value-derived rule metadata.
+
+    The reviewed artifact digest is the one intentional exception: it identifies
+    the reviewed evidence file and is not derived from a credential value.
+    """
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{path} contains a non-string key")
+            normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", key).casefold()
+            normalized = normalized.replace("-", "_")
+            allowed_evidence_digest = (
+                path == "document.reviewed_evidence" and normalized == "sha256"
+            )
+            allowed_evidence_disclosure = (
+                path == "document.reviewed_evidence" and normalized == "value_disclosure"
+            )
+            derived_suffixes = (
+                "_digest",
+                "_hash",
+                "_sha",
+                "_sha1",
+                "_sha256",
+                "_checksum",
+                "_prefix",
+                "_length",
+                "_bytes",
+            )
+            if not (allowed_evidence_digest or allowed_evidence_disclosure) and (
+                normalized in FORBIDDEN_VALUE_DERIVED_KEYS
+                or normalized.endswith(derived_suffixes)
+                or normalized.startswith(("value_", "secret_", "plaintext_"))
+            ):
+                raise ValueError(f"forbidden value-derived key: {path}.{key}")
+            _walk_rule_forbidden_keys(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _walk_rule_forbidden_keys(child, f"{path}[{index}]")
+
+
+def _validate_rule_target(target: Any, path: str) -> None:
+    if not isinstance(target, dict):
+        raise ValueError(f"{path} must be a mapping")
+    _require_exact_keys(target, RULE_TARGET_KEYS, path)
+    if set(target) != RULE_TARGET_KEYS:
+        raise ValueError(f"{path} must contain exactly: {', '.join(sorted(RULE_TARGET_KEYS))}")
+    _require_string(target["disposition"], f"{path}.disposition")
+    if target["disposition"] not in {"canonical-item", "dedicated-item", "github-variable"}:
+        raise ValueError(f"unsupported consolidation target disposition at {path}")
+    _require_string(target["environment"], f"{path}.environment")
+    if target["environment"] not in ENVIRONMENTS:
+        raise ValueError(f"unsupported consolidation target environment at {path}")
+    for key in ("vault", "item", "field"):
+        _require_string(target[key], f"{path}.{key}", allow_none=True)
+    if target["disposition"] == "github-variable":
+        if target["environment"] != "none" or target["vault"] is not None or target["item"] is not None:
+            raise ValueError(f"github-variable target must be unscoped at {path}")
+        if target["field"] is None:
+            raise ValueError(f"github-variable target requires a field at {path}")
+    else:
+        if target["vault"] not in ALLOWED_VAULTS or target["item"] is None or target["field"] is None:
+            raise ValueError(f"item target requires vault, item, and field at {path}")
+        if target["environment"] != _environment_for_vault(target["vault"]):
+            raise ValueError(f"target environment does not match vault at {path}")
+
+
+def _validate_rule_group_common(
+    group: Any,
+    index: int,
+    keys: frozenset[str],
+    path_prefix: str,
+) -> None:
+    path = f"{path_prefix}[{index}]"
+    if not isinstance(group, dict):
+        raise ValueError(f"{path} must be a mapping")
+    _require_exact_keys(group, keys, path)
+    if set(group) != keys:
+        raise ValueError(f"{path} must contain exactly: {', '.join(sorted(keys))}")
+    _require_string(group["id"], f"{path}.id")
+    _require_string_list(group["source_coordinates"], f"{path}.source_coordinates")
+    if not group["source_coordinates"]:
+        raise ValueError(f"{path}.source_coordinates must not be empty")
+    if "handoff_coordinates" in group:
+        _require_string_list(group["handoff_coordinates"], f"{path}.handoff_coordinates")
+    _require_string(group["evidence_group"], f"{path}.evidence_group")
+
+
+def validate_consolidation_rules(document: Any) -> dict[str, Any]:
+    """Validate the reviewed, value-free same-identity consolidation rules."""
+    _walk_rule_forbidden_keys(document)
+    if not isinstance(document, dict):
+        raise ValueError("consolidation rules document must be a mapping")
+    _require_exact_keys(document, RULES_TOP_LEVEL_KEYS, "document")
+    if set(document) != RULES_TOP_LEVEL_KEYS:
+        raise ValueError(
+            "document must contain exactly: "
+            + ", ".join(sorted(RULES_TOP_LEVEL_KEYS))
+        )
+    if _is_bool(document["schema_version"]) or document["schema_version"] != 1:
+        raise ValueError("consolidation rules schema_version must be integer 1")
+    if not isinstance(document["schema_version"], int):
+        raise ValueError("consolidation rules schema_version must be integer 1")
+    _require_string(document["organization"], "organization")
+    if document["organization"] != "Ken-Technology":
+        raise ValueError("consolidation rules organization must be Ken-Technology")
+
+    evidence = document["reviewed_evidence"]
+    if not isinstance(evidence, dict):
+        raise ValueError("reviewed_evidence must be a mapping")
+    _require_exact_keys(evidence, RULE_EVIDENCE_KEYS, "reviewed_evidence")
+    if set(evidence) != RULE_EVIDENCE_KEYS:
+        raise ValueError("reviewed_evidence has an incomplete schema")
+    _require_string(evidence["artifact"], "reviewed_evidence.artifact")
+    _require_string(evidence["sha256"], "reviewed_evidence.sha256")
+    if evidence["sha256"] != REVIEWED_EVIDENCE_SHA256:
+        raise ValueError("reviewed evidence SHA does not match the approved artifact")
+    if evidence["value_disclosure"] != "none":
+        raise ValueError("reviewed evidence must declare value_disclosure: none")
+    if evidence["comparison_boundary"] != "single-process-memory-only":
+        raise ValueError("reviewed evidence comparison boundary is not approved")
+
+    for key in ("reviewed_groups", "approved_same_identity", "preserve_separately"):
+        if not isinstance(document[key], list):
+            raise ValueError(f"{key} must be a list")
+
+    reviewed_ids: set[str] = set()
+    for index, group in enumerate(document["reviewed_groups"]):
+        path = f"reviewed_groups[{index}]"
+        if not isinstance(group, dict):
+            raise ValueError(f"{path} must be a mapping")
+        _require_exact_keys(group, REVIEWED_GROUP_KEYS, path)
+        if set(group) != REVIEWED_GROUP_KEYS:
+            raise ValueError(f"{path} has an incomplete schema")
+        _require_string(group["id"], f"{path}.id")
+        if group["id"] in reviewed_ids:
+            raise ValueError(f"duplicate reviewed group id: {group['id']}")
+        reviewed_ids.add(group["id"])
+        _require_string(group["status"], f"{path}.status")
+        if group["status"] not in RULE_STATUSES:
+            raise ValueError(f"unsupported reviewed group status at {path}")
+        _require_string_list(group["source_coordinates"], f"{path}.source_coordinates")
+        _require_string(group["environment_scope"], f"{path}.environment_scope")
+        if group["environment_scope"] not in RULE_ENVIRONMENT_SCOPES:
+            raise ValueError(f"unsupported reviewed group environment_scope at {path}")
+        _require_string(group["evidence_class"], f"{path}.evidence_class")
+
+    rule_ids: set[str] = set()
+    referenced_coordinates: set[str] = set()
+    for index, group in enumerate(document["approved_same_identity"]):
+        path = f"approved_same_identity[{index}]"
+        _validate_rule_group_common(group, index, APPROVED_GROUP_KEYS, "approved_same_identity")
+        if group["id"] in rule_ids:
+            raise ValueError(f"duplicate consolidation group id: {group['id']}")
+        rule_ids.add(group["id"])
+        _require_string(group["environment_scope"], f"{path}.environment_scope")
+        if group["environment_scope"] != "matching":
+            raise ValueError(f"approved group must have matching environment_scope at {path}")
+        _validate_rule_target(group["target"], f"{path}.target")
+        overlap = referenced_coordinates.intersection(group["handoff_coordinates"])
+        if overlap:
+            raise ValueError(f"approved consolidation coordinate appears twice: {sorted(overlap)[0]}")
+        referenced_coordinates.update(group["handoff_coordinates"])
+
+    for index, group in enumerate(document["preserve_separately"]):
+        path = f"preserve_separately[{index}]"
+        _validate_rule_group_common(group, index, PRESERVED_GROUP_KEYS, "preserve_separately")
+        if group["id"] in rule_ids:
+            raise ValueError(f"duplicate consolidation group id: {group['id']}")
+        rule_ids.add(group["id"])
+        _require_string(group["status"], f"{path}.status")
+        if group["status"] not in {"different", "unresolved"}:
+            raise ValueError(f"preserved group must be different or unresolved at {path}")
+        _require_string(group["reason"], f"{path}.reason")
+        if group["reason"] not in RULE_REASONS:
+            raise ValueError(f"unsupported preserved-group reason at {path}")
+        overlap = referenced_coordinates.intersection(group["handoff_coordinates"])
+        if overlap:
+            raise ValueError(f"preserved coordinate appears in another group: {sorted(overlap)[0]}")
+        referenced_coordinates.update(group["handoff_coordinates"])
+    return document
+
+
+def load_consolidation_rules(path: str | Path) -> dict[str, Any]:
+    """Load and validate the value-free reviewed consolidation rules."""
+    rules_path = Path(path)
+    with rules_path.open("r", encoding="utf-8") as stream:
+        document = yaml.load(stream, Loader=UniqueKeySafeLoader)
+    return validate_consolidation_rules(document)
+
+
+def entry_target(entry: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Return the structural target identity, never a credential value."""
+    return (
+        entry.get("disposition"),
+        entry.get("canonical_vault"),
+        entry.get("canonical_item"),
+        entry.get("canonical_field"),
+        entry.get("environment"),
+    )
+
+
+def validate_consolidation(
+    registry: Mapping[str, Any], rules: Mapping[str, Any]
+) -> None:
+    """Prove approved groups collapse and preserved groups remain separate."""
+    validate_consolidation_rules(rules)
+    entries = {
+        entry["coordinate"]: entry
+        for entry in registry.get("entries", [])
+        if isinstance(entry, Mapping) and isinstance(entry.get("coordinate"), str)
+    }
+    approved_coordinates: set[str] = set()
+    for group in rules["approved_same_identity"]:
+        coordinates = group["handoff_coordinates"]
+        if not coordinates:
+            continue
+        missing = [coordinate for coordinate in coordinates if coordinate not in entries]
+        if missing:
+            raise ValueError(f"approved group references missing handoff coordinate: {missing[0]}")
+        targets = {entry_target(entries[coordinate]) for coordinate in coordinates}
+        if len(targets) != 1:
+            raise ValueError(f"approved group did not collapse: {group['id']}")
+        target = group["target"]
+        expected = (
+            target["disposition"],
+            target["vault"],
+            target["item"],
+            target["field"],
+            target["environment"],
+        )
+        if next(iter(targets)) != expected:
+            raise ValueError(f"approved group target mismatch: {group['id']}")
+        approved_coordinates.update(coordinates)
+
+    for group in rules["preserve_separately"]:
+        coordinates = group["handoff_coordinates"]
+        if not coordinates:
+            continue
+        missing = [coordinate for coordinate in coordinates if coordinate not in entries]
+        if missing:
+            raise ValueError(f"preserved group references missing handoff coordinate: {missing[0]}")
+        if approved_coordinates.intersection(coordinates):
+            raise ValueError(f"coordinate is both approved and preserved: {group['id']}")
+        targets = {entry_target(entries[coordinate]) for coordinate in coordinates}
+        if len(targets) < 2:
+            raise ValueError(f"preserved group was merged: {group['id']}")
+
+
+def minimal_consolidation_rules() -> dict[str, Any]:
+    """Small valid rules document used by the contract tests."""
+    return {
+        "schema_version": 1,
+        "organization": "Ken-Technology",
+        "reviewed_evidence": {
+            "artifact": "authority-resolution",
+            "sha256": REVIEWED_EVIDENCE_SHA256,
+            "value_disclosure": "none",
+            "comparison_boundary": "single-process-memory-only",
+        },
+        "reviewed_groups": [
+            {
+                "id": "reviewed-test",
+                "status": "same",
+                "source_coordinates": ["source://test"],
+                "environment_scope": "matching",
+                "evidence_class": "test-only",
+            }
+        ],
+        "approved_same_identity": [
+            {
+                "id": "approved-test",
+                "source_coordinates": ["source://test"],
+                "handoff_coordinates": ["test|TOKEN|Ken Deploy Production"],
+                "environment_scope": "matching",
+                "target": {
+                    "disposition": "dedicated-item",
+                    "environment": "production",
+                    "vault": "Ken Deploy Production",
+                    "item": "test-item",
+                    "field": "TEST_TOKEN",
+                },
+                "evidence_group": "reviewed-test",
+            }
+        ],
+        "preserve_separately": [],
     }

@@ -24,6 +24,7 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
         self.handoff = yaml.safe_load(
             (INVENTORY / "secret-handoff.yaml").read_text(encoding="utf-8")
         )
+        self.rules_path = INVENTORY / "evidence" / "org-secret-consolidation-rules.yaml"
 
     def test_committed_registry_covers_every_handoff_coordinate(self) -> None:
         document = registry.load_registry(
@@ -89,11 +90,43 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
     def test_coverage_rejects_missing_or_extra_coordinates(self) -> None:
         document = registry.minimal_document()
         handoff = {"rows": [{"coordinate": document["entries"][0]["coordinate"]}]}
+        with self.assertRaisesRegex(ValueError, "exactly 308"):
+            registry.validate_complete_coverage(document, handoff)
+
+    def test_coverage_requires_308_even_without_declared_count(self) -> None:
+        handoff = copy.deepcopy(self.handoff)
+        handoff.pop("counts", None)
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
         registry.validate_complete_coverage(document, handoff)
 
-        handoff["rows"].append({"coordinate": "missing-coordinate"})
-        with self.assertRaisesRegex(ValueError, "missing-coordinate"):
-            registry.validate_complete_coverage(document, handoff)
+    def test_item_backed_field_type_is_required_and_matches_handoff(self) -> None:
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        entry = next(
+            entry
+            for entry in document["entries"]
+            if entry["coordinate"]
+            == "ken-agents|DEEPSEEK_API_KEY|Ken Deploy Production"
+        )
+        del entry["field_type"]
+        with self.assertRaisesRegex(ValueError, "field_type"):
+            registry.validate_registry(document, handoff=self.handoff)
+
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        entry = next(
+            entry
+            for entry in document["entries"]
+            if entry["coordinate"]
+            == "ken-agents|DEEPSEEK_API_KEY|Ken Deploy Production"
+        )
+        entry["field_type"] = "STRING"
+        with self.assertRaisesRegex(ValueError, "field_type mismatch"):
+            registry.validate_complete_coverage(document, self.handoff)
 
     def test_only_deployment_vaults_are_accepted(self) -> None:
         document = registry.minimal_document()
@@ -162,6 +195,115 @@ class CanonicalCredentialRegistryTests(unittest.TestCase):
         unresolved = entries["ken-agents|DEPLOY_HOST|Ken Deploy Production"]
         self.assertEqual(unresolved["verification_status"], "unresolved")
         self.assertIsNone(unresolved["source_authority"])
+
+    def test_reviewed_rules_are_value_free_and_cover_the_reviewed_groups(self) -> None:
+        rules = registry.load_consolidation_rules(self.rules_path)
+
+        self.assertEqual(
+            rules["reviewed_evidence"]["artifact"],
+            "/tmp/ken-secret-authority-resolution.yaml",
+        )
+        self.assertEqual(
+            rules["reviewed_evidence"]["sha256"],
+            "51113962b9cb1705f66ff51700afacf9f65da37753e215b3e0d4606d9211c5c0",
+        )
+        self.assertEqual(rules["reviewed_evidence"]["value_disclosure"], "none")
+        self.assertGreaterEqual(len(rules["reviewed_groups"]), 15)
+        self.assertGreaterEqual(len(rules["approved_same_identity"]), 15)
+        self.assertGreaterEqual(len(rules["preserve_separately"]), 15)
+
+    def test_approved_same_identity_groups_collapse_to_one_target(self) -> None:
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        rules = registry.load_consolidation_rules(self.rules_path)
+
+        registry.validate_consolidation(document, rules)
+        entries = {entry["coordinate"]: entry for entry in document["entries"]}
+
+        for group in rules["approved_same_identity"]:
+            if not group["handoff_coordinates"]:
+                continue
+            targets = {
+                registry.entry_target(entries[coordinate])
+                for coordinate in group["handoff_coordinates"]
+            }
+            self.assertEqual(
+                len(targets),
+                1,
+                msg=f"approved group did not collapse: {group['id']}",
+            )
+
+    def test_disallowed_groups_remain_split_even_when_labels_match(self) -> None:
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        rules = registry.load_consolidation_rules(self.rules_path)
+        registry.validate_consolidation(document, rules)
+
+        entries = {entry["coordinate"]: entry for entry in document["entries"]}
+        for group in rules["preserve_separately"]:
+            if not group["handoff_coordinates"]:
+                continue
+            targets = {
+                registry.entry_target(entries[coordinate])
+                for coordinate in group["handoff_coordinates"]
+            }
+            self.assertGreaterEqual(
+                len(targets),
+                2,
+                msg=f"disallowed group was merged: {group['id']}",
+            )
+
+    def test_deepseek_agents_and_frontend_are_explicitly_split(self) -> None:
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        rules = registry.load_consolidation_rules(self.rules_path)
+        group = next(
+            group
+            for group in rules["preserve_separately"]
+            if group["id"] == "deepseek-agents-frontend"
+        )
+        entries = {entry["coordinate"]: entry for entry in document["entries"]}
+        self.assertNotEqual(
+            registry.entry_target(entries[group["handoff_coordinates"][0]]),
+            registry.entry_target(entries[group["handoff_coordinates"][1]]),
+        )
+
+    def test_target_field_normalization_is_structural_only(self) -> None:
+        document = registry.load_registry(
+            INVENTORY / "canonical-credentials.yaml", handoff=self.handoff
+        )
+        entries = {entry["coordinate"]: entry for entry in document["entries"]}
+        self.assertEqual(
+            entries[
+                "ken-ai-mcp|WORLDSTREAM_PASSWORD|Ken Deploy Production"
+            ]["canonical_field"],
+            "WORLDSTREAM_PASSWORD",
+        )
+        self.assertEqual(
+            entries["ken-search|VPS_HOST|no-1password-target"]["canonical_field"],
+            "DEPLOY_HOST",
+        )
+        self.assertEqual(
+            entries[
+                "ken-ai-mcp|WORLDSTREAM_HOST|Ken Deploy Production"
+            ]["canonical_field"],
+            "WORLDSTREAM_HOST",
+        )
+        self.assertEqual(
+            entries["ken-ai-mcp|WORLDSTREAM_USER|no-1password-target"][
+                "canonical_field"
+            ],
+            "WORLDSTREAM_USER",
+        )
+
+    def test_rules_reject_value_derived_keys(self) -> None:
+        rules = registry.minimal_consolidation_rules()
+        rules["approved_same_identity"][0]["secret_prefix"] = "must fail"
+        with self.assertRaisesRegex(ValueError, "forbidden"):
+            registry.validate_consolidation_rules(rules)
 
 
 if __name__ == "__main__":
