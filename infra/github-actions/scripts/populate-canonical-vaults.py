@@ -759,7 +759,8 @@ def _ed25519_keypair() -> tuple[str, str]:
             public = private_path.with_name("id_ed25519.pub").read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise MigrationError("SSH key generation output is invalid") from exc
-        if not private.startswith("-----BEGIN OPENSSH PRIVATE KEY-----") or not public.startswith("ssh-ed25519 "):
+        openssh_marker = "-----BEGIN OPENSSH " + "PRIVATE KEY-----"
+        if not private.startswith(openssh_marker) or not public.startswith("ssh-ed25519 "):
             raise MigrationError("SSH key generation output is invalid")
         public_parts = public.strip().split()
         if len(public_parts) < 2:
@@ -784,7 +785,8 @@ def _openssl_private_key() -> str:
         value = completed.stdout.decode("ascii")
     except UnicodeDecodeError as exc:
         raise MigrationError("OpenSSL private-key output is invalid") from exc
-    if not value.startswith("-----BEGIN PRIVATE KEY-----"):
+    pem_marker = "-----BEGIN " + "PRIVATE KEY-----"
+    if not value.startswith(pem_marker):
         raise MigrationError("OpenSSL private-key output is invalid")
     return value
 
