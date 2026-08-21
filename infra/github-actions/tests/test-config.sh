@@ -60,6 +60,12 @@ run_inventory() {
     fail "canonical credential registry tests"
   fi
 
+  if (cd "${ROOT}" && PYTHONDONTWRITEBYTECODE=1 python3 infra/github-actions/tests/test-consolidate-1password.py -q); then
+    pass "concealed credential migration tests"
+  else
+    fail "concealed credential migration tests"
+  fi
+
   echo "== inventory semantics =="
   if python3 - "${INV}" "${GA_ROOT}" <<'PY'
 import re
