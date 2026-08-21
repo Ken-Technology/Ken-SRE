@@ -96,7 +96,7 @@ def write_fake_op(root):
         "        handle.write(json.dumps({'argv': args, 'token': token, 'stdin': stdin}) + '\\n')\n"
         "if token == 'personal-session':\n"
         "    if command[:2] == ['whoami', '--format=json']:\n"
-        "        print(json.dumps({'account_uuid': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'user_uuid': 'user-uuid', 'user_type': 'PERSON'}))\n"
+        "        print(json.dumps({'account_uuid': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'email': 'cristian@getken.ai', 'url': 'ken-ai.1password.com', 'user_uuid': 'user-uuid', 'user_type': 'PERSON'}))\n"
         "    elif command[:2] == ['account', 'get']:\n"
         "        print(json.dumps({'id': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'type': 'TEAM', 'state': 'ACTIVE'}))\n"
         "    elif command[:2] == ['vault', 'get']:\n"
@@ -108,7 +108,7 @@ def write_fake_op(root):
         "        print(json.dumps({'id': item_id, 'title': titles[item_id], 'vault': {'id': 'crnj3w2djpvppe452icvu6fblm', 'name': 'Employee'}, 'fields': [{'label': 'credential', 'type': 'CONCEALED', 'value': values[item_id]}]}))\n"
         "elif token == '':\n"
         "    if command[:2] == ['whoami', '--format=json']:\n"
-        "        print(json.dumps({'account_uuid': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'user_uuid': 'user-uuid', 'user_type': 'PERSON'}))\n"
+        "        print(json.dumps({'account_uuid': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'email': 'cristian@getken.ai', 'url': 'ken-ai.1password.com', 'user_uuid': 'user-uuid', 'user_type': 'PERSON'}))\n"
         "    elif command[:2] == ['account', 'get']:\n"
         "        print(json.dumps({'id': 'PHLSEQ2HNVAALEWHKWGKZOAGSY', 'type': 'TEAM', 'state': 'ACTIVE'}))\n"
         "    elif command[:2] == ['vault', 'get']:\n"
@@ -249,10 +249,39 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
         tool._validate_personal_identity(
             {
                 "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                "email": "cristian@getken.ai",
+                "url": "ken-ai.1password.com",
                 "user_uuid": "user-uuid",
-                "user_type": "PERSON",
             }
         )
+        with self.assertRaisesRegex(ValueError, "personal account identity"):
+            tool._validate_personal_identity(
+                {
+                    "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                    "email": "cristian@getken.ai",
+                    "url": "my.1password.com",
+                    "user_uuid": "user-uuid",
+                }
+            )
+        for service_account_identity in (
+            {
+                "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                "email": "cristian@getken.ai",
+                "url": "ken-ai.1password.com",
+                "user_uuid": "user-uuid",
+                "user_type": "SERVICE_ACCOUNT",
+            },
+            {
+                "account_uuid": tool.APPROVED_PERSONAL_ACCOUNT_UUID,
+                "email": "cristian@getken.ai",
+                "url": "ken-ai.1password.com",
+                "user_uuid": "user-uuid",
+                "user_type": "PERSON",
+                "ServiceAccountType": "SERVICE_ACCOUNT",
+            },
+        ):
+            with self.assertRaisesRegex(ValueError, "personal account identity"):
+                tool._validate_personal_identity(service_account_identity)
         self.assertEqual(
             tool._validate_personal_vault(
                 {"id": tool.APPROVED_PERSONAL_VAULT_ID, "name": tool.APPROVED_PERSONAL_VAULT_NAME}

@@ -47,6 +47,7 @@ ITEM_DISPOSITIONS = frozenset({"canonical-item", "dedicated-item"})
 GENERATION_ACTIONS = frozenset({"generate-random-additive", "generate-ssh-additive"})
 FIELD_TYPES = frozenset({"CONCEALED", "STRING"})
 APPROVED_PERSONAL_ACCOUNT_UUID = "PHLSEQ2HNVAALEWHKWGKZOAGSY"
+APPROVED_PERSONAL_ACCOUNT_URL = "ken-ai.1password.com"
 APPROVED_PERSONAL_VAULT_NAME = "Employee"
 APPROVED_PERSONAL_VAULT_ID = "crnj3w2djpvppe452icvu6fblm"
 APPROVED_WRITER_ITEMS = {
@@ -261,9 +262,23 @@ def _personal_session_environment(extra_env: Mapping[str, str] | None = None) ->
 def _validate_personal_identity(response: Any) -> None:
     if not isinstance(response, Mapping) or response.get("account_uuid") != APPROVED_PERSONAL_ACCOUNT_UUID:
         raise MigrationError("personal account identity is not the reviewed account")
+    if response.get("url") != APPROVED_PERSONAL_ACCOUNT_URL:
+        raise MigrationError("personal account identity is invalid")
     if not isinstance(response.get("user_uuid"), str) or not response["user_uuid"]:
         raise MigrationError("personal account identity is invalid")
-    if str(response.get("user_type", "")).upper() not in {"PERSON", "USER"}:
+    service_account_keys = {
+        str(key).casefold().replace("_", "")
+        for key in response
+        if isinstance(key, str)
+    }
+    if "serviceaccounttype" in service_account_keys:
+        raise MigrationError("personal account identity is invalid")
+    user_type = response.get("user_type")
+    if user_type is not None and (
+        not isinstance(user_type, str) or user_type.upper() not in {"PERSON", "USER"}
+    ):
+        raise MigrationError("personal account identity is invalid")
+    if str(response.get("type", "")).upper() == "SERVICE_ACCOUNT":
         raise MigrationError("personal account identity is invalid")
 
 
