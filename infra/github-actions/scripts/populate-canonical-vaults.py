@@ -961,13 +961,11 @@ def _inspect_generation_target(
     ):
         raise MigrationError("existing item response is invalid")
     expected_fields = {field: "CONCEALED" for field in fields}
-    for observed_field in existing["fields"]:
-        if not isinstance(observed_field, Mapping):
-            raise MigrationError("existing item field structure is invalid")
-        if observed_field.get("label") in expected_fields:
-            concealed_value = observed_field.get("value")
-            if not isinstance(concealed_value, str) or not concealed_value:
-                raise MigrationError("existing generated concealed value is invalid")
+    _validate_generated_concealed_values(
+        existing,
+        expected_fields,
+        error_message="existing generated concealed value is invalid",
+    )
     # verify_item_shape records only labels/types; concealed values never leave
     # this process and are never included in the status or ledger.
     return vault_id, _MIGRATION.verify_item_shape(
@@ -977,6 +975,24 @@ def _inspect_generation_target(
         expected_title=title,
         expected_fields=expected_fields,
     )
+
+
+def _validate_generated_concealed_values(
+    item: Mapping[str, Any],
+    expected_fields: Mapping[str, str],
+    *,
+    error_message: str = "generated concealed value is invalid",
+) -> None:
+    fields = item.get("fields")
+    if not isinstance(fields, list):
+        return
+    for observed_field in fields:
+        if not isinstance(observed_field, Mapping):
+            raise MigrationError("item field structure is invalid")
+        if observed_field.get("label") in expected_fields:
+            concealed_value = observed_field.get("value")
+            if not isinstance(concealed_value, str) or not concealed_value:
+                raise MigrationError(error_message)
 
 
 def _create_generated_item(
@@ -1014,12 +1030,14 @@ def _create_generated_item(
     )
     if not isinstance(readback, Mapping):
         raise MigrationError("item readback is invalid")
+    expected_fields = {field: "CONCEALED" for field in concealed_fields}
+    _validate_generated_concealed_values(readback, expected_fields)
     return _MIGRATION.verify_item_shape(
         coordinate=coordinate,
         item=readback,
         expected_vault_id=expected_vault_id,
         expected_title=title,
-        expected_fields={field: "CONCEALED" for field in concealed_fields},
+        expected_fields=expected_fields,
     )
 
 

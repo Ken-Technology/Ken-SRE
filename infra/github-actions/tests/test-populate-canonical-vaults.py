@@ -915,6 +915,39 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
                                 ledger_path=root / "ledger.yaml",
                             )
 
+    def test_new_generated_item_requires_a_nonempty_string_value_on_readback(self):
+        tool = load_module()
+        missing = object()
+        for bad_value in (missing, "", 7):
+            with self.subTest(bad_value="missing" if bad_value is missing else bad_value):
+                readback_field = {"label": "GENERATED", "type": "CONCEALED"}
+                if bad_value is not missing:
+                    readback_field["value"] = bad_value
+                with mock.patch.object(
+                    tool._MIGRATION,
+                    "run_op_json",
+                    side_effect=[
+                        {"id": "created-id"},
+                        {
+                            "id": "created-id",
+                            "title": "fixture-generated",
+                            "vault": {"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"]},
+                            "fields": [readback_field],
+                            "sections": [],
+                        },
+                    ],
+                ):
+                    with self.assertRaisesRegex(tool.MigrationError, "generated concealed value"):
+                        tool._create_generated_item(
+                            op_bin=Path("/fake/op"),
+                            target_token="writer-prod",
+                            expected_vault="Ken Deploy Production",
+                            expected_vault_id=tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"],
+                            coordinate="Ken Deploy Production|fixture-generated",
+                            title="fixture-generated",
+                            concealed_fields={"GENERATED": "generated-secret"},
+                        )
+
     def test_existing_ssh_private_key_does_not_fabricate_public_registration(self):
         tool = load_module()
         with tempfile.TemporaryDirectory() as temp:
