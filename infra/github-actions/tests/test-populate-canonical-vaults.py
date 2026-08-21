@@ -751,7 +751,6 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
                         "title": "fixture-generated",
                         "vault": {"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"]},
                         "fields": [{"label": "GENERATED", "type": "CONCEALED", "value": "existing-hidden"}],
-                        "sections": [],
                     }
                 raise AssertionError(f"unexpected op command: {command}")
 
@@ -947,6 +946,39 @@ class PopulateCanonicalVaultsTests(unittest.TestCase):
                             title="fixture-generated",
                             concealed_fields={"GENERATED": "generated-secret"},
                         )
+
+    def test_new_generated_item_accepts_omitted_sections_as_empty(self):
+        tool = load_module()
+        with mock.patch.object(
+            tool._MIGRATION,
+            "run_op_json",
+            side_effect=[
+                {"id": "created-id"},
+                {
+                    "id": "created-id",
+                    "title": "fixture-generated",
+                    "vault": {"id": tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"]},
+                    "fields": [{"label": "GENERATED", "type": "CONCEALED", "value": "generated-hidden"}],
+                },
+            ],
+        ):
+            result = tool._create_generated_item(
+                op_bin=Path("/fake/op"),
+                target_token="writer-prod",
+                expected_vault="Ken Deploy Production",
+                expected_vault_id=tool.APPROVED_TARGET_VAULT_IDS["Ken Deploy Production"],
+                coordinate="Ken Deploy Production|fixture-generated",
+                title="fixture-generated",
+                concealed_fields={"GENERATED": "generated-secret"},
+            )
+        self.assertEqual(result["status"], "verified")
+
+    def test_generated_item_rejects_non_list_sections(self):
+        tool = load_module()
+        for sections in (None, {}, "unsafe"):
+            with self.subTest(sections=sections):
+                with self.assertRaisesRegex(tool.MigrationError, "sections structure"):
+                    tool._canonicalize_generated_item_sections({"sections": sections})
 
     def test_existing_ssh_private_key_does_not_fabricate_public_registration(self):
         tool = load_module()

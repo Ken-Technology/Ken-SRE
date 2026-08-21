@@ -900,6 +900,17 @@ def _build_generation_groups(
     return grouped
 
 
+def _canonicalize_generated_item_sections(item: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Treat an omitted sections key as the canonical empty section list."""
+    if "sections" not in item:
+        normalized = dict(item)
+        normalized["sections"] = []
+        return normalized
+    if not isinstance(item["sections"], list):
+        raise MigrationError("item sections structure is invalid")
+    return item
+
+
 def _inspect_generation_target(
     *,
     op_bin: Path,
@@ -957,9 +968,9 @@ def _inspect_generation_target(
         not isinstance(existing, Mapping)
         or not isinstance(existing.get("vault"), Mapping)
         or not isinstance(existing.get("fields"), list)
-        or not isinstance(existing.get("sections"), list)
     ):
         raise MigrationError("existing item response is invalid")
+    existing = _canonicalize_generated_item_sections(existing)
     expected_fields = {field: "CONCEALED" for field in fields}
     _validate_generated_concealed_values(
         existing,
@@ -1030,6 +1041,7 @@ def _create_generated_item(
     )
     if not isinstance(readback, Mapping):
         raise MigrationError("item readback is invalid")
+    readback = _canonicalize_generated_item_sections(readback)
     expected_fields = {field: "CONCEALED" for field in concealed_fields}
     _validate_generated_concealed_values(readback, expected_fields)
     return _MIGRATION.verify_item_shape(
