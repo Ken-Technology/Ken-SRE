@@ -1,0 +1,11 @@
+[Unit]
+Description=Boundary for Ken ordinary deployment transaction slot 2
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+TasksAccounting=true
+CPUQuota=125%
+MemoryMax=3584M
+MemorySwapMax=0
+TasksMax=384

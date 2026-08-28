@@ -1,0 +1,9 @@
+#!/usr/bin/python3
+"""Fail-closed frontend executor pending phase and deploy bindings."""
+import os
+import sys
+
+BLOCKER = "frontend_task7_pins_phase_transport_deploy_required"
+if os.path.basename(sys.argv[0]) != "ken-frontend-production-release-build":
+    raise SystemExit(78)
+raise SystemExit(78)

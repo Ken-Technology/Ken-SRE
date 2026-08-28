@@ -1,0 +1,13 @@
+name: prompt-parity
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+jobs:
+  parity:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - env:
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+        run: echo langfuse prompt parity

@@ -1,0 +1,11 @@
+[Unit]
+Description=Aggregate boundary for Ken deployment runner listeners
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+TasksAccounting=true
+CPUQuota=25%
+MemoryMax=512M
+MemorySwapMax=0
+TasksMax=128

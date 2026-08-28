@@ -1,0 +1,322 @@
+schema_version: 1
+policy_version: 2026-08-20.4
+issuer: https://token.actions.githubusercontent.com
+discovery_url: https://token.actions.githubusercontent.com/.well-known/openid-configuration
+jwks_uri: https://token.actions.githubusercontent.com/.well-known/jwks
+organization:
+  login: Ken-Technology
+  id: 270069411
+protocol:
+  socket_type: SOCK_SEQPACKET
+  packet_bytes_max: 65536
+  oidc_token_bytes_max: 16384
+  github_token_bytes_max: 4096
+  first_packet_timeout_seconds: 5
+  socket_backlog: 16
+  response_fields: [version, request_id, status, reason_code]
+  response_statuses: [accepted, succeeded, rejected, failed]
+jwks:
+  algorithms: [RS256]
+  connect_timeout_seconds: 3
+  read_timeout_seconds: 5
+  response_bytes_max: 1048576
+  freshness_min_seconds: 300
+  freshness_max_seconds: 21600
+  clock_skew_seconds: 30
+  token_lifetime_max_seconds: 600
+github_api:
+  origin: https://api.github.com
+  redirects: reject
+  response_bytes_max: 1048576
+  allowed_get_templates:
+    - /repositories/{repository_id}
+    - /repos/{owner}/{repository}/actions/runs/{run_id}/attempts/{run_attempt}
+    - /repos/{owner}/{repository}/actions/jobs/{check_run_id}
+    - /repos/{owner}/{repository}/actions/artifacts/{artifact_id}
+    - /repos/{owner}/{repository}/git/commits/{sha}
+artifact:
+  upload_action: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+  overwrite: false
+  retention_days: 3
+  api_digest_pattern: '^sha256:[0-9a-f]{64}$'
+  descriptors: exactly-one-read-only-regular-file
+  reject_entries: [absolute, traversal, symlink, hardlink, device, fifo, socket, sparse, duplicate, case-collision]
+source_commit:
+  object_format: sha1
+  redirects: reject
+  shared_cache: false
+  alternates: false
+  partial_clone: false
+  bundle_uri: false
+  lfs: reject
+  submodules: reject
+  symlinks: reject
+  checkout: false
+  archive: false
+  materialization_modes: ['100644', '100755']
+  forbidden_command_tokens:
+    - dotnet build
+    - dotnet publish
+    - dotnet pack
+    - npm install
+    - npm run build
+    - npm publish
+    - pnpm install
+    - pnpm build
+    - pnpm publish
+    - yarn install
+    - yarn build
+    - docker build
+    - buildctl build
+    - make package
+    - python -m build
+    - cargo publish
+    - mvn package
+    - gradle build
+    - mix hex.publish
+credentials:
+  command: [/usr/local/bin/op, inject]
+  credential_name: op-service-account-token
+  credential_source_mode: '0700-root-only'
+  delivery: one-use-anonymous-pipe
+  connect_environment: forbidden
+  operations: [inject]
+  output_owner: root
+deploy_leases:
+  ordinary_slots: 2
+  writer_preference: true
+  production_build_holds_both: true
+  recovery: fail-closed-reap-then-release
+firewall_phase_interface:
+  command: [/usr/local/libexec/ken-actions-guest-firewall, phase]
+  arguments: [--request-id, '{request_id}', --profile, '{network_profile}', --phase, '{phase}', --state, '{activate|deactivate}']
+  target_authority: policy-only
+  activation: root-created-request-id
+  teardown: mandatory-on-exit
+  profiles:
+    github-control-ci: [oidc-discovery, oidc-jwks, github-api, github-smart-https]
+    github-control-nonproduction: [oidc-discovery, oidc-jwks, github-api, github-smart-https]
+    github-control-production: [oidc-discovery, oidc-jwks, github-api, github-smart-https]
+    vexa-production-fixed-target: [vexa-ssh, vexa-public-health]
+    website-production-fixed-target: [website-ssh, ken-so-public-health, getken-ai-separation]
+    beehiiv-api-fixed-target: [beehiiv-api]
+    github-ssh-ken-website-fixed-target: [github-ssh]
+    frontend-production-digest-deploy: [node-base-read, package-read, build-offline, posthog-upload, ghcr-write, frontend-deploy, frontend-public-health]
+classes:
+  ci:
+    audience: https://ken.so/actions/op-broker/ci
+    broker_network_uid: 22001
+    broker_network_gid: 22001
+    vault: Ken CI Runtime
+    active_connections_max: 4
+  nonproduction:
+    audience: https://ken.so/actions/op-broker/nonproduction
+    broker_network_uid: 22002
+    broker_network_gid: 22002
+    vault: Ken Deploy Nonproduction
+    active_connections_max: 2
+  production:
+    audience: https://ken.so/actions/op-broker/production
+    broker_network_uid: 22003
+    broker_network_gid: 22003
+    vault: Ken Deploy Production
+    active_connections_max: 1
+actions:
+  - action_id: ken-frontend-production-release
+    enabled: false
+    blocked_reason_code: frontend_live_runtime_variables_and_target_authority_required
+    deferred_bindings: [runner.id, runner.group_id, runner.listener_generation, production_build.variables_manifest_sha256, production_build.deploy_target_authority_sha256, production_build.live_runtime_sha256]
+    trust_class: production
+    input_mode: production_build
+    result_contract: stable-code-only
+    repository:
+      owner: Ken-Technology
+      owner_id: 270069411
+      name: ken-frontend
+      id: 1141163204
+      visibility: private
+      default_branch: main
+      ref: refs/heads/main
+      protected: true
+      source_commit_sha: 0952ac075f658acd1bc15a3253032507581e1f0d
+      workflow_ref: Ken-Technology/ken-frontend/.github/workflows/deploy.yml@refs/heads/main
+      workflow_blob_sha: 21b01bbfeb3db512a42080ea21dff5276f3fa28b
+      dockerfile_blob_sha: 6860679d7e023ac3d7828fa97cb32ed0e04bce53
+      lockfile_blob_sha: 4dadbbdda72a3c1ed23c1ef14240e765fe9a2170
+    oidc:
+      audience: https://ken.so/actions/op-broker/production
+      subject: repo:Ken-Technology/ken-frontend:environment:production
+      event_names: [push, workflow_dispatch]
+      environment: production
+      ref_type: branch
+      reusable_workflow: false
+    job:
+      id: build-image
+      name: Build & push image
+      permissions: {actions: read, contents: read, id-token: write, packages: write}
+    runner:
+      name: ken-deploy-production-01
+      uid: 21014
+      gid: 21014
+      id: 0
+      group_id: 0
+      group_name: Ken Private Deploy
+      labels: [self-hosted, linux, x64, ken-deploy, production]
+      cgroup: /ken-actions-deploy.slice/ken-actions-deploy-listeners.slice/ken-runner@ken-deploy-production-01.service
+      executable: /usr/local/bin/ken-op-exec
+      listener_generation: 0
+    executor:
+      name: ken-fe-deploy
+      uid: 22203
+      gid: 22203
+      wrapper: /usr/local/libexec/ken-actions/ken-frontend-production-release-build
+      wrapper_sha256: ad8f98761590eb31670866c60dfe78484ff76eb0fe834b4966f99aea19c2da1c
+      operation_binding_sha256: ab05e6593ce625be91fad528f7adcdd7c2696f1664d8ba113a0f58a5a363b12e
+      systemd_transaction_transport_sha256: 5e1641f88d90bd43ad1fb56cef41574c3cda29497d3c139aa1c040e0634500f2
+      timeout_seconds: 2400
+      network_profile: frontend-production-digest-deploy
+    production_build:
+      builder_uid: 22201
+      builder_gid: 22201
+      uploader_uid: 22202
+      uploader_gid: 22202
+      deploy_uid: 22203
+      deploy_gid: 22203
+      buildkit_version: 0.24.0
+      buildctl_version: 0.24.0
+      node_version: 22.20.0
+      pnpm_version: 10.28.2
+      base_image: docker.io/library/node@sha256:aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6
+      base_image_digest: sha256:aa83e8f13963f17f7f6bd497085112bf12ea6f20b4b826d9b33f2d99594325b6
+      platform: linux/amd64
+      registry: ghcr.io/ken-technology/ken-frontend
+      derived_tag_prefix: sha-
+      secret_mount: /run/secrets/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+      secret_command: [pnpm, build]
+      secret_network: none
+      executes_repository_code_with_secret: true
+      transformed_embedding_residual_accepted: true
+      source_map_endpoint: https://us.posthog.com
+      variables_manifest_sha256: null
+      phase_transport_sha256: f4784b92e104c27530e0b9dd86b98d4205faf83098aae616e9ecf392bef12fda
+      deploy_contract_sha256: 47ebf14dcd3341c1dd7b843d45b102e996190d6f954d8b1bb4d003e6484cc564
+      deploy_target_authority_sha256: null
+      live_runtime_sha256: null
+      builder: {slice: ken-actions-deploy-builder.slice, cpu_quota: '300%', memory_max: 8G, memory_swap_max: 0, tasks_max: 1024, disk_max_bytes: 32212254720, timeout_seconds: 1800}
+      uploader: {slice: ken-actions-deploy-uploader.slice, cpu_quota: '50%', memory_max: 512M, memory_swap_max: 0, tasks_max: 128}
+      deploy: {slice: ken-actions-deploy-executor.slice, cpu_quota: '100%', memory_max: 1G, memory_swap_max: 0, tasks_max: 256}
+      github_read_paths:
+        - /repositories/1141163204
+        - /repos/Ken-Technology/ken-frontend/actions/runs/{run_id}/attempts/{run_attempt}
+        - /repos/Ken-Technology/ken-frontend/actions/jobs/{check_run_id}
+        - /repos/Ken-Technology/ken-frontend/git/commits/{sha}
+      github_denied_resources: [artifacts, logs, caches, attestations, graphql, mutations]
+      ghcr_hosts: [ghcr.io, pkg-containers.githubusercontent.com]
+      ghcr_methods: [GET, HEAD, POST, PATCH, PUT]
+      ghcr_path_prefix: /v2/ken-technology/ken-frontend/
+      leakage_encodings: [raw, canonical-base64, lowercase-hex]
+      posthog_fields: [POSTHOG_PERSONAL_API_KEY, POSTHOG_PROJECT_ID]
+      build_field: NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+      firewall_phases:
+        node-base-read: {uid: 22201, targets: [node-registry, node-registry-auth]}
+        package-read: {uid: 22201, targets: [package-read]}
+        build-offline: {uid: 22201, targets: []}
+        posthog-upload: {uid: 22202, targets: [posthog-upload]}
+        ghcr-write: {uid: 22003, targets: [ghcr, ghcr-storage]}
+        frontend-deploy: {uid: 22203, targets: [frontend-deploy]}
+        frontend-public-health: {uid: 22203, targets: [frontend-public-health]}
+      receipt_contract:
+        schema_version: 2
+        plan_sha256: 75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658
+        policy_binding: root-owned-runtime-policy-sha256
+        contract_sha256: d5ebeb58afb5f5e24bc1b6a6e74934ee3a22ae337b103a085d2df9a5776db63c
+        action_id: ken-frontend-production-release
+        data_bytes_max: 16384
+        receipt_bytes_max: 16384
+        receipt_owner_uid: 0
+        receipt_owner_gid: 0
+        receipt_mode: '0600'
+        chain: sha256-canonical-json-with-external-root-authority
+        phase_authority: root-owned-0600-canonical-json
+        chronology: one-boot-strict-monotonic
+        runner_visible: false
+        phases: [source, build, scan, upload, registry, token-destroy, digest, deploy-health, cleanup]
+  - action_id: ken-vexa-mcp-auth-production-deploy
+    enabled: false
+    blocked_reason_code: vexa_host_key_and_runtime_identity_required
+    deferred_bindings: [runner.id, runner.group_id, runner.listener_generation, executor.known_hosts_sha256]
+    trust_class: production
+    input_mode: artifact
+    executes_repository_code: false
+    result_contract: stable-code-only
+    repository: {owner: Ken-Technology, owner_id: 270069411, name: ken-vexa-mcp-auth, id: 1318316509, visibility: private, default_branch: main, ref: refs/heads/main, protected: true, source_commit_sha: 10abbdfc68349ee01a6050412888cabc9a025f74, workflow_ref: Ken-Technology/ken-vexa-mcp-auth/.github/workflows/deploy.yml@refs/heads/main, workflow_blob_sha: c438d1d4c4a08fc2fb7f2544038f0bdcaaf8d79e}
+    oidc: {audience: https://ken.so/actions/op-broker/production, subject: 'repo:Ken-Technology/ken-vexa-mcp-auth:ref:refs/heads/main', event_names: [push, workflow_dispatch], environment: '', ref_type: branch, reusable_workflow: false}
+    job: {id: deploy, name: deploy, permissions: {actions: read, contents: read, id-token: write}}
+    runner: {name: ken-deploy-production-01, uid: 21014, gid: 21014, id: 0, group_id: 0, group_name: Ken Private Deploy, labels: [self-hosted, linux, x64, ken-deploy, production], cgroup: /ken-actions-deploy.slice/ken-actions-deploy-listeners.slice/ken-runner@ken-deploy-production-01.service, executable: /usr/local/bin/ken-op-exec, listener_generation: 0}
+    template: {path: /etc/ken-op-broker/templates/ken-vexa-mcp-auth-production-deploy.env.op, sha256: ad5209c361c759cc7a2a3ee893389862f30fb2abd814ec71386e4889df810f55, vault: Ken Deploy Production, item: vexa-mcp-auth-deploy-ssh-production, fields: [SERVER_HOST, SERVER_PORT, SERVER_SSH_KEY]}
+    executor: {name: ken-vexa-deploy, uid: 22101, gid: 22101, wrapper: /usr/local/libexec/ken-actions/ken-vexa-mcp-auth-production-deploy, wrapper_sha256: 491b1505adb8a69056dbdb288392ddd73065be94daff08cb5113bc31626dc853, operation_binding_sha256: 48e6ab4ac77940c7b0bea51516b4b284e33523b823a45357006da253cde51670, systemd_transaction_transport_sha256: 5e1641f88d90bd43ad1fb56cef41574c3cda29497d3c139aa1c040e0634500f2, known_hosts_path: /etc/ken-op-broker/known_hosts/ken-vexa-mcp-auth-production-deploy, known_hosts_sha256: null, timeout_seconds: 900, target_profile: vexa-mcp-auth-production-ssh-and-public-health, network_profile: vexa-production-fixed-target}
+    artifact_input: {name_prefix: ken-vexa-mcp-auth-deploy-deploy-, sha_suffix: true, max_archive_bytes: 268435456, max_entries: 30000, max_extracted_bytes: 536870912, manifest_path: manifest.json}
+    limits: {fetch_seconds: 120, pack_bytes: 268435456, objects: 100000, files: 30000, blob_bytes: 33554432, materialized_bytes: 536870912}
+  - action_id: ken-website-beehiiv-production-sync
+    enabled: false
+    blocked_reason_code: beehiiv_live_runtime_required
+    deferred_bindings: [runner.id, runner.group_id, runner.listener_generation, trusted_generation.transport.live_runtime_sha256]
+    trust_class: production
+    input_mode: trusted_generation
+    result_contract: stable-code-only
+    repository: {owner: Ken-Technology, owner_id: 270069411, name: ken-website, id: 1215913301, visibility: private, default_branch: main, ref: refs/heads/main, protected: true, source_commit_sha: e554db05eafbb8f0aaea67714c43255bca610dd8, workflow_ref: Ken-Technology/ken-website/.github/workflows/beehiiv-sync.yml@refs/heads/main, workflow_blob_sha: c7f6d5eeaab5079c953d4be317e550c7728246dc}
+    oidc: {audience: https://ken.so/actions/op-broker/production, subject: 'repo:Ken-Technology/ken-website:ref:refs/heads/main', event_names: [schedule, workflow_dispatch], environment: '', ref_type: branch, reusable_workflow: false}
+    job: {id: sync, name: sync, permissions: {actions: read, contents: read, id-token: write}}
+    runner: {name: ken-deploy-production-01, uid: 21014, gid: 21014, id: 0, group_id: 0, group_name: Ken Private Deploy, labels: [self-hosted, linux, x64, ken-deploy, production], cgroup: /ken-actions-deploy.slice/ken-actions-deploy-listeners.slice/ken-runner@ken-deploy-production-01.service, executable: /usr/local/bin/ken-op-exec, listener_generation: 0}
+    trusted_generation:
+      authenticated_source: protected-main-before-credentials
+      dependency_acquisition: before-credentials
+      phase_order: [generate, push]
+      phase_overlap: forbidden
+      verified_commit_input: root-coordinator-sealed-read-only
+      transaction_slices: [ken-actions-deploy-transaction-1.slice, ken-actions-deploy-transaction-2.slice]
+      transport:
+        wrapper: /usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync
+        wrapper_sha256: 1beb7a1564b661cfb48f551cfd84b95fca3f99d75950e196d6c9fe30399f5640
+        dependency_acquisition_sha256: dcd386771149140e68e19a2c44989ea3e268c7171afd32fa38db166541ae6933
+        generated_paths_manifest_sha256: 08720cf30192a6daf13056fd150cece9c4308ff13adad1861b9f2db6deea3ec9
+        commit_input_contract_sha256: d2d81004d9076702ddc01e37cb0d8f189008f033cd7b03871eacf1d8d4e484df
+        cgroup_contract_sha256: 9c01ecb1ada3ae65f0f157698accf56cc56cbafadd078589bf3df7d4893cf854
+        phase_transport_sha256: 6e0945130af419de14091f5afc06d404a919319f7dc2bcee7cf40489561ec12b
+        live_runtime_sha256: null
+      phases:
+        generate:
+          identity: {name: ken-beehiiv-generate, uid: 22102, gid: 22102}
+          request_subdirectory: generate
+          cgroup_template: /ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-generate.scope
+          descriptor_set: [authenticated-source-tree, BEEHIIV_API_KEY, BEEHIIV_PUBLICATION_ID]
+          template: {path: /etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.generate.env.op, sha256: ee1530b139be67f357083d8504c9c001cd89c8693b49e90b463d68af448b8a2e, vault: Ken Deploy Production, item: beehiiv-production, fields: [BEEHIIV_API_KEY, BEEHIIV_PUBLICATION_ID]}
+          network_profile: beehiiv-api-fixed-target
+          executes_repository_code: true
+          operation: pinned-dependency-install-and-beehiiv-generation
+        push:
+          identity: {name: ken-beehiiv-push, uid: 22104, gid: 22104}
+          request_subdirectory: push
+          cgroup_template: /ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-push.scope
+          descriptor_set: [root-verified-commit-input, DEPLOY_SSH_KEY]
+          template: {path: /etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.push.env.op, sha256: 9c9d7ae9dd0596dabdfc3c112a67c9d32e1f075f76b842644b8f870c644cd10d, vault: Ken Deploy Production, item: blog-sync-deploy-production, fields: [DEPLOY_SSH_KEY]}
+          network_profile: github-ssh-ken-website-fixed-target
+          executes_repository_code: false
+          operation: fixed-verified-commit-git-ssh-push
+    limits: {fetch_seconds: 120, pack_bytes: 268435456, objects: 100000, files: 30000, blob_bytes: 33554432, materialized_bytes: 536870912}
+  - action_id: ken-website-production-deploy
+    enabled: false
+    blocked_reason_code: website_host_key_and_runtime_identity_required
+    deferred_bindings: [runner.id, runner.group_id, runner.listener_generation, executor.known_hosts_sha256]
+    trust_class: production
+    input_mode: artifact
+    executes_repository_code: false
+    result_contract: stable-code-only
+    repository: {owner: Ken-Technology, owner_id: 270069411, name: ken-website, id: 1215913301, visibility: private, default_branch: main, ref: refs/heads/main, protected: true, source_commit_sha: e554db05eafbb8f0aaea67714c43255bca610dd8, workflow_ref: Ken-Technology/ken-website/.github/workflows/deploy.yml@refs/heads/main, workflow_blob_sha: 0445aa8004483c644ce3e4143e46758322b00a05}
+    oidc: {audience: https://ken.so/actions/op-broker/production, subject: 'repo:Ken-Technology/ken-website:ref:refs/heads/main', event_names: [push, workflow_dispatch], environment: '', ref_type: branch, reusable_workflow: false}
+    job: {id: deploy, name: deploy, permissions: {actions: read, contents: read, id-token: write}}
+    runner: {name: ken-deploy-production-01, uid: 21014, gid: 21014, id: 0, group_id: 0, group_name: Ken Private Deploy, labels: [self-hosted, linux, x64, ken-deploy, production], cgroup: /ken-actions-deploy.slice/ken-actions-deploy-listeners.slice/ken-runner@ken-deploy-production-01.service, executable: /usr/local/bin/ken-op-exec, listener_generation: 0}
+    template: {path: /etc/ken-op-broker/templates/ken-website-production-deploy.env.op, sha256: b4f917adb90ae50e62fbc2d5ac97ccf02476a4ef4b794f94fe5b26283beaab9e, vault: Ken Deploy Production, item: deploy-ssh-production, fields: [WEBSITE_HOST, WEBSITE_PORT, WEBSITE_SSH_KEY]}
+    executor: {name: ken-website-deploy, uid: 22103, gid: 22103, wrapper: /usr/local/libexec/ken-actions/ken-website-production-deploy, wrapper_sha256: 3d87a23d40bdd6a217b46e0b7bebb5ca47b48bb2b686f84c55776cbce005a34a, operation_binding_sha256: 7d2743ce1c66ffb5df97786fe9e35921ec41338e1d62f4450bce47467f68e6e5, systemd_transaction_transport_sha256: 5e1641f88d90bd43ad1fb56cef41574c3cda29497d3c139aa1c040e0634500f2, known_hosts_path: /etc/ken-op-broker/known_hosts/ken-website-production-deploy, known_hosts_sha256: null, timeout_seconds: 1200, target_profile: ken-website-production-ssh-and-public-health, network_profile: website-production-fixed-target}
+    artifact_input: {name_prefix: ken-website-deploy-deploy-, sha_suffix: true, max_archive_bytes: 536870912, max_entries: 50000, max_extracted_bytes: 1073741824, manifest_path: manifest.json}
+    limits: {fetch_seconds: 120, pack_bytes: 536870912, objects: 150000, files: 50000, blob_bytes: 67108864, materialized_bytes: 1073741824}

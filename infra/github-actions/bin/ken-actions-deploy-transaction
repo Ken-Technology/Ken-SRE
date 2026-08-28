@@ -1,0 +1,2434 @@
+#!/usr/bin/env python3
+"""Fail-closed systemd transport for broker-authorized Ken deployments.
+
+The Actions runner never invokes this program.  A root broker writes a sealed,
+root-owned request and calls ``dispatch`` with only its request id.  Policy,
+identity, slice, command, target, paths and network profile are selected from
+root-owned files.  The client receives only the broker's stable result code.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import fcntl
+import hashlib
+import io
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import time
+import types
+from typing import Any, Mapping, Sequence
+
+try:
+    import yaml
+except ImportError:  # The immutable Task 6 runtime makes this fatal on guests.
+    yaml = None
+
+
+PLAN_SHA256 = "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658"
+MATRIX_SHA256 = "f471a1fe1633e8be3ea40b78bc07762bc14512e011a813ac628754d10e35f0b6"
+TASK6_CORE_POLICY_SHA256 = "b1e15a9b74e3330c32eb63143d65f51fd1ec595c8eeb3a36cfb46abcc27cc89b"
+TASK6_CORE_LOCK_SHA256 = "2aae227ff90d932c0d80ef71a23993e2819e911b83c7a9ed492647bae67d465f"
+TASK6_RECEIPT_SOURCE_COMMIT_SHA = "45c55b6fc0cd2752d2869c4517475c86004a1e91"
+TASK6_RECEIPT_SOURCE_TREE_SHA = "e8da0e42c2593ff4bb284d7bc52320cefb1ba517"
+TASK6_RECEIPT_HELPER_BLOB_SHA = "ad56d39488c749a29486d2a842d713bbd838fa7d"
+TASK6_RECEIPT_HELPER_SHA256 = "8a611e251c69ee0af1f66043d508695461decf271cc32b76dbe224833a17f183"
+TASK6_RECEIPT_CONTRACT_SHA256 = "d5ebeb58afb5f5e24bc1b6a6e74934ee3a22ae337b103a085d2df9a5776db63c"
+SAFE_REQUEST_ID = re.compile(r"^[0-9a-f]{64}$")
+SAFE_ACTION_ID = re.compile(r"^[a-z][a-z0-9-]{0,79}$")
+SHA1 = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+SAFE_REASON = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+DEFAULT_STATE_ROOT = Path("/run/ken-actions-deploy")
+DEFAULT_POLICY = Path("/etc/ken-op-broker/op-broker-policy.yaml")
+DEFAULT_MANIFEST = Path("/etc/ken-op-broker/action-transport.lock.yaml")
+DEFAULT_RUNTIME_LOCK = Path("/etc/ken-op-broker/broker-runtime.lock.yaml")
+SYSTEMCTL = "/usr/bin/systemctl"
+FIREWALL_HELPER = "/usr/local/libexec/ken-actions-guest-firewall"
+FIREWALL_REQUEST_ROOT = Path("/run/ken-actions-firewall/requests")
+TOOLCHAIN_NODE = "/opt/ken-toolchain/node-v22.20.0/bin/node"
+TOOLCHAIN_PNPM = "/opt/ken-toolchain/lib/node_modules/pnpm/bin/pnpm.cjs"
+TRANSPORT_PATH = "/usr/local/libexec/ken-actions/ken-actions-deploy-transaction"
+TRUSTED_HELPER_PATH = "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync"
+FRONTEND_RELEASE_HELPER_PATH = "/usr/local/bin/ken-frontend-production-release"
+
+ORDINARY_SLOTS = {
+    1: ("ken-actions-deploy-transaction-1.service", "ken-actions-deploy-transaction-1.slice"),
+    2: ("ken-actions-deploy-transaction-2.service", "ken-actions-deploy-transaction-2.slice"),
+}
+FRONTEND_PHASES = {
+    "builder": ("ken-frontend-production-builder@{request_id}.service", "ken-actions-deploy-builder.slice", 22201),
+    "uploader": ("ken-frontend-source-map-uploader@{request_id}.service", "ken-actions-deploy-uploader.slice", 22202),
+    "deploy": ("ken-frontend-deploy-executor@{request_id}.service", "ken-actions-deploy-executor.slice", 22203),
+}
+FRONTEND_FIREWALL_PHASES = (
+    ("node-base-read", 22201), ("package-read", 22201), ("build-offline", 22201),
+    ("posthog-upload", 22202), ("ghcr-write", 22003),
+    ("frontend-deploy", 22203), ("frontend-public-health", 22203),
+)
+FRONTEND_RECEIPT_PHASES = (
+    "source", "build", "scan", "upload", "registry", "token-destroy",
+    "digest", "deploy-health", "cleanup",
+)
+FRONTEND_RECEIPT_ACTOR_UIDS = {
+    "source": 22003,
+    "build": 22201,
+    "scan": 0,
+    "upload": 22202,
+    "registry": 22003,
+    "token-destroy": 22003,
+    "digest": 0,
+    "deploy-health": 22203,
+    "cleanup": 0,
+}
+FRONTEND_RECEIPT_FIREWALL_PHASES = {
+    "source": (),
+    "build": ("node-base-read", "package-read", "build-offline"),
+    "scan": (),
+    "upload": ("posthog-upload",),
+    "registry": ("ghcr-write",),
+    "token-destroy": (),
+    "digest": (),
+    "deploy-health": ("frontend-deploy", "frontend-public-health"),
+    "cleanup": (),
+}
+ORDINARY_DESCRIPTOR_CONTRACTS = {
+    "artifact": ("artifact", "rendered"),
+    "source_commit": ("source", "rendered"),
+    "registry": ("registry-state", "rendered"),
+}
+GENERATED_EXACT_PATHS = frozenset({"src/data/blog.beehiiv.generated.json"})
+GENERATED_DIRECTORY = "public/images/blog/beehiiv"
+GENERATED_FILE_MAX = 32 * 1024 * 1024
+GENERATED_TOTAL_MAX = 512 * 1024 * 1024
+ORDINARY_FIREWALL_PHASES = {
+    "ken-vexa-mcp-auth-production-deploy": (("vexa-ssh", "deploy"), ("vexa-public-health", "health")),
+    "ken-website-production-deploy": (
+        ("website-ssh", "deploy"), ("ken-so-public-health", "health"),
+        ("getken-ai-separation", "separation"),
+    ),
+}
+ALLOWED_FIREWALL_PHASES = frozenset({
+    ("vexa-production-fixed-target", "vexa-ssh"),
+    ("vexa-production-fixed-target", "vexa-public-health"),
+    ("website-production-fixed-target", "website-ssh"),
+    ("website-production-fixed-target", "ken-so-public-health"),
+    ("website-production-fixed-target", "getken-ai-separation"),
+    ("beehiiv-api-fixed-target", "beehiiv-api"),
+    ("github-ssh-ken-website-fixed-target", "github-ssh"),
+    *(("frontend-production-digest-deploy", phase) for phase, _ in FRONTEND_FIREWALL_PHASES),
+})
+
+
+class TransportReject(Exception):
+    def __init__(self, code: str):
+        self.code = code if SAFE_REASON.fullmatch(code) else "transport_rejected"
+        super().__init__(self.code)
+
+
+class LeaseUnavailable(TransportReject):
+    pass
+
+
+def _pairs_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise TransportReject("json_duplicate_key")
+        result[key] = value
+    return result
+
+
+def strict_json(data: bytes, *, maximum: int = 65536) -> Any:
+    if not data or len(data) > maximum:
+        raise TransportReject("json_size_invalid")
+    try:
+        return json.loads(data.decode("utf-8"), object_pairs_hook=_pairs_no_duplicates)
+    except TransportReject:
+        raise
+    except (UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise TransportReject("json_invalid") from exc
+
+
+def _strict_yaml_text(text: str) -> Any:
+    if yaml is None:
+        raise TransportReject("yaml_runtime_missing")
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    def mapping(loader: Loader, node: Any, deep: bool = False) -> dict[Any, Any]:
+        result: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in result:
+                raise TransportReject("yaml_duplicate_key")
+            result[key] = loader.construct_object(value_node, deep=deep)
+        return result
+
+    Loader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+    try:
+        for event in yaml.parse(text):
+            if isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None) is not None or getattr(event, "tag", None) is not None:
+                raise TransportReject("yaml_feature_forbidden")
+        return yaml.load(text, Loader=Loader)
+    except TransportReject:
+        raise
+    except yaml.YAMLError as exc:
+        raise TransportReject("yaml_invalid") from exc
+
+
+def strict_yaml(path: Path) -> Any:
+    try:
+        return _strict_yaml_text(path.read_text(encoding="utf-8"))
+    except TransportReject:
+        raise
+    except (OSError, UnicodeError) as exc:
+        raise TransportReject("yaml_invalid") from exc
+
+
+def _exact_keys(value: Any, expected: set[str], code: str) -> Mapping[str, Any]:
+    if not isinstance(value, dict) or set(value) != expected:
+        raise TransportReject(code)
+    return value
+
+
+@dataclasses.dataclass(frozen=True)
+class TransportRequest:
+    version: int
+    request_id: str
+    action_id: str
+    policy_sha256: str
+    source_sha: str
+    descriptors: tuple[str, ...]
+
+    @classmethod
+    def parse(cls, data: bytes) -> "TransportRequest":
+        value = _exact_keys(strict_json(data), {
+            "version", "request_id", "action_id", "policy_sha256", "source_sha", "descriptors",
+        }, "request_schema_invalid")
+        if type(value["version"]) is not int or value["version"] != 1:
+            raise TransportReject("request_schema_invalid")
+        if not isinstance(value["request_id"], str) or not SAFE_REQUEST_ID.fullmatch(value["request_id"]):
+            raise TransportReject("request_id_invalid")
+        if not isinstance(value["action_id"], str) or not SAFE_ACTION_ID.fullmatch(value["action_id"]):
+            raise TransportReject("request_action_invalid")
+        if not isinstance(value["policy_sha256"], str) or not SHA256.fullmatch(value["policy_sha256"]):
+            raise TransportReject("request_policy_invalid")
+        if not isinstance(value["source_sha"], str) or not SHA1.fullmatch(value["source_sha"]):
+            raise TransportReject("request_source_invalid")
+        descriptors = value["descriptors"]
+        if (not isinstance(descriptors, list) or any(not isinstance(item, str) for item in descriptors)
+                or len(descriptors) != len(set(descriptors)) or len(descriptors) > 8):
+            raise TransportReject("request_descriptors_invalid")
+        return cls(value["version"], value["request_id"], value["action_id"], value["policy_sha256"], value["source_sha"], tuple(descriptors))
+
+
+def descriptor_contract(mode: str) -> tuple[str, ...]:
+    try:
+        return ORDINARY_DESCRIPTOR_CONTRACTS[mode]
+    except KeyError as exc:
+        raise TransportReject("descriptor_mode_invalid") from exc
+
+
+def validate_descriptor_contract(mode: str, descriptors: Sequence[str]) -> None:
+    if tuple(descriptors) != descriptor_contract(mode):
+        raise TransportReject("descriptor_contract_invalid")
+
+
+@dataclasses.dataclass(frozen=True)
+class LeaseHandle:
+    request_id: str
+    slots: tuple[int, ...]
+    kind: str
+
+
+class LeaseScheduler:
+    """Durable two-slot writer-preferring gate.
+
+    Lease marker files intentionally survive a coordinator crash.  Recovery
+    removes them only after the owning unit/process group is stopped and
+    reaped, its cgroup is empty, and the marked request directory is cleaned.
+    """
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            os.chmod(self.root, 0o700)
+        except OSError:
+            pass
+        self.scheduler_path = self.root / "scheduler.lock"
+        self.writer_path = self.root / "writer-pending.json"
+        self.waiter_root = self.root / "ordinary-waiters"
+        self.waiter_root.mkdir(mode=0o700, exist_ok=True)
+        os.chmod(self.waiter_root, 0o700)
+
+    def _locked(self):
+        fd = os.open(self.scheduler_path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return fd
+
+    def _slot_path(self, slot: int) -> Path:
+        if slot not in ORDINARY_SLOTS:
+            raise TransportReject("lease_slot_invalid")
+        return self.root / f"slot-{slot}.json"
+
+    @staticmethod
+    def _payload(handle: LeaseHandle, slot: int) -> bytes:
+        return json.dumps({
+            "version": 1,
+            "request_id": handle.request_id,
+            "kind": handle.kind,
+            "slot": slot,
+            "slots": list(handle.slots),
+        }, sort_keys=True, separators=(",", ":")).encode()
+
+    def _create_marker(self, path: Path, payload: bytes) -> None:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            os.write(fd, payload)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def _read_marker(self, path: Path) -> LeaseHandle:
+        value = _exact_keys(strict_json(path.read_bytes(), maximum=4096), {"version", "request_id", "kind", "slot", "slots"}, "lease_marker_invalid")
+        if type(value["version"]) is not int or value["version"] != 1:
+            raise TransportReject("lease_marker_invalid")
+        if not isinstance(value["request_id"], str) or not SAFE_REQUEST_ID.fullmatch(value["request_id"]):
+            raise TransportReject("lease_marker_invalid")
+        if value["kind"] not in {"ordinary", "production_build"}:
+            raise TransportReject("lease_marker_invalid")
+        if type(value["slot"]) is not int or value["slot"] not in ORDINARY_SLOTS:
+            raise TransportReject("lease_marker_invalid")
+        if value["slots"] not in ([1], [2], [1, 2]):
+            raise TransportReject("lease_marker_invalid")
+        handle = LeaseHandle(value["request_id"], tuple(value["slots"]), value["kind"])
+        if value["slot"] not in handle.slots or (handle.kind == "ordinary") != (len(handle.slots) == 1):
+            raise TransportReject("lease_marker_invalid")
+        return handle
+
+    def _read_waiter(self, path: Path) -> Mapping[str, Any]:
+        value = _exact_keys(strict_json(path.read_bytes(), maximum=2048), {
+            "version", "request_id", "sequence", "pid", "boot_id", "start_ticks",
+        }, "ordinary_waiter_invalid")
+        if (type(value["version"]) is not int or value["version"] != 1
+                or not isinstance(value["request_id"], str) or not SAFE_REQUEST_ID.fullmatch(value["request_id"])
+                or type(value["sequence"]) is not int or value["sequence"] <= 0
+                or type(value["pid"]) is not int or value["pid"] <= 0
+                or not isinstance(value["boot_id"], str) or not value["boot_id"]
+                or type(value["start_ticks"]) is not int or value["start_ticks"] < 0
+                or path.name != f"{value['sequence']:020d}-{value['request_id']}.json"):
+            raise TransportReject("ordinary_waiter_invalid")
+        return value
+
+    def _waiters_locked(self) -> list[tuple[Path, Mapping[str, Any]]]:
+        rows: list[tuple[Path, Mapping[str, Any]]] = []
+        for path in sorted(self.waiter_root.iterdir(), key=lambda item: item.name):
+            if path.is_symlink() or not path.is_file():
+                raise TransportReject("ordinary_waiter_invalid")
+            rows.append((path, self._read_waiter(path)))
+        return rows
+
+    def ordinary_waiters(self) -> tuple[str, ...]:
+        lock = self._locked()
+        try:
+            return tuple(row["request_id"] for _, row in self._waiters_locked())
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN); os.close(lock)
+
+    def enqueue_ordinary(self, request_id: str) -> int:
+        if not SAFE_REQUEST_ID.fullmatch(request_id):
+            raise TransportReject("lease_request_invalid")
+        lock = self._locked()
+        try:
+            rows = self._waiters_locked()
+            existing = [row for _, row in rows if row["request_id"] == request_id]
+            if existing:
+                if len(existing) != 1:
+                    raise TransportReject("ordinary_waiter_invalid")
+                return int(existing[0]["sequence"])
+            sequence = max((int(row["sequence"]) for _, row in rows), default=0) + 1
+            boot_id, start_ticks = _process_identity(os.getpid())
+            handle = {
+                "version": 1, "request_id": request_id, "sequence": sequence, "pid": os.getpid(),
+                "boot_id": boot_id, "start_ticks": start_ticks,
+            }
+            self._create_marker(self.waiter_root / f"{sequence:020d}-{request_id}.json",
+                                json.dumps(handle, sort_keys=True, separators=(",", ":")).encode())
+            return sequence
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN); os.close(lock)
+
+    def cancel_ordinary(self, request_id: str) -> None:
+        lock = self._locked()
+        try:
+            rows = [(path, row) for path, row in self._waiters_locked() if row["request_id"] == request_id]
+            if len(rows) > 1:
+                raise TransportReject("ordinary_waiter_invalid")
+            if rows:
+                rows[0][0].unlink()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN); os.close(lock)
+
+    def acquire_ordinary(self, request_id: str, *, from_queue: bool = False) -> LeaseHandle:
+        if not SAFE_REQUEST_ID.fullmatch(request_id):
+            raise TransportReject("lease_request_invalid")
+        lock = self._locked()
+        try:
+            if self.writer_path.exists():
+                raise LeaseUnavailable("lease_exclusive_waiting")
+            waiters = self._waiters_locked()
+            if waiters:
+                if not from_queue or waiters[0][1]["request_id"] != request_id:
+                    raise LeaseUnavailable("lease_ordinary_queued")
+            elif from_queue:
+                raise TransportReject("ordinary_waiter_missing")
+            for slot in ORDINARY_SLOTS:
+                path = self._slot_path(slot)
+                if path.exists():
+                    continue
+                handle = LeaseHandle(request_id, (slot,), "ordinary")
+                try:
+                    self._create_marker(path, self._payload(handle, slot))
+                    if from_queue:
+                        waiters[0][0].unlink()
+                    return handle
+                except FileExistsError:
+                    continue
+            raise LeaseUnavailable("lease_capacity")
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            os.close(lock)
+
+    def wait_for_ordinary(self, request_id: str, *, timeout: float = 300.0, wait: Any = time.sleep,
+                          cancelled: Any = lambda: False) -> LeaseHandle:
+        self.enqueue_ordinary(request_id)
+        deadline = time.monotonic() + max(0.0, timeout)
+        try:
+            while True:
+                if cancelled():
+                    raise LeaseUnavailable("lease_ordinary_cancelled")
+                try:
+                    return self.acquire_ordinary(request_id, from_queue=True)
+                except LeaseUnavailable as exc:
+                    if exc.code not in {"lease_capacity", "lease_exclusive_waiting", "lease_ordinary_queued"}:
+                        raise
+                    if time.monotonic() >= deadline:
+                        raise LeaseUnavailable("lease_ordinary_timeout")
+                    wait(min(0.1, max(0.0, deadline - time.monotonic())))
+        except Exception:
+            self.cancel_ordinary(request_id)
+            raise
+
+    def announce_writer(self, request_id: str) -> None:
+        if not SAFE_REQUEST_ID.fullmatch(request_id):
+            raise TransportReject("lease_request_invalid")
+        lock = self._locked()
+        try:
+            if self.writer_path.exists():
+                current = self._read_writer()
+                if current["request_id"] != request_id:
+                    raise LeaseUnavailable("lease_writer_queued")
+                return
+            boot_id, start_ticks = _process_identity(os.getpid())
+            payload = json.dumps({
+                "version": 1, "request_id": request_id, "pid": os.getpid(),
+                "boot_id": boot_id, "start_ticks": start_ticks,
+            }, sort_keys=True, separators=(",", ":")).encode()
+            self._create_marker(self.writer_path, payload)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            os.close(lock)
+
+    def acquire_exclusive(self, request_id: str) -> LeaseHandle:
+        if not SAFE_REQUEST_ID.fullmatch(request_id):
+            raise TransportReject("lease_request_invalid")
+        lock = self._locked()
+        created: list[Path] = []
+        try:
+            if not self.writer_path.exists():
+                raise TransportReject("lease_writer_not_announced")
+            writer = self._read_writer()
+            if writer["request_id"] != request_id:
+                raise LeaseUnavailable("lease_writer_queued")
+            if any(self._slot_path(slot).exists() for slot in ORDINARY_SLOTS):
+                raise LeaseUnavailable("lease_capacity")
+            handle = LeaseHandle(request_id, (1, 2), "production_build")
+            for slot in ORDINARY_SLOTS:
+                path = self._slot_path(slot)
+                self._create_marker(path, self._payload(handle, slot))
+                created.append(path)
+            self.writer_path.unlink()
+            return handle
+        except Exception:
+            for path in created:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+            raise
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            os.close(lock)
+
+    def _read_writer(self) -> Mapping[str, Any]:
+        value = _exact_keys(strict_json(self.writer_path.read_bytes(), maximum=2048), {
+            "version", "request_id", "pid", "boot_id", "start_ticks",
+        }, "writer_marker_invalid")
+        if (type(value["version"]) is not int or value["version"] != 1
+                or not isinstance(value["request_id"], str) or not SAFE_REQUEST_ID.fullmatch(value["request_id"])
+                or type(value["pid"]) is not int or value["pid"] <= 0
+                or not isinstance(value["boot_id"], str) or not value["boot_id"]
+                or type(value["start_ticks"]) is not int or value["start_ticks"] < 0):
+            raise TransportReject("writer_marker_invalid")
+        return value
+
+    def cancel_writer(self, request_id: str) -> None:
+        lock = self._locked()
+        try:
+            if not self.writer_path.exists():
+                return
+            if self._read_writer()["request_id"] != request_id:
+                raise LeaseUnavailable("lease_writer_queued")
+            self.writer_path.unlink()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            os.close(lock)
+
+    def wait_for_exclusive(self, request_id: str, *, timeout: float = 300.0, wait: Any = time.sleep) -> LeaseHandle:
+        self.announce_writer(request_id)
+        deadline = time.monotonic() + max(0.0, timeout)
+        try:
+            while True:
+                try:
+                    return self.acquire_exclusive(request_id)
+                except LeaseUnavailable as exc:
+                    if exc.code != "lease_capacity":
+                        raise
+                    if time.monotonic() >= deadline:
+                        raise LeaseUnavailable("lease_exclusive_timeout")
+                    wait(min(0.1, max(0.0, deadline - time.monotonic())))
+        except Exception:
+            self.cancel_writer(request_id)
+            raise
+
+    def release(self, handle: LeaseHandle, *, cleanup_verified: bool) -> None:
+        if not cleanup_verified:
+            raise TransportReject("lease_cleanup_unverified")
+        lock = self._locked()
+        try:
+            for slot in handle.slots:
+                path = self._slot_path(slot)
+                if not path.exists() or self._read_marker(path) != handle:
+                    raise TransportReject("lease_release_mismatch")
+            for slot in handle.slots:
+                self._slot_path(slot).unlink()
+            if handle.kind == "production_build" and self.writer_path.exists():
+                writer = strict_json(self.writer_path.read_bytes(), maximum=1024)
+                if isinstance(writer, dict) and writer.get("request_id") == handle.request_id:
+                    self.writer_path.unlink()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            os.close(lock)
+
+    def active_leases(self) -> tuple[LeaseHandle, ...]:
+        found: dict[tuple[str, str], LeaseHandle] = {}
+        for slot in ORDINARY_SLOTS:
+            path = self._slot_path(slot)
+            if path.exists():
+                handle = self._read_marker(path)
+                found[(handle.request_id, handle.kind)] = handle
+        return tuple(sorted(found.values(), key=lambda item: (item.request_id, item.kind)))
+
+    def recover(self, runtime: Any) -> None:
+        for handle in self.active_leases():
+            finish_transaction(self, runtime, handle)
+        if self.writer_path.exists():
+            writer = self._read_writer()
+            if not _writer_alive(writer):
+                pending = LeaseHandle(writer["request_id"], (), "production_build")
+                if runtime.cleanup_request(pending) is not True:
+                    raise TransportReject("recovery_cleanup_failed")
+                self.cancel_writer(writer["request_id"])
+
+        lock = self._locked()
+        try:
+            waiters = list(self._waiters_locked())
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            os.close(lock)
+        for path, waiter in waiters:
+            if _writer_alive(waiter):
+                continue
+            pending = LeaseHandle(str(waiter["request_id"]), (), "ordinary")
+            if runtime.cleanup_request(pending) is not True:
+                raise TransportReject("recovery_cleanup_failed")
+            lock = self._locked()
+            try:
+                if not path.exists():
+                    continue
+                current = self._read_waiter(path)
+                if current != waiter or _writer_alive(current):
+                    raise TransportReject("ordinary_waiter_recovery_raced")
+                path.unlink()
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+                os.close(lock)
+
+
+def finish_transaction(scheduler: LeaseScheduler, runtime: Any, lease: LeaseHandle) -> None:
+    """Release a lease only after its processes and request bytes are gone."""
+    if runtime.stop_and_reap(lease) is not True:
+        raise TransportReject("transaction_reap_failed")
+    if runtime.cleanup_request(lease) is not True:
+        raise TransportReject("transaction_cleanup_failed")
+    scheduler.release(lease, cleanup_verified=True)
+
+
+def _process_identity(pid: int) -> tuple[str, int]:
+    try:
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        fields = Path(f"/proc/{pid}/stat").read_text().split()
+        if not boot_id or len(fields) < 22:
+            raise OSError
+        return boot_id, int(fields[21])
+    except (OSError, ValueError):
+        return "nonlinux-test", 0
+
+
+def _writer_alive(writer: Mapping[str, Any]) -> bool:
+    boot_id, start_ticks = _process_identity(int(writer["pid"]))
+    return boot_id != "nonlinux-test" and (boot_id, start_ticks) == (writer["boot_id"], writer["start_ticks"])
+
+
+def validate_cgroup(control_group: str, expected_slice: str) -> None:
+    if not isinstance(control_group, str) or not control_group.startswith("/"):
+        raise TransportReject("cgroup_parent_invalid")
+    parts = [part for part in control_group.split("/") if part]
+    prefix = ["ken.slice", "ken-actions.slice", "ken-actions-deploy.slice"]
+    if (len(parts) < 5 or parts[:3] != prefix or parts.count("ken-actions-deploy.slice") != 1
+            or parts.count(expected_slice) != 1 or parts.index(expected_slice) < 3
+            or not parts[-1].endswith((".service", ".scope"))):
+        raise TransportReject("cgroup_slice_invalid")
+    expected_index = parts.index(expected_slice)
+    if expected_slice.startswith("ken-actions-deploy-transaction-"):
+        if parts[3:expected_index] != ["ken-actions-deploy-transaction.slice"]:
+            raise TransportReject("cgroup_slice_invalid")
+    elif expected_index != 3:
+        raise TransportReject("cgroup_slice_invalid")
+    if any(part in {"system.slice", "user.slice", "ken-deploy.slice", ".", ".."} for part in parts):
+        raise TransportReject("cgroup_parent_invalid")
+    leaf = parts[-1]
+    allowed_leaf = False
+    slot_match = re.fullmatch(r"ken-actions-deploy-transaction-([12])[.]slice", expected_slice)
+    if slot_match:
+        slot = slot_match.group(1)
+        allowed_leaf = leaf == f"ken-actions-deploy-transaction-{slot}.service" or leaf in {
+            f"ken-beehiiv-generate-slot-{slot}.scope", f"ken-beehiiv-push-slot-{slot}.scope",
+        }
+    else:
+        templates = {
+            "ken-actions-deploy-builder.slice": "ken-frontend-production-builder@",
+            "ken-actions-deploy-uploader.slice": "ken-frontend-source-map-uploader@",
+            "ken-actions-deploy-executor.slice": "ken-frontend-deploy-executor@",
+        }
+        prefix_name = templates.get(expected_slice)
+        if prefix_name:
+            allowed_leaf = bool(re.fullmatch(re.escape(prefix_name) + r"[0-9a-f]{64}[.]service", leaf))
+    if not allowed_leaf:
+        raise TransportReject("cgroup_leaf_invalid")
+
+
+def firewall_phase_plan(action_id: str) -> tuple[tuple[str, str], ...]:
+    try:
+        return ORDINARY_FIREWALL_PHASES[action_id]
+    except KeyError as exc:
+        raise TransportReject("firewall_action_unbound") from exc
+
+
+def trusted_generation_contract() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "action_id": "ken-website-beehiiv-production-sync",
+        "phase_order": ["dependency", "generate", "reap", "validate", "seal", "push"],
+        "dependency": {
+            "identity": {"name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102},
+            "command": [TOOLCHAIN_NODE, TOOLCHAIN_PNPM, "install", "--offline", "--frozen-lockfile", "--ignore-scripts"],
+            "credentials": [],
+            "network": "none",
+            "lockfile": "pnpm-lock.yaml",
+            "source": "authenticated-protected-main",
+            "diff_baseline": "post-install-before-credentials",
+        },
+        "generate": {
+            "identity": {"name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102},
+            "command": [TOOLCHAIN_NODE, TOOLCHAIN_PNPM, "sync:beehiiv"],
+            "credentials": ["BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"],
+            "descriptors": ["authenticated-source-tree", "BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"],
+            "network_profile": "beehiiv-api-fixed-target",
+            "firewall_phase": "beehiiv-api",
+            "request_subdirectory": "generate",
+            "cgroup_scope": "ken-beehiiv-generate-slot-{slot}.scope",
+            "executes_repository_code": True,
+        },
+        "commit_input": {
+            "authority": "root-coordinator-exact-path-diff",
+            "allowed_exact": ["src/data/blog.beehiiv.generated.json"],
+            "allowed_directory": "public/images/blog/beehiiv",
+            "types": ["regular-file", "delete-under-image-directory"],
+            "modes": ["100644"],
+            "seal": "sha256-canonical-json-read-only-fd",
+            "repository_code_execution": False,
+        },
+        "push": {
+            "identity": {"name": "ken-beehiiv-push", "uid": 22104, "gid": 22104},
+            "operation": "fixed-verified-commit-git-ssh-push",
+            "credentials": ["DEPLOY_SSH_KEY"],
+            "descriptors": ["root-verified-commit-input", "DEPLOY_SSH_KEY"],
+            "network_profile": "github-ssh-ken-website-fixed-target",
+            "firewall_phase": "github-ssh",
+            "request_subdirectory": "push",
+            "cgroup_scope": "ken-beehiiv-push-slot-{slot}.scope",
+            "executes_repository_code": False,
+        },
+        "separation": {
+            "overlap": "forbidden",
+            "generator_reaped_before_validation": True,
+            "generate_credentials_closed_before_push": True,
+            "request_subdirectories_disjoint": True,
+            "descriptor_sets_disjoint": True,
+            "network_profiles_disjoint": True,
+            "scope_names_include_slot": True,
+        },
+    }
+
+
+def validate_generated_diff(entries: Any) -> tuple[str, ...]:
+    if not isinstance(entries, list) or len(entries) > 10000:
+        raise TransportReject("generated_manifest_invalid")
+    seen: set[str] = set()
+    total = 0
+    accepted: list[str] = []
+    for entry in entries:
+        row = _exact_keys(entry, {"path", "type", "mode", "size", "sha256"}, "generated_entry_invalid")
+        path = row["path"]
+        if not isinstance(path, str) or not path or "\\" in path or "\x00" in path:
+            raise TransportReject("generated_path_invalid")
+        pure = PurePosixPath(path)
+        if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
+            raise TransportReject("generated_path_invalid")
+        canonical = pure.as_posix()
+        inside_images = canonical.startswith(GENERATED_DIRECTORY + "/") and canonical != GENERATED_DIRECTORY
+        if canonical not in GENERATED_EXACT_PATHS and not inside_images:
+            raise TransportReject("generated_path_invalid")
+        folded = canonical.casefold()
+        if folded in seen:
+            raise TransportReject("generated_path_duplicate")
+        seen.add(folded)
+        if row["type"] == "delete":
+            if not inside_images or row["mode"] is not None or row["size"] != 0 or row["sha256"] is not None:
+                raise TransportReject("generated_type_invalid")
+        else:
+            if row["type"] != "file" or row["mode"] != "100644":
+                raise TransportReject("generated_type_invalid")
+            if type(row["size"]) is not int or not 0 <= row["size"] <= GENERATED_FILE_MAX:
+                raise TransportReject("generated_size_invalid")
+            if not isinstance(row["sha256"], str) or not SHA256.fullmatch(row["sha256"]):
+                raise TransportReject("generated_digest_invalid")
+        total += row["size"]
+        if total > GENERATED_TOTAL_MAX:
+            raise TransportReject("generated_size_invalid")
+        accepted.append(canonical)
+    return tuple(accepted)
+
+
+def generated_diff_from_snapshots(baseline: Mapping[str, Mapping[str, Any]], generated: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for path in sorted(set(baseline) | set(generated), key=lambda item: (item.casefold(), item)):
+        before = baseline.get(path); after = generated.get(path)
+        if before == after:
+            continue
+        if after is None:
+            entries.append({"path": path, "type": "delete", "mode": None, "size": 0, "sha256": None})
+        else:
+            entries.append({"path": path, "type": "file", **after})
+    validate_generated_diff(entries)
+    return entries
+
+
+def orchestrate_trusted_generation(runtime: Any, slot: int) -> None:
+    """Run the split Beehiiv transaction through a narrow runtime adapter.
+
+    Dependency preparation is credential-free.  The generator is synchronously
+    reaped before root validation/sealing.  Generator descriptors are closed
+    before the distinct push identity can start.  Any exception invokes the
+    runtime's fail-closed process/descriptor/request cleanup boundary.
+    """
+    if slot not in ORDINARY_SLOTS:
+        raise TransportReject("trusted_generation_slot_invalid")
+    contract = trusted_generation_contract()
+    try:
+        runtime.prepare_dependencies(contract["dependency"])
+        runtime.start_generate(contract["generate"])
+        runtime.stop_and_reap("generate")
+        entries = runtime.generated_diff()
+        validate_generated_diff(entries)
+        if not entries:
+            runtime.close_generate_descriptors()
+            runtime.close_push_descriptors()
+            return
+        sealed = runtime.seal_commit_input(entries)
+        if sealed is None:
+            raise TransportReject("commit_input_unsealed")
+        runtime.close_generate_descriptors()
+        runtime.start_push(contract["push"], sealed)
+        runtime.stop_and_reap("push")
+        runtime.close_push_descriptors()
+    except Exception:
+        runtime.abort_cleanup()
+        raise
+
+
+def execute_action_mode(mode: str, *, slot: int, ordinary: Any, trusted_runtime: Any) -> None:
+    if mode in ORDINARY_DESCRIPTOR_CONTRACTS:
+        ordinary()
+        return
+    if mode == "trusted_generation" and trusted_runtime is not None:
+        orchestrate_trusted_generation(trusted_runtime, slot)
+        return
+    raise TransportReject("ordinary_mode_invalid")
+
+
+@dataclasses.dataclass
+class FrontendPhaseState:
+    order: tuple[str, ...] = (
+        "source-ready", "dependencies-ready", "secret-build", "builder-reaped",
+        "scan-passed", "uploader", "uploader-reaped", "registry-readback",
+        "token-destroyed", "deploy", "deploy-reaped", "cleaned",
+    )
+    index: int = 0
+    active_role: str | None = None
+
+    @property
+    def complete(self) -> bool:
+        return self.index == len(self.order) and self.active_role is None
+
+    def advance(self, phase: str) -> None:
+        if self.index >= len(self.order) or self.order[self.index] != phase:
+            raise TransportReject("frontend_phase_order_invalid")
+        transitions = {
+            "secret-build": "builder",
+            "builder-reaped": None,
+            "uploader": "uploader",
+            "uploader-reaped": None,
+            "deploy": "deploy",
+            "deploy-reaped": None,
+        }
+        if phase in {"uploader", "deploy"} and self.active_role is not None:
+            raise TransportReject("frontend_phase_overlap")
+        if phase in {"builder-reaped", "uploader-reaped", "deploy-reaped"}:
+            expected = {"builder-reaped": "builder", "uploader-reaped": "uploader", "deploy-reaped": "deploy"}[phase]
+            if self.active_role not in {expected, None}:  # replayed receipt-only unit tests may not call start_role.
+                raise TransportReject("frontend_phase_overlap")
+        if phase in transitions:
+            self.active_role = transitions[phase]
+        self.index += 1
+
+    def start_role(self, role: str) -> None:
+        if role not in {"builder", "uploader", "deploy"} or self.active_role is not None:
+            raise TransportReject("frontend_phase_overlap")
+        allowed_index = {"builder": 2, "uploader": 5, "deploy": 9}[role]
+        if self.index != allowed_index:
+            raise TransportReject("frontend_phase_order_invalid")
+        self.active_role = role
+
+    def stop_role(self, role: str) -> None:
+        if self.active_role != role:
+            raise TransportReject("frontend_phase_overlap")
+        self.active_role = None
+
+
+def frontend_phase_directory(request_id: str, phase: str) -> tuple[Path, int]:
+    if not SAFE_REQUEST_ID.fullmatch(request_id) or phase not in FRONTEND_PHASES:
+        raise TransportReject("frontend_phase_invalid")
+    return Path(f"/run/ken-actions-deploy-phases/{request_id}-{phase}"), FRONTEND_PHASES[phase][2]
+
+
+def _frontend_release_helper_path() -> Path:
+    local = _repo_root() / "bin/ken-frontend-production-release"
+    return local if local.is_file() and not local.is_symlink() else Path(FRONTEND_RELEASE_HELPER_PATH)
+
+
+def load_frontend_receipt_helper() -> Any:
+    path = _frontend_release_helper_path()
+    fd = None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+        status = os.fstat(fd)
+        if not stat.S_ISREG(status.st_mode) or status.st_size < 1 or status.st_size > 2 * 1024 * 1024:
+            raise OSError("receipt helper is not a bounded regular file")
+        chunks = []
+        remaining = status.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 65536))
+            if not chunk:
+                raise OSError("short receipt helper read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise OSError("receipt helper grew during read")
+        payload = b"".join(chunks)
+    except OSError as exc:
+        raise TransportReject("frontend_receipt_helper_invalid") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+    local = _repo_root().name == "github-actions"
+    if (not stat.S_ISREG(status.st_mode) or status.st_mode & 0o022
+            or (not local and status.st_uid != 0)
+            or hashlib.sha256(payload).hexdigest() != TASK6_RECEIPT_HELPER_SHA256
+            or hashlib.sha1(f"blob {len(payload)}\0".encode() + payload).hexdigest() != TASK6_RECEIPT_HELPER_BLOB_SHA
+            or len({TASK6_RECEIPT_SOURCE_COMMIT_SHA, TASK6_RECEIPT_SOURCE_TREE_SHA, TASK6_RECEIPT_HELPER_BLOB_SHA}) != 3):
+        raise TransportReject("frontend_receipt_helper_invalid")
+    try:
+        name = f"ken_frontend_receipt_{TASK6_RECEIPT_HELPER_SHA256[:16]}"
+        module = types.ModuleType(name)
+        module.__file__ = "<verified-task6-receipt-helper>"
+        module.__package__ = ""
+        exec(compile(payload, module.__file__, "exec", dont_inherit=True), module.__dict__)
+    except Exception as exc:
+        raise TransportReject("frontend_receipt_helper_invalid") from exc
+    if (tuple(module.RECEIPT_PHASES) != FRONTEND_RECEIPT_PHASES
+            or dict(module.RECEIPT_ACTOR_UIDS) != FRONTEND_RECEIPT_ACTOR_UIDS
+            or {key: tuple(value) for key, value in module.RECEIPT_FIREWALL_PHASES.items()} != FRONTEND_RECEIPT_FIREWALL_PHASES
+            or module.RECEIPT_CONTRACT_SHA256 != TASK6_RECEIPT_CONTRACT_SHA256):
+        raise TransportReject("frontend_receipt_helper_invalid")
+    return module
+
+
+def require_frontend_receipt_transport(action: Mapping[str, Any]) -> Any:
+    helper = load_frontend_receipt_helper()
+    if not isinstance(action, Mapping) or action.get("action_id") != "ken-frontend-production-release" or action.get("input_mode") != "production_build":
+        raise TransportReject("frontend_receipt_action_invalid")
+    build = action.get("production_build")
+    executor = action.get("executor")
+    if not isinstance(build, Mapping) or not isinstance(executor, Mapping):
+        raise TransportReject("frontend_receipt_action_invalid")
+    expected_firewall = {
+        name: {"uid": uid, "targets": list(helper.FRONTEND_FIREWALL_PHASES[name]["targets"])}
+        for name, uid in FRONTEND_FIREWALL_PHASES
+    }
+    digests = binding_digests()
+    receipt_contract = build.get("receipt_contract")
+    expected_receipt_contract = {**helper.RECEIPT_CONTRACT, "contract_sha256": helper.RECEIPT_CONTRACT_SHA256}
+    if (receipt_contract != expected_receipt_contract
+            or build.get("firewall_phases") != expected_firewall
+            or build.get("phase_transport_sha256") != digests["frontend_phase_transport_sha256"]
+            or build.get("deploy_contract_sha256") != digests["frontend_deploy_contract_sha256"]
+            or executor.get("operation_binding_sha256") != digests["frontend_operation_binding_sha256"]
+            or executor.get("systemd_transaction_transport_sha256") != digests["ordinary_systemd_transaction_transport_sha256"]):
+        raise TransportReject("frontend_receipt_binding_invalid")
+    return helper
+
+
+def _atomic_bytes(path: Path, payload: bytes, *, mode: int, replace: bool = False) -> None:
+    if (not payload or len(payload) > 65536 or path.is_symlink()
+            or (path.exists() and not replace)):
+        raise TransportReject("frontend_receipt_output_invalid")
+    parent = path.parent
+    status = parent.stat()
+    if parent.is_symlink() or not stat.S_ISDIR(status.st_mode) or status.st_uid != os.geteuid() or stat.S_IMODE(status.st_mode) != 0o700:
+        raise TransportReject("frontend_receipt_output_invalid")
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.new")
+    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), mode)
+    try:
+        view = memoryview(payload)
+        written = 0
+        while written < len(view):
+            count = os.write(fd, view[written:])
+            if type(count) is not int or count <= 0:
+                raise OSError("short write")
+            written += count
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(temporary, path)
+    directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+class FrontendReceiptStore:
+    """Root-owned, fixed-path adapter around the frozen Task 6 receipt API."""
+
+    def __init__(self, state_root: Path, request_id: str, source_sha: str, policy_path: Path, helper: Any):
+        if not SAFE_REQUEST_ID.fullmatch(request_id) or not SHA1.fullmatch(source_sha):
+            raise TransportReject("frontend_receipt_identity_invalid")
+        self.state_root = state_root
+        self.request_id = request_id
+        self.source_sha = source_sha
+        self.policy_path = policy_path
+        self.helper = helper
+        self.root = state_root / "frontend-receipts" / request_id
+        self.inputs = self.root / "inputs"
+        self.observations = self.root / "observations"
+        self.authorities = self.root / "authorities"
+        self.receipts = self.root / "receipts"
+        self.state_path = self.root / "state.json"
+
+    def initialize(self) -> None:
+        if self.root.exists() or self.root.is_symlink():
+            raise TransportReject("frontend_receipt_state_exists")
+        parent = self.root.parent
+        if not parent.exists():
+            parent.mkdir(mode=0o700)
+        parent_status = parent.stat()
+        if (parent.is_symlink() or not stat.S_ISDIR(parent_status.st_mode)
+                or parent_status.st_uid != os.geteuid() or stat.S_IMODE(parent_status.st_mode) != 0o700):
+            raise TransportReject("frontend_receipt_state_invalid")
+        self.root.mkdir(mode=0o700)
+        for path in (self.inputs, self.observations, self.authorities, self.receipts):
+            path.mkdir(mode=0o700)
+        self._write_state(0)
+
+    def initialize_or_recover(self) -> int:
+        if not self.root.exists() and not self.root.is_symlink():
+            self.initialize()
+            return 0
+        return self.recovery_ordinal()
+
+    def _write_state(self, next_ordinal: int) -> None:
+        if type(next_ordinal) is not int or not 0 <= next_ordinal <= len(FRONTEND_RECEIPT_PHASES):
+            raise TransportReject("frontend_receipt_state_invalid")
+        _atomic_bytes(self.state_path, json.dumps({
+            "schema_version": 1, "request_id": self.request_id, "source_sha": self.source_sha,
+            "next_ordinal": next_ordinal,
+        }, sort_keys=True, separators=(",", ":")).encode(), mode=0o600, replace=True)
+
+    def _read_state(self) -> int:
+        try:
+            status = self.state_path.stat()
+            if (self.state_path.is_symlink() or not stat.S_ISREG(status.st_mode)
+                    or status.st_uid != os.geteuid() or status.st_nlink != 1
+                    or stat.S_IMODE(status.st_mode) != 0o600 or status.st_size > 4096):
+                raise TransportReject("frontend_receipt_state_invalid")
+            raw = self.state_path.read_bytes()
+        except OSError as exc:
+            raise TransportReject("frontend_receipt_state_invalid") from exc
+        value = _exact_keys(strict_json(raw, maximum=4096), {
+            "schema_version", "request_id", "source_sha", "next_ordinal",
+        }, "frontend_receipt_state_invalid")
+        ordinal = value["next_ordinal"]
+        if (type(value["schema_version"]) is not int or value["schema_version"] != 1
+                or value["request_id"] != self.request_id or value["source_sha"] != self.source_sha
+                or type(ordinal) is not int or not 0 <= ordinal <= len(FRONTEND_RECEIPT_PHASES)):
+            raise TransportReject("frontend_receipt_state_invalid")
+        return ordinal
+
+    def phase_data_path(self, phase: str) -> Path:
+        if phase not in FRONTEND_RECEIPT_PHASES:
+            raise TransportReject("frontend_receipt_phase_invalid")
+        return self.inputs / f"{FRONTEND_RECEIPT_PHASES.index(phase):02d}-{phase}.data"
+
+    def observation_paths(self, phase: str) -> tuple[Path, ...]:
+        if phase not in FRONTEND_RECEIPT_PHASES:
+            raise TransportReject("frontend_receipt_phase_invalid")
+        names = FRONTEND_RECEIPT_FIREWALL_PHASES[phase] or ("none",)
+        return tuple(self.observations / f"{FRONTEND_RECEIPT_PHASES.index(phase):02d}-{phase}-{index}-{name}.json"
+                     for index, name in enumerate(names))
+
+    def authority_path(self, phase: str) -> Path:
+        return self.authorities / f"{FRONTEND_RECEIPT_PHASES.index(phase):02d}-{phase}.json"
+
+    def receipt_path(self, phase: str) -> Path:
+        return self.receipts / f"{FRONTEND_RECEIPT_PHASES.index(phase):02d}-{phase}.json"
+
+    def seal(self, phase: str, evidence: Mapping[str, Any], observed_monotonic_ns: int) -> None:
+        ordinal = self._read_state()
+        if ordinal >= len(FRONTEND_RECEIPT_PHASES) or FRONTEND_RECEIPT_PHASES[ordinal] != phase:
+            raise TransportReject("frontend_receipt_order_invalid")
+        authority = self.authority_path(phase)
+        try:
+            encoded = self.helper.canonical_phase_authority(
+                self.request_id, self.source_sha, phase, dict(evidence), observed_monotonic_ns,
+            )
+            if authority.exists() or authority.is_symlink():
+                if authority.is_symlink() or authority.read_bytes() != encoded:
+                    raise TransportReject("frontend_receipt_authority_conflict")
+            else:
+                _atomic_bytes(authority, encoded, mode=0o600)
+            previous = None if ordinal == 0 else self.receipt_path(FRONTEND_RECEIPT_PHASES[ordinal - 1])
+            self.helper.seal_phase_receipt_from_fds(
+                request_id=self.request_id, source_sha=self.source_sha, phase=phase,
+                data_fd=os.open(self.phase_data_path(phase), os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)),
+                authority_fd=os.open(authority, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)),
+                observation_fds=[os.open(path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)) for path in self.observation_paths(phase)],
+                policy_fd=os.open(self.policy_path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)),
+                previous_receipt_fd=None if previous is None else os.open(previous, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)),
+                output=self.receipt_path(phase),
+            )
+            self._write_state(ordinal + 1)
+        except Exception as exc:
+            raise TransportReject("frontend_receipt_seal_failed") from exc
+
+    def recover_pending_phase(self, phase: str) -> tuple[Mapping[str, Any], int] | None:
+        authority = self.authority_path(phase)
+        data_path = self.phase_data_path(phase)
+        observation_paths = self.observation_paths(phase)
+        has_partial = (authority.exists() or authority.is_symlink() or data_path.exists() or data_path.is_symlink()
+                       or any(path.exists() or path.is_symlink() for path in observation_paths))
+        if not has_partial:
+            return None
+        if (not authority.is_file() or authority.is_symlink() or not data_path.is_file() or data_path.is_symlink()
+                or any(not path.is_file() or path.is_symlink() for path in observation_paths)):
+            raise TransportReject("frontend_receipt_recovery_ambiguous")
+        try:
+            authority_fd = os.open(authority, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+            data_fd = os.open(data_path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                authority_data = self.helper._read_regular_fd(
+                    authority_fd, owner_uid=self.helper.RECEIPT_OWNER_UID,
+                    maximum=self.helper.PHASE_DATA_MAX, code="phase_authority_file_invalid",
+                )
+                phase_data = self.helper.parse_phase_data(
+                    self.helper._read_regular_fd(
+                        data_fd, owner_uid=self.helper.RECEIPT_ACTOR_UIDS[phase],
+                        maximum=self.helper.PHASE_DATA_MAX, code="phase_data_file_invalid",
+                    ), request_id=self.request_id, source_sha=self.source_sha, phase=phase,
+                )
+            finally:
+                os.close(authority_fd)
+                os.close(data_fd)
+            parsed = self.helper.parse_phase_authority(
+                authority_data, request_id=self.request_id, source_sha=self.source_sha, phase=phase,
+            )
+            if parsed["evidence"] != phase_data["evidence"]:
+                raise TransportReject("frontend_receipt_recovery_ambiguous")
+            return parsed["evidence"], parsed["observed_monotonic_ns"]
+        except (OSError, Exception) as exc:
+            if isinstance(exc, TransportReject):
+                raise
+            raise TransportReject("frontend_receipt_recovery_ambiguous") from exc
+
+    def verify_complete(self) -> None:
+        if self._read_state() != len(FRONTEND_RECEIPT_PHASES):
+            raise TransportReject("frontend_receipt_chain_incomplete")
+        try:
+            self.helper.verify_receipt_chain(
+                [self.receipt_path(phase) for phase in FRONTEND_RECEIPT_PHASES],
+                request_id=self.request_id, source_sha=self.source_sha,
+                policy_fd=os.open(self.policy_path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)),
+                authority_fds=[os.open(self.authority_path(phase), os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)) for phase in FRONTEND_RECEIPT_PHASES],
+            )
+        except Exception as exc:
+            raise TransportReject("frontend_receipt_chain_invalid") from exc
+
+    def recovery_ordinal(self) -> int:
+        if not self.state_path.exists() and not self.state_path.is_symlink():
+            expected = {path.name: path for path in (self.inputs, self.observations, self.authorities, self.receipts)}
+            actual = {path.name: path for path in self.root.iterdir()}
+            if not set(actual) <= set(expected):
+                raise TransportReject("frontend_receipt_recovery_invalid")
+            for name, path in actual.items():
+                status = path.stat()
+                if (path.is_symlink() or not stat.S_ISDIR(status.st_mode) or status.st_uid != os.geteuid()
+                        or stat.S_IMODE(status.st_mode) != 0o700 or any(path.iterdir())):
+                    raise TransportReject("frontend_receipt_recovery_invalid")
+            for name, path in expected.items():
+                if name not in actual:
+                    path.mkdir(mode=0o700)
+            self._write_state(0)
+        advisory = self._read_state()
+        expected_names = [self.receipt_path(phase).name for phase in FRONTEND_RECEIPT_PHASES]
+        actual_receipts = {path.name for path in self.receipts.iterdir()}
+        count = 0
+        while count < len(expected_names) and expected_names[count] in actual_receipts:
+            count += 1
+        if actual_receipts != set(expected_names[:count]):
+            raise TransportReject("frontend_receipt_recovery_invalid")
+        expected_authorities = [self.authority_path(phase).name for phase in FRONTEND_RECEIPT_PHASES]
+        actual_authorities = {path.name for path in self.authorities.iterdir()}
+        allowed_authorities = set(expected_authorities[:count])
+        if count < len(expected_authorities):
+            allowed_authorities.add(expected_authorities[count])
+        if not set(expected_authorities[:count]) <= actual_authorities or not actual_authorities <= allowed_authorities:
+            raise TransportReject("frontend_receipt_recovery_invalid")
+        if advisory not in ({count} if count == 0 else {count - 1, count}):
+            raise TransportReject("frontend_receipt_recovery_invalid")
+        try:
+            policy_fd = os.open(self.policy_path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                policy_sha256 = self.helper._policy_sha256_from_fd(policy_fd)
+            finally:
+                os.close(policy_fd)
+            previous_digest = None
+            previous_completed = None
+            boot_id = None
+            for ordinal, phase in enumerate(FRONTEND_RECEIPT_PHASES[:count]):
+                receipt_fd = os.open(self.receipt_path(phase), os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+                authority_fd = os.open(self.authority_path(phase), os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+                try:
+                    data, record = self.helper._read_receipt_fd(
+                        receipt_fd, request_id=self.request_id, source_sha=self.source_sha, phase=phase,
+                        owner_uid=self.helper.RECEIPT_OWNER_UID, owner_gid=self.helper.RECEIPT_OWNER_GID,
+                        policy_sha256=policy_sha256,
+                    )
+                    authority_data = self.helper._read_regular_fd(
+                        authority_fd, owner_uid=self.helper.RECEIPT_OWNER_UID,
+                        maximum=self.helper.PHASE_DATA_MAX, code="phase_authority_file_invalid",
+                    )
+                finally:
+                    os.close(receipt_fd)
+                    os.close(authority_fd)
+                authority = self.helper.parse_phase_authority(
+                    authority_data, request_id=self.request_id, source_sha=self.source_sha, phase=phase,
+                )
+                observation = record["root_observation"]
+                if (record["ordinal"] != ordinal or record["previous_receipt_sha256"] != previous_digest
+                        or record["phase_authority_sha256"] != hashlib.sha256(authority_data).hexdigest()
+                        or record["evidence"] != authority["evidence"]
+                        or (boot_id is not None and observation["boot_id"] != boot_id)
+                        or (previous_completed is not None and observation["started_observed_monotonic_ns"] <= previous_completed)):
+                    raise TransportReject("frontend_receipt_recovery_invalid")
+                boot_id = observation["boot_id"]
+                previous_completed = observation["completed_observed_monotonic_ns"]
+                previous_digest = hashlib.sha256(data).hexdigest()
+            if count < len(FRONTEND_RECEIPT_PHASES) and expected_authorities[count] in actual_authorities:
+                phase = FRONTEND_RECEIPT_PHASES[count]
+                authority_fd = os.open(self.authority_path(phase), os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+                try:
+                    authority_data = self.helper._read_regular_fd(
+                        authority_fd, owner_uid=self.helper.RECEIPT_OWNER_UID,
+                        maximum=self.helper.PHASE_DATA_MAX, code="phase_authority_file_invalid",
+                    )
+                finally:
+                    os.close(authority_fd)
+                self.helper.parse_phase_authority(authority_data, request_id=self.request_id, source_sha=self.source_sha, phase=phase)
+        except (OSError, Exception) as exc:
+            if isinstance(exc, TransportReject):
+                raise
+            raise TransportReject("frontend_receipt_recovery_invalid") from exc
+        if advisory != count:
+            self._write_state(count)
+        if count == len(FRONTEND_RECEIPT_PHASES):
+            self.verify_complete()
+        return count
+
+
+def orchestrate_frontend_receipts(store: FrontendReceiptStore, runtime: Any) -> None:
+    """Resume and seal the eight operational phases under root authority."""
+    ordinal = store.initialize_or_recover()
+    if ordinal == len(FRONTEND_RECEIPT_PHASES):
+        store.verify_complete()
+        return
+    if ordinal > len(FRONTEND_RECEIPT_PHASES) - 1:
+        raise TransportReject("frontend_receipt_recovery_invalid")
+    for phase in FRONTEND_RECEIPT_PHASES[ordinal:-1]:
+        recovered = store.recover_pending_phase(phase)
+        evidence, observed_monotonic_ns = recovered if recovered is not None else runtime.execute_phase(phase, store)
+        store.seal(phase, evidence, observed_monotonic_ns)
+    if store.recovery_ordinal() != len(FRONTEND_RECEIPT_PHASES) - 1:
+        raise TransportReject("frontend_receipt_chain_incomplete")
+
+
+def finalize_frontend_transaction(scheduler: LeaseScheduler, runtime: Any, lease: LeaseHandle,
+                                  store: FrontendReceiptStore) -> None:
+    """Commit cleanup, verification and lease release in that exact order."""
+    if store.recovery_ordinal() != len(FRONTEND_RECEIPT_PHASES) - 1:
+        raise TransportReject("frontend_receipt_chain_incomplete")
+    if runtime.stop_and_reap(lease) is not True:
+        raise TransportReject("transaction_reap_failed")
+    if runtime.remove_request(lease) is not True:
+        raise TransportReject("transaction_cleanup_failed")
+    evidence, observed_monotonic_ns = runtime.execute_cleanup(store)
+    store.seal("cleanup", evidence, observed_monotonic_ns)
+    store.verify_complete()
+    scheduler.release(lease, cleanup_verified=True)
+
+
+def _validated_frontend_phase_directory(request_id: str, phase: str) -> Path:
+    path, identity = frontend_phase_directory(request_id, phase)
+    if path.is_symlink():
+        raise TransportReject("frontend_phase_directory_invalid")
+    status = path.stat()
+    marker = path / ".ken-frontend-phase"
+    output = path / "output"
+    if (not stat.S_ISDIR(status.st_mode) or status.st_uid != 0 or status.st_gid != identity or stat.S_IMODE(status.st_mode) != 0o750
+            or marker.is_symlink() or not marker.is_file() or marker.stat().st_uid != 0 or marker.stat().st_mode & 0o022
+            or output.is_symlink() or not output.is_dir() or output.stat().st_uid != identity or output.stat().st_gid != identity
+            or stat.S_IMODE(output.stat().st_mode) != 0o700):
+        raise TransportReject("frontend_phase_directory_invalid")
+    return path
+
+
+def _repo_root() -> Path:
+    path = Path(__file__).resolve()
+    if path.parent.name == "bin" and path.parent.parent.name == "github-actions":
+        return path.parent.parent
+    return Path("/usr/local/libexec/ken-actions")
+
+
+def _artifact_hash(relative: str) -> str:
+    root = _repo_root()
+    path = root / relative if root.name == "github-actions" else Path(TRANSPORT_PATH if relative == "bin/ken-actions-deploy-transaction" else f"/etc/systemd/system/{Path(relative).name}")
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise TransportReject("transport_artifact_missing") from exc
+
+
+def binding_contracts() -> dict[str, Any]:
+    coordinator = _artifact_hash("bin/ken-actions-deploy-transaction")
+    units = {
+        "ordinary_1": _artifact_hash("systemd/ken-actions-deploy-transaction-1.service"),
+        "ordinary_2": _artifact_hash("systemd/ken-actions-deploy-transaction-2.service"),
+        "builder": _artifact_hash("systemd/ken-frontend-production-builder@.service"),
+        "uploader": _artifact_hash("systemd/ken-frontend-source-map-uploader@.service"),
+        "deploy": _artifact_hash("systemd/ken-frontend-deploy-executor@.service"),
+    }
+    trusted = trusted_generation_contract()
+    return {
+        "ordinary_systemd_transaction_transport_sha256": {
+            "version": 1, "coordinator_sha256": coordinator,
+            "units": {"slot-1": units["ordinary_1"], "slot-2": units["ordinary_2"]},
+            "slots": [1, 2], "modes": ["artifact", "source_commit", "registry"],
+            "request_id": "64-lowercase-hex-root-created",
+            "firewall_phases": {key: [list(item) for item in value] for key, value in ORDINARY_FIREWALL_PHASES.items()},
+            "writer_preference": True, "recovery": "stop-reap-cgroup-empty-cleanup-then-release",
+        },
+        "frontend_operation_binding_sha256": {
+            "version": 1, "action_id": "ken-frontend-production-release", "coordinator_sha256": coordinator,
+            "source": "broker-authenticated-pinned-source", "runner_output": "stable-code-only",
+            "registry": "ghcr.io/ken-technology/ken-frontend", "derived_tag": "sha-{verified_oidc_sha}",
+            "task6_receipt_source_commit_sha": TASK6_RECEIPT_SOURCE_COMMIT_SHA,
+            "task6_receipt_source_tree_sha": TASK6_RECEIPT_SOURCE_TREE_SHA,
+            "task6_receipt_helper_blob_sha": TASK6_RECEIPT_HELPER_BLOB_SHA,
+            "task6_receipt_helper_sha256": TASK6_RECEIPT_HELPER_SHA256,
+            "receipt_contract_sha256": TASK6_RECEIPT_CONTRACT_SHA256,
+            "availability": "receipt-bound-awaiting-task6-final-policy-and-task4-live-authority",
+        },
+        "frontend_phase_transport_sha256": {
+            "version": 1, "coordinator_sha256": coordinator,
+            "units": {"builder": units["builder"], "uploader": units["uploader"]},
+            "order": list(FrontendPhaseState().order), "exclusive_slots": [1, 2],
+            "firewall_phases": [list(item) for item in FRONTEND_FIREWALL_PHASES],
+            "receipt_phases": list(FRONTEND_RECEIPT_PHASES),
+            "receipt_actor_uids": FRONTEND_RECEIPT_ACTOR_UIDS,
+            "receipt_firewall_phases": {key: list(value) for key, value in FRONTEND_RECEIPT_FIREWALL_PHASES.items()},
+            "availability": "receipt-bound-awaiting-task6-final-policy-and-task4-live-authority",
+            "no_overlap": ["builder:uploader", "builder:deploy", "uploader:deploy", "ordinary:any"],
+        },
+        "frontend_deploy_contract_sha256": {
+            "version": 1, "coordinator_sha256": coordinator, "unit_sha256": units["deploy"],
+            "input": "broker-durable-verified-registry-digest", "token_destroyed_before_start": True,
+            "fallbacks": [], "executor_uid": 22203, "slice": "ken-actions-deploy-executor.slice",
+            "receipt_phase": "deploy-health", "cleanup_receipt_required": True,
+        },
+        "trusted_generation_dependency_acquisition_sha256": trusted["dependency"],
+        "trusted_generation_generated_paths_manifest_sha256": trusted["commit_input"],
+        "trusted_generation_commit_input_contract_sha256": {
+            "version": 1, "parent": "authenticated-protected-main-sha", "diff": trusted["commit_input"],
+            "author": "ken-blog-sync[bot] <blog-sync@getken.ai>", "message": "content: sync beehiiv posts",
+            "seal": "sha256-canonical-json-read-only-fd", "repository_code_execution": False,
+        },
+        "trusted_generation_cgroup_contract_sha256": {
+            "version": 1, "parent": "ken-actions-deploy.slice", "slots": [1, 2],
+            "generate_scope": trusted["generate"]["cgroup_scope"], "push_scope": trusted["push"]["cgroup_scope"],
+            "distinct_global_unit_names": True, "overlap": "forbidden",
+        },
+        "trusted_generation_phase_transport_sha256": trusted,
+    }
+
+
+def contract_sha256(contract: Any) -> str:
+    return hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
+
+
+def binding_digests() -> dict[str, str]:
+    return {name: contract_sha256(contract) for name, contract in binding_contracts().items()}
+
+
+def _regular_root_file(path: Path, *, maximum: int = 2 * 1024 * 1024) -> bytes:
+    if path.is_symlink():
+        raise TransportReject("root_file_invalid")
+    status = path.stat()
+    if not stat.S_ISREG(status.st_mode) or status.st_uid != 0 or status.st_mode & 0o022 or status.st_size > maximum:
+        raise TransportReject("root_file_invalid")
+    return path.read_bytes()
+
+
+def _request_directory(root: Path, request_id: str) -> Path:
+    if not SAFE_REQUEST_ID.fullmatch(request_id):
+        raise TransportReject("request_id_invalid")
+    request = root / "requests" / request_id
+    root_real = (root / "requests").resolve(strict=True)
+    request_real = request.resolve(strict=True)
+    if request.is_symlink() or request_real.parent != root_real or not (request_real / ".ken-actions-request").is_file():
+        raise TransportReject("request_directory_invalid")
+    status = request_real.stat()
+    if status.st_uid != 0 or stat.S_IMODE(status.st_mode) != 0o700:
+        raise TransportReject("request_directory_invalid")
+    return request_real
+
+
+def _load_request(root: Path, request_id: str) -> tuple[Path, TransportRequest]:
+    request_dir = _request_directory(root, request_id)
+    raw = _regular_root_file(request_dir / "request.json", maximum=65536)
+    request = TransportRequest.parse(raw)
+    if request.request_id != request_id:
+        raise TransportReject("request_identity_mismatch")
+    return request_dir, request
+
+
+def _load_policy(path: Path, expected_sha256: str) -> Mapping[str, Any]:
+    raw = _regular_root_file(path, maximum=2 * 1024 * 1024)
+    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise TransportReject("policy_digest_mismatch")
+    policy = strict_yaml(path)
+    _exact_keys(policy, {
+        "schema_version", "policy_version", "issuer", "discovery_url", "jwks_uri", "organization", "protocol", "jwks",
+        "github_api", "artifact", "source_commit", "credentials", "deploy_leases", "firewall_phase_interface", "classes", "actions",
+    }, "policy_schema_invalid")
+    return policy
+
+
+def _action(policy: Mapping[str, Any], action_id: str) -> Mapping[str, Any]:
+    rows = [row for row in policy["actions"] if isinstance(row, dict) and row.get("action_id") == action_id]
+    if len(rows) != 1:
+        raise TransportReject("action_policy_invalid")
+    return rows[0]
+
+
+def _status_write(state_root: Path, request_id: str, status: str, reason: str) -> None:
+    if (not SAFE_REQUEST_ID.fullmatch(request_id) or status not in {"succeeded", "failed"}
+            or not SAFE_REASON.fullmatch(reason)):
+        raise TransportReject("status_invalid")
+    status_root = state_root / "transport-status"
+    if not status_root.exists():
+        status_root.mkdir(mode=0o700)
+    root_status = status_root.stat()
+    if (status_root.is_symlink() or not stat.S_ISDIR(root_status.st_mode)
+            or root_status.st_uid != os.geteuid() or stat.S_IMODE(root_status.st_mode) != 0o700):
+        raise TransportReject("status_invalid")
+    path = status_root / f"{request_id}.json"
+    payload = json.dumps({"version": 1, "status": status, "reason_code": reason}, sort_keys=True, separators=(",", ":")).encode()
+    _atomic_bytes(path, payload, mode=0o600, replace=True)
+
+
+def _quiet_run(argv: Sequence[str], *, timeout: int, env: Mapping[str, str] | None = None, pass_fds: Sequence[int] = ()) -> None:
+    result = subprocess.run(list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            env=dict(env or {"HOME": "/nonexistent", "LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"}),
+                            pass_fds=tuple(pass_fds), timeout=timeout, check=False)
+    if result.returncode != 0:
+        raise TransportReject("child_operation_failed")
+
+
+def _atomic_json(path: Path, value: Mapping[str, Any], *, mode: int = 0o600) -> None:
+    parent = path.parent
+    if parent.is_symlink() or not parent.is_dir():
+        raise TransportReject("authority_directory_invalid")
+    parent_status = parent.stat()
+    if parent_status.st_uid != 0 or stat.S_IMODE(parent_status.st_mode) != 0o700:
+        raise TransportReject("authority_directory_invalid")
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.new")
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), mode)
+    try:
+        os.write(fd, payload); os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(temporary, path)
+    parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        os.fsync(parent_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def _firewall(request_dir: Path, request_id: str, profile: str, phase: str, state: str) -> None:
+    if (state not in {"activate", "deactivate"} or (profile, phase) not in ALLOWED_FIREWALL_PHASES
+            or not SAFE_ACTION_ID.fullmatch(profile.replace("_", "-")) or not SAFE_ACTION_ID.fullmatch(phase.replace("_", "-"))):
+        raise TransportReject("firewall_request_invalid")
+    if not SAFE_REQUEST_ID.fullmatch(request_id):
+        raise TransportReject("firewall_request_invalid")
+    descriptor = {"schema_version": 1, "request_id": request_id, "profile": profile, "phase": phase}
+    request_file = FIREWALL_REQUEST_ROOT / f"{request_id}.json"
+    active_marker = request_dir / ".firewall-phase.json"
+    if state == "activate":
+        if request_file.exists() or request_file.is_symlink() or active_marker.exists() or active_marker.is_symlink():
+            raise TransportReject("firewall_phase_overlap")
+        _atomic_json(request_file, descriptor)
+        _atomic_json(active_marker, descriptor)
+    else:
+        try:
+            current = _exact_keys(strict_json(active_marker.read_bytes(), maximum=4096), set(descriptor), "firewall_marker_invalid")
+        except OSError as exc:
+            raise TransportReject("firewall_marker_invalid") from exc
+        if current != descriptor:
+            raise TransportReject("firewall_marker_invalid")
+    _quiet_run([FIREWALL_HELPER, "phase", "--request-id", request_id, "--profile", profile, "--phase", phase, "--state", state], timeout=30)
+    if state == "deactivate":
+        try:
+            active_marker.unlink()
+        except FileNotFoundError as exc:
+            raise TransportReject("firewall_marker_invalid") from exc
+
+
+def _recover_firewall(request_dir: Path, request_id: str) -> bool:
+    marker = request_dir / ".firewall-phase.json"
+    if not marker.exists() and not marker.is_symlink():
+        return True
+    try:
+        value = _exact_keys(strict_json(marker.read_bytes(), maximum=4096), {
+            "schema_version", "request_id", "profile", "phase",
+        }, "firewall_marker_invalid")
+        if type(value["schema_version"]) is not int or value["schema_version"] != 1 or value["request_id"] != request_id:
+            return False
+        _firewall(request_dir, request_id, str(value["profile"]), str(value["phase"]), "deactivate")
+        return True
+    except (OSError, TransportReject):
+        return False
+
+
+def _systemctl_property(unit: str, name: str) -> str:
+    result = subprocess.run([SYSTEMCTL, "show", unit, f"--property={name}", "--value"], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env={"LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+                            timeout=15, check=False)
+    if result.returncode != 0 or len(result.stdout) > 4096:
+        raise TransportReject("systemd_readback_failed")
+    try:
+        return result.stdout.decode("utf-8").strip()
+    except UnicodeError as exc:
+        raise TransportReject("systemd_readback_failed") from exc
+
+
+def _stop_and_verify_unit(unit: str) -> bool:
+    result = subprocess.run([SYSTEMCTL, "stop", unit], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            env={"LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"}, timeout=60, check=False)
+    try:
+        load = _systemctl_property(unit, "LoadState")
+        active = _systemctl_property(unit, "ActiveState")
+        control_group = _systemctl_property(unit, "ControlGroup")
+    except TransportReject:
+        return False
+    if load == "not-found":
+        return not control_group
+    return result.returncode == 0 and active in {"inactive", "failed"} and not control_group
+
+
+def _start_fixed_unit(unit: str, expected_slice: str, request_id: str | None = None) -> None:
+    if _systemctl_property(unit, "Slice") != expected_slice:
+        raise TransportReject("systemd_slice_mismatch")
+    _quiet_run([SYSTEMCTL, "start", unit], timeout=3600)
+    cgroup = _systemctl_property(unit, "ControlGroup")
+    if cgroup:
+        validate_cgroup(cgroup, expected_slice)
+    if request_id and not SAFE_REQUEST_ID.fullmatch(request_id):
+        raise TransportReject("request_id_invalid")
+
+
+class LiveRecoveryRuntime:
+    def __init__(self, state_root: Path):
+        self.state_root = state_root
+
+    def stop_and_reap(self, lease: LeaseHandle) -> bool:
+        units = [ORDINARY_SLOTS[slot][0] for slot in lease.slots]
+        units.extend(template.format(request_id=lease.request_id) for template, _, _ in FRONTEND_PHASES.values())
+        for slot in lease.slots:
+            units.extend((f"ken-beehiiv-generate-slot-{slot}.scope", f"ken-beehiiv-push-slot-{slot}.scope"))
+        results = [_stop_and_verify_unit(unit) for unit in units]
+        return all(results)
+
+    def cleanup_request(self, lease: LeaseHandle) -> bool:
+        try:
+            request_path = self.state_root / "requests" / lease.request_id
+            if not request_path.exists() and not request_path.is_symlink():
+                receipt_root = self.state_root / "frontend-receipts" / lease.request_id
+                if lease.kind != "production_build" or (not receipt_root.exists() and not receipt_root.is_symlink()):
+                    return True
+                identity = _exact_keys(strict_json((receipt_root / "state.json").read_bytes(), maximum=4096), {
+                    "schema_version", "request_id", "source_sha", "next_ordinal",
+                }, "frontend_receipt_state_invalid")
+                helper = load_frontend_receipt_helper()
+                receipts = FrontendReceiptStore(self.state_root, lease.request_id, str(identity["source_sha"]), DEFAULT_POLICY, helper)
+                ordinal = receipts.recovery_ordinal()
+                if ordinal < len(FRONTEND_RECEIPT_PHASES):
+                    shutil.rmtree(receipt_root)
+                return True
+            request = _request_directory(self.state_root, lease.request_id)
+            if not _recover_firewall(request, lease.request_id):
+                return False
+            if lease.kind == "production_build":
+                _, parsed = _load_request(self.state_root, lease.request_id)
+                policy = _load_policy(DEFAULT_POLICY, parsed.policy_sha256)
+                action = _action(policy, parsed.action_id)
+                helper = require_frontend_receipt_transport(action)
+                receipts = FrontendReceiptStore(self.state_root, parsed.request_id, parsed.source_sha, DEFAULT_POLICY, helper)
+                ordinal = 0 if not receipts.root.exists() and not receipts.root.is_symlink() else receipts.recovery_ordinal()
+            shutil.rmtree(request)
+            if (lease.kind == "production_build" and ordinal < len(FRONTEND_RECEIPT_PHASES)
+                    and receipts.root.exists() and not receipts.root.is_symlink()):
+                shutil.rmtree(receipts.root)
+            return True
+        except (OSError, TransportReject):
+            return False
+
+    def remove_request(self, lease: LeaseHandle) -> bool:
+        try:
+            request_path = self.state_root / "requests" / lease.request_id
+            if not request_path.exists() and not request_path.is_symlink():
+                return True
+            request = _request_directory(self.state_root, lease.request_id)
+            if not _recover_firewall(request, lease.request_id):
+                return False
+            shutil.rmtree(request)
+            return not request_path.exists() and not request_path.is_symlink()
+        except (OSError, TransportReject):
+            return False
+
+
+class LiveFrontendProductionRuntime:
+    """Fail-closed live adapter until the fixed Task 6 executor stops returning 78.
+
+    Hermetic tests exercise the complete transaction protocol.  The deployed
+    action remains disabled, and this adapter refuses to synthesize actor data
+    or observations around the frozen exit-78 executor.
+    """
+
+    def __init__(self, state_root: Path, request_dir: Path, request: TransportRequest,
+                 action: Mapping[str, Any], helper: Any):
+        self.recovery = LiveRecoveryRuntime(state_root)
+        self.request_dir = request_dir
+        self.request = request
+        self.action = action
+        self.helper = helper
+
+    def execute_phase(self, phase: str, store: FrontendReceiptStore) -> tuple[Mapping[str, Any], int]:
+        if phase not in FRONTEND_RECEIPT_PHASES[:-1]:
+            raise TransportReject("frontend_receipt_phase_invalid")
+        raise TransportReject("frontend_fixed_phase_runtime_unavailable")
+
+    def stop_and_reap(self, lease: LeaseHandle) -> bool:
+        return self.recovery.stop_and_reap(lease)
+
+    def remove_request(self, lease: LeaseHandle) -> bool:
+        return self.recovery.remove_request(lease)
+
+    def execute_cleanup(self, store: FrontendReceiptStore) -> tuple[Mapping[str, Any], int]:
+        raise TransportReject("frontend_fixed_phase_runtime_unavailable")
+
+
+def _current_control_group() -> str:
+    try:
+        for line in Path("/proc/self/cgroup").read_text().splitlines():
+            fields = line.split(":", 2)
+            if len(fields) == 3 and fields[0] == "0":
+                return fields[2]
+    except OSError as exc:
+        raise TransportReject("cgroup_read_failed") from exc
+    raise TransportReject("cgroup_read_failed")
+
+
+def _open_descriptor(path: Path) -> int:
+    if path.is_symlink():
+        raise TransportReject("descriptor_file_invalid")
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+    status = os.fstat(fd)
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    if (not stat.S_ISREG(status.st_mode) or status.st_uid != 0 or status.st_nlink != 1
+            or status.st_mode & 0o022 or (flags & os.O_ACCMODE) != os.O_RDONLY):
+        os.close(fd)
+        raise TransportReject("descriptor_file_invalid")
+    return fd
+
+
+def _execute_ordinary(request_dir: Path, request: TransportRequest, action: Mapping[str, Any]) -> None:
+    mode = action.get("input_mode")
+    validate_descriptor_contract(str(mode), request.descriptors)
+    executor = _exact_keys(action.get("executor"), {
+        "name", "uid", "gid", "wrapper", "wrapper_sha256", "operation_binding_sha256",
+        "systemd_transaction_transport_sha256", "timeout_seconds", "network_profile",
+        *({"target_profile", "known_hosts_path", "known_hosts_sha256"} if "known_hosts_path" in (action.get("executor") or {}) else set()),
+    }, "executor_policy_invalid")
+    if type(executor["uid"]) is not int or type(executor["gid"]) is not int or executor["uid"] <= 0 or executor["gid"] <= 0:
+        raise TransportReject("executor_identity_invalid")
+    wrapper = Path(executor["wrapper"])
+    if hashlib.sha256(_regular_root_file(wrapper, maximum=1024 * 1024)).hexdigest() != executor["wrapper_sha256"]:
+        raise TransportReject("executor_wrapper_invalid")
+    descriptor_root = request_dir / "descriptors"
+    fds = [_open_descriptor(descriptor_root / name) for name in request.descriptors]
+    profile = str(executor["network_profile"])
+    try:
+        input_fd, rendered_fd = fds
+        for phase, operation in firewall_phase_plan(request.action_id):
+            _firewall(request_dir, request.request_id, profile, phase, "activate")
+            try:
+                os.lseek(input_fd, 0, os.SEEK_SET); os.lseek(rendered_fd, 0, os.SEEK_SET)
+                argv = [
+                    "/usr/bin/setpriv", f"--reuid={executor['uid']}", f"--regid={executor['gid']}", "--clear-groups", "--no-new-privs",
+                    str(wrapper), "--broker-action", request.action_id, "--operation", operation,
+                    "--input-fd", str(input_fd), "--rendered-fd", str(rendered_fd),
+                ]
+                _quiet_run(argv, timeout=int(executor["timeout_seconds"]), env={
+                    "HOME": "/nonexistent", "LANG": "C.UTF-8", "PATH": "/usr/bin:/bin",
+                    "REQUEST_ID": request.request_id, "SOURCE_SHA": request.source_sha,
+                }, pass_fds=fds)
+            finally:
+                _firewall(request_dir, request.request_id, profile, phase, "deactivate")
+    finally:
+        for fd in fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _safe_copy_tree(source: Path, destination: Path, *, owner_uid: int, owner_gid: int, maximum_files: int, maximum_bytes: int) -> None:
+    if source.is_symlink() or not source.is_dir() or destination.exists():
+        raise TransportReject("trusted_source_invalid")
+    destination.mkdir(mode=0o700, parents=True)
+    count = 0
+    total = 0
+    for directory, names, files in os.walk(source, topdown=True, followlinks=False):
+        names.sort(); files.sort()
+        relative = Path(directory).relative_to(source)
+        target_directory = destination / relative
+        if Path(directory).is_symlink() or any((Path(directory) / name).is_symlink() for name in names):
+            raise TransportReject("trusted_source_invalid")
+        target_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chown(target_directory, owner_uid, owner_gid)
+        for name in files:
+            source_file = Path(directory) / name
+            if source_file.is_symlink():
+                raise TransportReject("trusted_source_invalid")
+            status = source_file.stat()
+            mode = stat.S_IMODE(status.st_mode)
+            if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1 or mode not in {0o440, 0o444, 0o550, 0o555}:
+                raise TransportReject("trusted_source_invalid")
+            count += 1; total += status.st_size
+            if count > maximum_files or total > maximum_bytes:
+                raise TransportReject("trusted_source_limit")
+            target = target_directory / name
+            source_fd = os.open(source_file, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+            target_fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o700 if mode & 0o111 else 0o600)
+            try:
+                while True:
+                    chunk = os.read(source_fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    os.write(target_fd, chunk)
+                os.fsync(target_fd)
+            finally:
+                os.close(source_fd); os.close(target_fd)
+            os.chown(target, owner_uid, owner_gid)
+
+
+def validate_offline_store(root: Path, *, owner_uid: int = 0, reader_gid: int = 22102) -> None:
+    """Require an immutable, recursively generator-readable pnpm store."""
+    if root.is_symlink() or not root.is_dir():
+        raise TransportReject("trusted_dependency_store_invalid")
+    count = 0
+    total = 0
+    for directory, names, files in os.walk(root, topdown=True, followlinks=False):
+        names.sort(); files.sort()
+        path = Path(directory)
+        status = path.stat()
+        if (path.is_symlink() or not stat.S_ISDIR(status.st_mode) or status.st_uid != owner_uid
+                or status.st_gid != reader_gid or stat.S_IMODE(status.st_mode) != 0o550
+                or any((path / name).is_symlink() for name in names)):
+            raise TransportReject("trusted_dependency_store_invalid")
+        for name in files:
+            item = path / name
+            if item.is_symlink():
+                raise TransportReject("trusted_dependency_store_invalid")
+            item_status = item.stat()
+            if (not stat.S_ISREG(item_status.st_mode) or item_status.st_nlink != 1
+                    or item_status.st_uid != owner_uid or item_status.st_gid != reader_gid
+                    or stat.S_IMODE(item_status.st_mode) != 0o440):
+                raise TransportReject("trusted_dependency_store_invalid")
+            count += 1; total += item_status.st_size
+            if count > 250000 or total > 4 * 1024 * 1024 * 1024:
+                raise TransportReject("trusted_dependency_store_limit")
+
+
+def _tree_snapshot(root: Path) -> dict[str, dict[str, Any]]:
+    if root.is_symlink() or not root.is_dir():
+        raise TransportReject("generated_tree_invalid")
+    result: dict[str, dict[str, Any]] = {}
+    total = 0
+    for directory, names, files in os.walk(root, topdown=True, followlinks=False):
+        names.sort(); files.sort()
+        base = Path(directory)
+        if base.is_symlink() or any((base / name).is_symlink() for name in names):
+            raise TransportReject("generated_tree_invalid")
+        for name in files:
+            path = base / name
+            if path.is_symlink():
+                raise TransportReject("generated_tree_invalid")
+            status = path.stat()
+            if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:
+                raise TransportReject("generated_tree_invalid")
+            relative = path.relative_to(root).as_posix()
+            mode = stat.S_IMODE(status.st_mode)
+            if mode not in {0o600, 0o644, 0o700, 0o755}:
+                raise TransportReject("generated_tree_invalid")
+            digest = hashlib.sha256()
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            total += status.st_size
+            if len(result) >= 100000 or total > 2 * 1024 * 1024 * 1024:
+                raise TransportReject("generated_tree_limit")
+            result[relative] = {"mode": "100755" if mode & 0o111 else "100644", "size": status.st_size, "sha256": digest.hexdigest()}
+    return result
+
+
+def trusted_scope_state(request_id: str, slot: int, active_role: str | None) -> dict[str, Any]:
+    if (not SAFE_REQUEST_ID.fullmatch(request_id) or slot not in ORDINARY_SLOTS
+            or active_role not in {None, "generate", "push"}):
+        raise TransportReject("trusted_scope_state_invalid")
+    return {
+        "schema_version": 1, "request_id": request_id, "slot": slot,
+        "scopes": {
+            "generate": f"ken-beehiiv-generate-slot-{slot}.scope",
+            "push": f"ken-beehiiv-push-slot-{slot}.scope",
+        },
+        "active_role": active_role,
+    }
+
+
+def run_trusted_phase(role: str, slot: int, request_id: str, descriptors: Sequence[int], parent_sha: str | None) -> None:
+    """In-scope admission gate executed as the fixed transient phase UID."""
+    if slot not in ORDINARY_SLOTS or not SAFE_REQUEST_ID.fullmatch(request_id):
+        raise TransportReject("trusted_phase_admission_invalid")
+    scope_role = "push" if role == "push" else "generate"
+    expected_uid = 22104 if scope_role == "push" else 22102
+    if role not in {"dependency", "generate", "push"} or os.geteuid() != expected_uid:
+        raise TransportReject("trusted_phase_identity_invalid")
+    if len(descriptors) != 2 or any(type(fd) is not int or fd < 3 for fd in descriptors):
+        raise TransportReject("trusted_phase_descriptor_invalid")
+    unit = f"ken-beehiiv-{scope_role}-slot-{slot}.scope"
+    expected_slice = ORDINARY_SLOTS[slot][1]
+    if _systemctl_property(unit, "Slice") != expected_slice:
+        raise TransportReject("trusted_phase_slice_invalid")
+    control_group = _current_control_group()
+    validate_cgroup(control_group, expected_slice)
+    if control_group.rstrip("/").split("/")[-1] != unit:
+        raise TransportReject("trusted_phase_scope_invalid")
+    first_fd, second_fd = descriptors
+    if role == "dependency":
+        argv = [
+            TOOLCHAIN_NODE, TOOLCHAIN_PNPM, "install", "--offline", "--frozen-lockfile", "--ignore-scripts",
+            "--dir", f"/proc/self/fd/{first_fd}", "--store-dir", f"/proc/self/fd/{second_fd}",
+        ]
+        timeout = 900
+    elif role == "generate":
+        if parent_sha is not None:
+            raise TransportReject("trusted_phase_parent_invalid")
+        argv = [TRUSTED_HELPER_PATH, "generate", "--source-fd", str(first_fd), "--rendered-fd", str(second_fd)]
+        timeout = 900
+    else:
+        if parent_sha is None or not SHA1.fullmatch(parent_sha):
+            raise TransportReject("trusted_phase_parent_invalid")
+        argv = [TRUSTED_HELPER_PATH, "push", "--commit-input-fd", str(first_fd), "--rendered-fd", str(second_fd), "--parent-sha", parent_sha]
+        timeout = 600
+    _quiet_run(argv, timeout=timeout, pass_fds=descriptors)
+
+
+class LiveTrustedGenerationRuntime:
+    """Linux runtime adapter for the two non-overlapping Beehiiv phases."""
+
+    def __init__(self, request_dir: Path, request: TransportRequest, action: Mapping[str, Any], slot: int):
+        if slot not in ORDINARY_SLOTS:
+            raise TransportReject("trusted_generation_slot_invalid")
+        self.request_dir = request_dir
+        self.request = request
+        self.action = action
+        self.slot = slot
+        self.trusted_root = request_dir / "trusted"
+        self.source = self.trusted_root / "source"
+        self.generate_root = self.trusted_root / "generate"
+        self.push_root = self.trusted_root / "push"
+        self.worktree = self.generate_root / "worktree"
+        self.open_fds: list[int] = []
+        self.active: str | None = None
+        self.completed: set[str] = set()
+        self.scope_state_path = request_dir / ".trusted-scopes.json"
+        if self.scope_state_path.exists() or self.scope_state_path.is_symlink():
+            raise TransportReject("trusted_scope_state_exists")
+        self._write_scope_state(None)
+        generation = action.get("trusted_generation") or {}
+        transport = generation.get("transport") or {}
+        self.helper = Path(str(transport.get("wrapper") or ""))
+        expected = str(transport.get("wrapper_sha256") or "")
+        if (self.helper != Path(TRUSTED_HELPER_PATH) or not SHA256.fullmatch(expected)
+                or hashlib.sha256(_regular_root_file(self.helper, maximum=1024 * 1024)).hexdigest() != expected):
+            raise TransportReject("trusted_generation_wrapper_invalid")
+
+    def assert_inactive(self) -> None:
+        if self.active is not None:
+            raise TransportReject("trusted_generation_overlap")
+
+    def _scope(self, role: str) -> tuple[str, str]:
+        if role not in {"generate", "push"}:
+            raise TransportReject("trusted_generation_phase_invalid")
+        unit = f"ken-beehiiv-{role}-slot-{self.slot}.scope"
+        return unit, ORDINARY_SLOTS[self.slot][1]
+
+    def _write_scope_state(self, active_role: str | None) -> None:
+        _atomic_json(self.scope_state_path, trusted_scope_state(self.request.request_id, self.slot, active_role))
+
+    def _run_scope(self, scope_role: str, phase_role: str, identity: Mapping[str, Any], descriptors: Sequence[int],
+                   *, timeout: int, parent_sha: str | None = None) -> None:
+        self.assert_inactive()
+        if len(descriptors) != 2 or any(type(fd) is not int or fd < 3 for fd in descriptors):
+            raise TransportReject("trusted_phase_descriptor_invalid")
+        contract_role = "push" if scope_role == "push" else "generate"
+        if identity != trusted_generation_contract()[contract_role]["identity"]:
+            raise TransportReject("trusted_generation_identity_invalid")
+        unit, slice_name = self._scope(scope_role)
+        self._write_scope_state(scope_role)
+        self.active = scope_role
+        child = [
+            TRANSPORT_PATH, "run-trusted-phase", "--role", phase_role, "--slot", str(self.slot),
+            "--request-id", self.request.request_id, "--first-fd", str(descriptors[0]), "--second-fd", str(descriptors[1]),
+        ]
+        if parent_sha is not None:
+            child.extend(("--parent-sha", parent_sha))
+        command = [
+            "/usr/bin/systemd-run", "--quiet", "--scope", "--wait", f"--unit={unit.removesuffix('.scope')}", f"--slice={slice_name}",
+            "/usr/bin/setpriv", f"--reuid={identity['uid']}", f"--regid={identity['gid']}", "--clear-groups", "--no-new-privs", *child,
+        ]
+        _quiet_run(command, timeout=timeout, pass_fds=descriptors)
+        self.completed.add(phase_role)
+
+    def prepare_dependencies(self, spec: Mapping[str, Any]) -> None:
+        self.assert_inactive()
+        if spec != trusted_generation_contract()["dependency"]:
+            raise TransportReject("trusted_dependency_contract_invalid")
+        self.generate_root.mkdir(mode=0o700, parents=True, exist_ok=False)
+        self.push_root.mkdir(mode=0o700, parents=True, exist_ok=False)
+        _safe_copy_tree(self.source, self.worktree, owner_uid=22102, owner_gid=22102, maximum_files=100000, maximum_bytes=2 * 1024 * 1024 * 1024)
+        offline_store = self.trusted_root / "offline-pnpm-store"
+        validate_offline_store(offline_store)
+        worktree_fd = os.open(self.worktree, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+        store_fd = os.open(offline_store, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            self._run_scope("generate", "dependency", spec["identity"], (worktree_fd, store_fd), timeout=900)
+            self.stop_and_reap("generate")
+        finally:
+            os.close(worktree_fd); os.close(store_fd)
+        self.dependency_baseline = _tree_snapshot(self.worktree)
+
+    def start_generate(self, spec: Mapping[str, Any]) -> None:
+        if spec != trusted_generation_contract()["generate"] or "dependency" not in self.completed:
+            raise TransportReject("trusted_generate_contract_invalid")
+        rendered = _open_descriptor(self.generate_root / "rendered.env")
+        source_fd = os.open(self.worktree, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        self.open_fds.extend((source_fd, rendered))
+        _firewall(self.request_dir, self.request.request_id, spec["network_profile"], spec["firewall_phase"], "activate")
+        self._run_scope("generate", "generate", spec["identity"], (source_fd, rendered), timeout=900)
+
+    def stop_and_reap(self, role: str) -> None:
+        if self.active != role:
+            raise TransportReject("trusted_generation_reap_invalid")
+        unit, _ = self._scope(role)
+        if not _stop_and_verify_unit(unit):
+            raise TransportReject("trusted_generation_reap_invalid")
+        if not _recover_firewall(self.request_dir, self.request.request_id):
+            raise TransportReject("trusted_generation_firewall_reap_invalid")
+        self._write_scope_state(None)
+        self.active = None
+
+    def generated_diff(self) -> list[dict[str, Any]]:
+        self.assert_inactive()
+        if "generate" not in self.completed:
+            raise TransportReject("trusted_generation_incomplete")
+        if not hasattr(self, "dependency_baseline"):
+            raise TransportReject("trusted_dependency_baseline_missing")
+        generated = _tree_snapshot(self.worktree)
+        return generated_diff_from_snapshots(self.dependency_baseline, generated)
+
+    def seal_commit_input(self, entries: Sequence[Mapping[str, Any]]) -> Path:
+        self.assert_inactive()
+        validate_generated_diff(list(entries))
+        manifest = {
+            "version": 1, "action_id": self.request.action_id, "parent_sha": self.request.source_sha,
+            "author": "ken-blog-sync[bot] <blog-sync@getken.ai>", "message": "content: sync beehiiv posts", "entries": list(entries),
+        }
+        manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        archive = self.push_root / "verified-commit-input.tar"
+        if archive.exists() or archive.is_symlink():
+            raise TransportReject("commit_input_exists")
+        with tarfile.open(archive, "x", format=tarfile.PAX_FORMAT) as bundle:
+            info = tarfile.TarInfo("manifest.json"); info.size = len(manifest_bytes); info.mode = 0o400; info.mtime = 0; info.uid = 0; info.gid = 0
+            bundle.addfile(info, io.BytesIO(manifest_bytes))
+            for entry in entries:
+                if entry["type"] == "delete":
+                    continue
+                source = self.worktree / entry["path"]
+                status = source.stat()
+                if (source.is_symlink() or not stat.S_ISREG(status.st_mode) or status.st_size != entry["size"]
+                        or hashlib.sha256(source.read_bytes()).hexdigest() != entry["sha256"]):
+                    raise TransportReject("commit_input_drift")
+                member = tarfile.TarInfo("files/" + entry["path"]); member.size = status.st_size; member.mode = 0o400; member.mtime = 0; member.uid = 0; member.gid = 0
+                with source.open("rb") as handle:
+                    bundle.addfile(member, handle)
+        os.chmod(archive, 0o400)
+        if archive.stat().st_uid != 0:
+            raise TransportReject("commit_input_owner_invalid")
+        return archive
+
+    def close_generate_descriptors(self) -> None:
+        for fd in self.open_fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self.open_fds.clear()
+
+    def start_push(self, spec: Mapping[str, Any], sealed: Path) -> None:
+        if spec != trusted_generation_contract()["push"] or self.open_fds or "generate" not in self.completed:
+            raise TransportReject("trusted_push_contract_invalid")
+        commit_fd = _open_descriptor(sealed)
+        rendered_fd = _open_descriptor(self.push_root / "rendered.env")
+        self.open_fds.extend((commit_fd, rendered_fd))
+        _firewall(self.request_dir, self.request.request_id, spec["network_profile"], spec["firewall_phase"], "activate")
+        self._run_scope("push", "push", spec["identity"], (commit_fd, rendered_fd), timeout=600, parent_sha=self.request.source_sha)
+
+    def close_push_descriptors(self) -> None:
+        self.close_generate_descriptors()
+
+    def abort_cleanup(self) -> None:
+        results = [_stop_and_verify_unit(self._scope(role)[0]) for role in ("generate", "push")]
+        if not all(results) or not _recover_firewall(self.request_dir, self.request.request_id):
+            raise TransportReject("trusted_generation_abort_reap_failed")
+        self._write_scope_state(None)
+        self.close_generate_descriptors()
+        self.active = None
+
+
+def _lease_for_slot(scheduler: LeaseScheduler, slot: int) -> LeaseHandle:
+    marker = scheduler._slot_path(slot)
+    if not marker.exists():
+        raise TransportReject("lease_marker_missing")
+    handle = scheduler._read_marker(marker)
+    if slot not in handle.slots:
+        raise TransportReject("lease_slot_mismatch")
+    return handle
+
+
+def run_ordinary_slot(slot: int, state_root: Path, policy_path: Path) -> None:
+    if os.geteuid() != 0:
+        raise TransportReject("coordinator_not_root")
+    expected_slice = ORDINARY_SLOTS[slot][1]
+    validate_cgroup(_current_control_group(), expected_slice)
+    scheduler = LeaseScheduler(state_root / "leases")
+    lease = _lease_for_slot(scheduler, slot)
+    request_dir, request = _load_request(state_root, lease.request_id)
+    policy = _load_policy(policy_path, request.policy_sha256)
+    action = _action(policy, request.action_id)
+    if action.get("enabled") is not True:
+        raise TransportReject("action_not_enabled")
+    mode = action.get("input_mode")
+    runtime = LiveTrustedGenerationRuntime(request_dir, request, action, slot) if mode == "trusted_generation" else None
+    execute_action_mode(mode, slot=slot, ordinary=lambda: _execute_ordinary(request_dir, request, action), trusted_runtime=runtime)
+
+
+def run_frontend_phase(phase: str, request_id: str, state_root: Path) -> None:
+    if phase not in FRONTEND_PHASES or not SAFE_REQUEST_ID.fullmatch(request_id):
+        raise TransportReject("frontend_phase_invalid")
+    _, expected_slice, expected_uid = FRONTEND_PHASES[phase]
+    if os.geteuid() != expected_uid:
+        raise TransportReject("frontend_phase_identity_invalid")
+    validate_cgroup(_current_control_group(), expected_slice)
+    _, request = _load_request(state_root, request_id)
+    action = _action(_load_policy(DEFAULT_POLICY, request.policy_sha256), request.action_id)
+    require_frontend_receipt_transport(action)
+    request_dir = _validated_frontend_phase_directory(request_id, phase)
+    if phase == "builder":
+        _quiet_run(["/usr/local/libexec/ken-actions/ken-frontend-production-release-build", "--request-dir", str(request_dir)], timeout=1800)
+    elif phase == "uploader":
+        fds = [_open_descriptor(request_dir / name) for name in ("source-maps.zip", "posthog-key", "posthog-project")]
+        try:
+            _quiet_run(["/usr/local/bin/ken-frontend-source-map-upload", "--endpoint", "https://us.posthog.com/api/projects/source_maps",
+                        "--archive-fd", str(fds[0]), "--key-fd", str(fds[1]), "--project-fd", str(fds[2])], timeout=600, pass_fds=fds)
+        finally:
+            for fd in fds:
+                os.close(fd)
+    else:
+        state_fd = _open_descriptor(request_dir / "digest-state.json")
+        try:
+            _quiet_run(["/usr/local/bin/ken-frontend-production-release", "execute-digest", "--state-fd", str(state_fd)], timeout=1200, pass_fds=(state_fd,))
+        finally:
+            os.close(state_fd)
+
+
+def dispatch(request_id: str, state_root: Path, policy_path: Path) -> None:
+    if os.geteuid() != 0:
+        raise TransportReject("coordinator_not_root")
+    request_dir, request = _load_request(state_root, request_id)
+    policy = _load_policy(policy_path, request.policy_sha256)
+    action = _action(policy, request.action_id)
+    if action.get("enabled") is not True:
+        raise TransportReject("action_not_enabled")
+    mode = action.get("input_mode")
+    scheduler = LeaseScheduler(state_root / "leases")
+    lease: LeaseHandle | None = None
+    try:
+        if mode == "production_build":
+            helper = require_frontend_receipt_transport(action)
+            lease = scheduler.wait_for_exclusive(request_id)
+            receipts = FrontendReceiptStore(state_root, request.request_id, request.source_sha, policy_path, helper)
+            runtime = LiveFrontendProductionRuntime(state_root, request_dir, request, action, helper)
+            orchestrate_frontend_receipts(receipts, runtime)
+            finalize_frontend_transaction(scheduler, runtime, lease, receipts)
+            lease = None
+        else:
+            lease = scheduler.wait_for_ordinary(request_id)
+            unit, expected_slice = ORDINARY_SLOTS[lease.slots[0]]
+            _start_fixed_unit(unit, expected_slice)
+            finish_transaction(scheduler, LiveRecoveryRuntime(state_root), lease)
+            lease = None
+        _status_write(state_root, request_id, "succeeded", "transport_succeeded")
+    except Exception:
+        try:
+            _status_write(state_root, request_id, "failed", "transport_failed")
+        except (OSError, TransportReject):
+            pass
+        if lease is not None:
+            try:
+                finish_transaction(scheduler, LiveRecoveryRuntime(state_root), lease)
+                lease = None
+            except TransportReject:
+                pass
+        else:
+            scheduler.cancel_ordinary(request_id)
+            LiveRecoveryRuntime(state_root).cleanup_request(LeaseHandle(request_id, (), "ordinary"))
+        raise
+
+
+def validate_manifest_schema(manifest: Any) -> Mapping[str, Any]:
+    value = _exact_keys(manifest, {
+        "schema_version", "transport_version", "status", "enabled", "installation_authorized",
+        "live_execution_authorized", "authorities", "task6_core", "task6_receipts", "task6_final", "leases",
+        "artifacts", "task6_bindings",
+    }, "manifest_schema_invalid")
+    if (type(value["schema_version"]) is not int or value["schema_version"] != 1
+            or value["enabled"] is not False or value["installation_authorized"] is not False
+            or value["live_execution_authorized"] is not False):
+        raise TransportReject("manifest_state_invalid")
+    final_status = value["task6_final"].get("status") if isinstance(value["task6_final"], dict) else None
+    expected_state = {
+        "unavailable": ("2026-08-20.2", "reviewed-transport-awaiting-task6-final-bindings"),
+        "reviewed-final-bindings": (
+            "2026-08-20.3",
+            "reviewed-transport-bound-task6-final-awaiting-live-authorization",
+        ),
+    }.get(final_status)
+    if expected_state is None or (value["transport_version"], value["status"]) != expected_state:
+        raise TransportReject("manifest_state_invalid")
+    if value["authorities"] != {"plan_sha256": PLAN_SHA256, "matrix_sha256": MATRIX_SHA256}:
+        raise TransportReject("manifest_authority_invalid")
+    expected_core = {
+        "integrated_commit_sha": "63c9e0b17ae8e894b85152de6f1ea26b33481930",
+        "integrated_tree_sha": "df327c0de3ab5444011c41028f9dc9bc0e4248dd",
+        "reviewed_source_commit_sha": "1eb21d952c202d301a0252125f9a7b8fdc010ef6",
+        "reviewed_source_tree_sha": "1673e50129214f1e00c9926803be30b270148dae",
+        "broker_sha256": "8d1c7859a1d4108e507d2f9a32acee8a1e26a10c212186fc751ab39e1c47d22e",
+        "policy_sha256": TASK6_CORE_POLICY_SHA256,
+        "runtime_lock_sha256": TASK6_CORE_LOCK_SHA256,
+    }
+    if value["task6_core"] != expected_core:
+        raise TransportReject("manifest_core_invalid")
+    if value["task6_receipts"] != {
+        "reviewed_source_commit_sha": TASK6_RECEIPT_SOURCE_COMMIT_SHA,
+        "reviewed_source_tree_sha": TASK6_RECEIPT_SOURCE_TREE_SHA,
+        "helper_blob_sha": TASK6_RECEIPT_HELPER_BLOB_SHA,
+        "helper_path": "bin/ken-frontend-production-release",
+        "helper_sha256": TASK6_RECEIPT_HELPER_SHA256,
+        "contract_sha256": TASK6_RECEIPT_CONTRACT_SHA256,
+        "phases": list(FRONTEND_RECEIPT_PHASES),
+        "actor_uids": FRONTEND_RECEIPT_ACTOR_UIDS,
+        "firewall_phases": {key: list(rows) for key, rows in FRONTEND_RECEIPT_FIREWALL_PHASES.items()},
+        "task4_deploy_target_authority": "deferred-until-single-stop-readback",
+    }:
+        raise TransportReject("manifest_receipt_invalid")
+    if final_status == "unavailable":
+        if value["task6_final"] != {
+            "status": "unavailable", "commit_sha": None,
+            "policy_sha256": None, "runtime_lock_sha256": None,
+        }:
+            raise TransportReject("manifest_final_binding_invalid")
+    else:
+        final = _exact_keys(value["task6_final"], {
+            "status", "commit_sha", "tree_sha", "task7_base_commit_sha",
+            "artifacts", "receipt_helper_provenance",
+        }, "manifest_final_binding_invalid")
+        identities = (final["commit_sha"], final["tree_sha"], final["task7_base_commit_sha"])
+        if any(not isinstance(identity, str) or not SHA1.fullmatch(identity) for identity in identities):
+            raise TransportReject("manifest_final_binding_invalid")
+        if len(set(identities)) != len(identities):
+            raise TransportReject("manifest_final_binding_invalid")
+        final_paths = {
+            "policy": "inventory/op-broker-policy.yaml",
+            "runtime_lock": "inventory/broker-runtime.lock.yaml",
+            "broker": "bin/ken-op-broker",
+            "client": "bin/ken-op-exec",
+            "broker_unit": "systemd/ken-op-broker@.service",
+        }
+        final_artifacts = _exact_keys(final["artifacts"], set(final_paths), "manifest_final_binding_invalid")
+        for name, expected_path in final_paths.items():
+            row = _exact_keys(final_artifacts[name], {"path", "git_blob_sha", "sha256"}, "manifest_final_binding_invalid")
+            if (row["path"] != expected_path
+                    or not isinstance(row["git_blob_sha"], str) or not SHA1.fullmatch(row["git_blob_sha"])
+                    or not isinstance(row["sha256"], str) or not SHA256.fullmatch(row["sha256"])):
+                raise TransportReject("manifest_final_binding_invalid")
+        receipts = value["task6_receipts"]
+        if final["receipt_helper_provenance"] != {
+            "reviewed_source_commit_sha": receipts["reviewed_source_commit_sha"],
+            "reviewed_source_tree_sha": receipts["reviewed_source_tree_sha"],
+            "helper_path": receipts["helper_path"],
+            "helper_blob_sha": receipts["helper_blob_sha"],
+            "helper_sha256": receipts["helper_sha256"],
+            "contract_sha256": receipts["contract_sha256"],
+        }:
+            raise TransportReject("manifest_final_binding_invalid")
+    if value["leases"] != {
+        "ordinary_slots": [
+            {"slot": 1, "unit": "ken-actions-deploy-transaction-1.service", "slice": "ken-actions-deploy-transaction-1.slice"},
+            {"slot": 2, "unit": "ken-actions-deploy-transaction-2.service", "slice": "ken-actions-deploy-transaction-2.slice"},
+        ],
+        "writer_preference": True, "production_build_holds_both": True,
+        "recovery": "stop-reap-cgroup-empty-cleanup-then-release",
+    }:
+        raise TransportReject("manifest_lease_invalid")
+    expected_artifacts = {
+        "coordinator": "bin/ken-actions-deploy-transaction",
+        "ordinary_slot_1": "systemd/ken-actions-deploy-transaction-1.service",
+        "ordinary_slot_2": "systemd/ken-actions-deploy-transaction-2.service",
+        "frontend_builder": "systemd/ken-frontend-production-builder@.service",
+        "frontend_uploader": "systemd/ken-frontend-source-map-uploader@.service",
+        "frontend_deploy": "systemd/ken-frontend-deploy-executor@.service",
+    }
+    artifacts = _exact_keys(value["artifacts"], set(expected_artifacts), "manifest_artifact_invalid")
+    for name, relative in expected_artifacts.items():
+        row = _exact_keys(artifacts[name], {"path", "sha256"}, "manifest_artifact_invalid")
+        if row["path"] != relative or not isinstance(row["sha256"], str) or not SHA256.fullmatch(row["sha256"]):
+            raise TransportReject("manifest_artifact_invalid")
+    expected_bindings = {
+        "ordinary_systemd_transaction_transport_sha256", "frontend_operation_binding_sha256",
+        "frontend_phase_transport_sha256", "frontend_deploy_contract_sha256",
+        "trusted_generation_dependency_acquisition_sha256", "trusted_generation_generated_paths_manifest_sha256",
+        "trusted_generation_commit_input_contract_sha256", "trusted_generation_cgroup_contract_sha256",
+        "trusted_generation_phase_transport_sha256",
+    }
+    bindings = _exact_keys(value["task6_bindings"], expected_bindings, "manifest_binding_invalid")
+    if any(not isinstance(digest, str) or not SHA256.fullmatch(digest) for digest in bindings.values()):
+        raise TransportReject("manifest_binding_invalid")
+    return value
+
+
+def _git_blob_sha(payload: bytes) -> str:
+    return hashlib.sha1(f"blob {len(payload)}\0".encode() + payload).hexdigest()
+
+
+def _contains_recursive_manifest_binding(payload: bytes) -> bool:
+    try:
+        value = _strict_yaml_text(payload.decode("utf-8"))
+    except UnicodeError as exc:
+        raise TransportReject("manifest_final_artifact_invalid") from exc
+
+    forbidden = re.compile(r"^(?:task7|action[-_]?transport|transport)[-_]?manifest[-_]?sha256$", re.IGNORECASE)
+
+    def visit(current: Any) -> bool:
+        if isinstance(current, dict):
+            return any(
+                (isinstance(key, str) and forbidden.fullmatch(key) is not None) or visit(child)
+                for key, child in current.items()
+            )
+        if isinstance(current, list):
+            return any(visit(child) for child in current)
+        return False
+
+    return visit(value)
+
+
+def verify_task6_final_artifacts(manifest: Any, payloads: Mapping[str, bytes]) -> None:
+    value = validate_manifest_schema(manifest)
+    final = value["task6_final"]
+    if final["status"] == "unavailable":
+        if payloads:
+            raise TransportReject("manifest_final_artifact_invalid")
+        return
+    artifacts = final["artifacts"]
+    if not isinstance(payloads, dict) or set(payloads) != set(artifacts):
+        raise TransportReject("manifest_final_artifact_invalid")
+    for name, row in artifacts.items():
+        payload = payloads[name]
+        if not isinstance(payload, bytes) or not payload or len(payload) > 4 * 1024 * 1024:
+            raise TransportReject("manifest_final_artifact_invalid")
+        if hashlib.sha256(payload).hexdigest() != row["sha256"] or _git_blob_sha(payload) != row["git_blob_sha"]:
+            raise TransportReject("manifest_final_artifact_invalid")
+    if _contains_recursive_manifest_binding(payloads["policy"]) or _contains_recursive_manifest_binding(payloads["runtime_lock"]):
+        raise TransportReject("manifest_recursive_binding")
+
+
+def _git_read(repo_root: Path, *args: str, binary: bool = False) -> bytes | str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError as exc:
+        raise TransportReject("manifest_git_provenance_invalid") from exc
+    if result.returncode != 0:
+        raise TransportReject("manifest_git_provenance_invalid")
+    return result.stdout if binary else result.stdout.decode("ascii").strip()
+
+
+def verify_task6_final_repository(manifest: Any, repo_root: Path) -> None:
+    value = validate_manifest_schema(manifest)
+    final = value["task6_final"]
+    if final["status"] == "unavailable":
+        return
+    if not isinstance(repo_root, Path):
+        raise TransportReject("manifest_git_provenance_invalid")
+    commit = final["commit_sha"]
+    base = final["task7_base_commit_sha"]
+    if _git_read(repo_root, "cat-file", "-t", commit) != "commit":
+        raise TransportReject("manifest_git_provenance_invalid")
+    if _git_read(repo_root, "rev-parse", f"{commit}^{{tree}}") != final["tree_sha"]:
+        raise TransportReject("manifest_git_provenance_invalid")
+    if _git_read(repo_root, "cat-file", "-t", base) != "commit":
+        raise TransportReject("manifest_git_provenance_invalid")
+    _git_read(repo_root, "merge-base", "--is-ancestor", base, commit)
+    payloads: dict[str, bytes] = {}
+    for name, row in final["artifacts"].items():
+        repo_path = f"infra/github-actions/{row['path']}"
+        blob = _git_read(repo_root, "rev-parse", f"{commit}:{repo_path}")
+        if blob != row["git_blob_sha"] or _git_read(repo_root, "cat-file", "-t", blob) != "blob":
+            raise TransportReject("manifest_git_provenance_invalid")
+        payloads[name] = _git_read(repo_root, "cat-file", "blob", blob, binary=True)
+    helper = final["receipt_helper_provenance"]
+    helper_path = f"infra/github-actions/{helper['helper_path']}"
+    helper_blob = _git_read(repo_root, "rev-parse", f"{commit}:{helper_path}")
+    if (helper_blob != helper["helper_blob_sha"]
+            or _git_read(repo_root, "cat-file", "-t", helper_blob) != "blob"):
+        raise TransportReject("manifest_git_provenance_invalid")
+    helper_payload = _git_read(repo_root, "cat-file", "blob", helper_blob, binary=True)
+    if hashlib.sha256(helper_payload).hexdigest() != helper["helper_sha256"]:
+        raise TransportReject("manifest_git_provenance_invalid")
+    verify_task6_final_artifacts(value, payloads)
+
+
+def _task6_final_installed_payloads(final: Mapping[str, Any], policy_path: Path,
+                                    runtime_lock_path: Path) -> dict[str, bytes]:
+    root = _repo_root()
+    source_tree = root.name == "github-actions"
+    paths = {
+        "policy": policy_path,
+        "runtime_lock": runtime_lock_path,
+        "broker": root / "bin/ken-op-broker" if source_tree else Path("/usr/local/bin/ken-op-broker"),
+        "client": root / "bin/ken-op-exec" if source_tree else Path("/usr/local/bin/ken-op-exec"),
+        "broker_unit": root / "systemd/ken-op-broker@.service" if source_tree else Path("/etc/systemd/system/ken-op-broker@.service"),
+    }
+    if set(paths) != set(final["artifacts"]):
+        raise TransportReject("manifest_final_artifact_invalid")
+    return {name: _regular_root_file(file_path, maximum=4 * 1024 * 1024) for name, file_path in paths.items()}
+
+
+def verify_manifest(manifest_path: Path, policy_path: Path, runtime_lock_path: Path) -> None:
+    manifest = validate_manifest_schema(strict_yaml(manifest_path))
+    helper = load_frontend_receipt_helper()
+    if helper.RECEIPT_CONTRACT_SHA256 != manifest["task6_receipts"]["contract_sha256"]:
+        raise TransportReject("manifest_receipt_invalid")
+    final = manifest["task6_final"]
+    if final["status"] == "unavailable":
+        core = manifest["task6_core"]
+        if core.get("policy_sha256") != hashlib.sha256(_regular_root_file(policy_path)).hexdigest():
+            raise TransportReject("manifest_policy_invalid")
+        if core.get("runtime_lock_sha256") != hashlib.sha256(_regular_root_file(runtime_lock_path)).hexdigest():
+            raise TransportReject("manifest_runtime_lock_invalid")
+    else:
+        verify_task6_final_artifacts(
+            manifest,
+            _task6_final_installed_payloads(final, policy_path, runtime_lock_path),
+        )
+        root = _repo_root()
+        repo_root = root.parent.parent
+        if root.name == "github-actions" and (repo_root / ".git").exists():
+            verify_task6_final_repository(manifest, repo_root)
+    if manifest["task6_bindings"] != binding_digests():
+        raise TransportReject("manifest_binding_invalid")
+    for row in manifest["artifacts"].values():
+        if _artifact_hash(row["path"]) != row["sha256"]:
+            raise TransportReject("manifest_artifact_invalid")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Ken deployment transaction transport")
+    sub = parser.add_subparsers(dest="command", required=True)
+    verify = sub.add_parser("verify")
+    verify.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    verify.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
+    verify.add_argument("--runtime-lock", type=Path, default=DEFAULT_RUNTIME_LOCK)
+    sub.add_parser("contract-digests")
+    dispatch_parser = sub.add_parser("dispatch")
+    dispatch_parser.add_argument("--request-id", required=True)
+    dispatch_parser.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
+    dispatch_parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
+    ordinary = sub.add_parser("run-ordinary-slot")
+    ordinary.add_argument("--slot", required=True, type=int, choices=(1, 2))
+    ordinary.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
+    ordinary.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
+    frontend = sub.add_parser("run-frontend-phase")
+    frontend.add_argument("--phase", required=True, choices=tuple(FRONTEND_PHASES))
+    frontend.add_argument("--request-id", required=True)
+    frontend.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
+    trusted = sub.add_parser("run-trusted-phase")
+    trusted.add_argument("--role", required=True, choices=("dependency", "generate", "push"))
+    trusted.add_argument("--slot", required=True, type=int, choices=(1, 2))
+    trusted.add_argument("--request-id", required=True)
+    trusted.add_argument("--first-fd", required=True, type=int)
+    trusted.add_argument("--second-fd", required=True, type=int)
+    trusted.add_argument("--parent-sha")
+    recover = sub.add_parser("recover")
+    recover.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "verify":
+            verify_manifest(args.manifest, args.policy, args.runtime_lock)
+        elif args.command == "contract-digests":
+            print(json.dumps(binding_digests(), sort_keys=True, separators=(",", ":")))
+        elif args.command == "dispatch":
+            dispatch(args.request_id, args.state_root, args.policy)
+        elif args.command == "run-ordinary-slot":
+            run_ordinary_slot(args.slot, args.state_root, args.policy)
+        elif args.command == "run-frontend-phase":
+            run_frontend_phase(args.phase, args.request_id, args.state_root)
+        elif args.command == "run-trusted-phase":
+            run_trusted_phase(args.role, args.slot, args.request_id, (args.first_fd, args.second_fd), args.parent_sha)
+        else:
+            LeaseScheduler(args.state_root / "leases").recover(LiveRecoveryRuntime(args.state_root))
+        return 0
+    except (TransportReject, OSError, subprocess.SubprocessError, ValueError):
+        return 78
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

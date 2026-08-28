@@ -1,0 +1,15 @@
+{
+  "total_count": 2,
+  "branch_policies": [
+    {
+      "id": 361199,
+      "node_id": "MDE2OkRlcGxveW1lbnRCcmFuY2hQb2xpY3kzNjExOTk=",
+      "name": "main"
+    },
+    {
+      "id": 361200,
+      "node_id": "MDE2OkRlcGxveW1lbnRCcmFuY2hQb2xpY3kzNjEyMDA=",
+      "name": "release/*"
+    }
+  ]
+}

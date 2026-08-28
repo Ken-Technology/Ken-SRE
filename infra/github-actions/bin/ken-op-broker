@@ -1,0 +1,2470 @@
+#!/usr/bin/env python3
+"""Fail-closed local broker for fixed Ken Actions operations.
+
+The root coordinator owns local state and credentials. Network and action work
+is performed in separately dropped children. The wire response is deliberately
+limited to stable status metadata.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import ctypes
+import dataclasses
+import datetime as dt
+import errno
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import resource
+import secrets
+import shutil
+import signal
+import socket
+import ssl
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+from types import SimpleNamespace
+from typing import Any, Iterable, Mapping, Sequence
+import urllib.error
+import urllib.request
+import zipfile
+
+try:
+    import yaml
+except ImportError:  # runtime lock makes this fatal outside parser-only imports
+    yaml = None
+
+MAX_PACKET = 65536
+MAX_OIDC = 16384
+MAX_GITHUB_TOKEN = 4096
+PLAN_SHA256 = "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658"
+TASK7_REVIEWED_COMMIT_SHA = "a06da36014e6b08a7478f5306c137c52c436c3ef"
+TRANSPORT_PATH = Path("/usr/local/libexec/ken-actions/ken-actions-deploy-transaction")
+TRANSPORT_STATE_ROOT = Path("/run/ken-actions-deploy")
+TRANSPORT_POLICY_PATH = Path("/etc/ken-op-broker/op-broker-policy.yaml")
+TRANSPORT_STARTUP_RECOVERY_TIMEOUT_SECONDS = 700
+TASK7_ARTIFACT_SHA256 = {
+    "/usr/local/libexec/ken-actions/ken-actions-deploy-transaction": "f4cbe9c5222d3dafe9899b539c0bcdbd3b734f8b39d6c1c444f7ae8e42e54fd2",
+    "/etc/systemd/system/ken-actions-deploy-transaction-1.service": "8934f845a0ea882a26f3b6699f6a865662febbb736ec5816897504186b9faa24",
+    "/etc/systemd/system/ken-actions-deploy-transaction-2.service": "d137931523ec039b51f1b2428bf9e0c485b2ce688e5efca06b8678ba55f91ba1",
+    "/etc/systemd/system/ken-frontend-production-builder@.service": "434e76ae73a386c290bb16f3f45df48cfc892b738d8fec2c32ed1bcda3cc3c3e",
+    "/etc/systemd/system/ken-frontend-source-map-uploader@.service": "0e67084dc290d659581e250c5ba78d33f5c1b3ac42bb0aacbb9d3557d97d0ce0",
+    "/etc/systemd/system/ken-frontend-deploy-executor@.service": "dac86637f7f99ec71087585052250fbc4e32fc73cc585ac3370998c96fde78fd",
+}
+TASK7_BINDING_SHA256 = {
+    "ordinary_systemd_transaction_transport_sha256": "5e1641f88d90bd43ad1fb56cef41574c3cda29497d3c139aa1c040e0634500f2",
+    "frontend_operation_binding_sha256": "ab05e6593ce625be91fad528f7adcdd7c2696f1664d8ba113a0f58a5a363b12e",
+    "frontend_phase_transport_sha256": "f4784b92e104c27530e0b9dd86b98d4205faf83098aae616e9ecf392bef12fda",
+    "frontend_deploy_contract_sha256": "47ebf14dcd3341c1dd7b843d45b102e996190d6f954d8b1bb4d003e6484cc564",
+    "trusted_generation_dependency_acquisition_sha256": "dcd386771149140e68e19a2c44989ea3e268c7171afd32fa38db166541ae6933",
+    "trusted_generation_generated_paths_manifest_sha256": "08720cf30192a6daf13056fd150cece9c4308ff13adad1861b9f2db6deea3ec9",
+    "trusted_generation_commit_input_contract_sha256": "d2d81004d9076702ddc01e37cb0d8f189008f033cd7b03871eacf1d8d4e484df",
+    "trusted_generation_cgroup_contract_sha256": "9c01ecb1ada3ae65f0f157698accf56cc56cbafadd078589bf3df7d4893cf854",
+    "trusted_generation_phase_transport_sha256": "6e0945130af419de14091f5afc06d404a919319f7dc2bcee7cf40489561ec12b",
+}
+FRONTEND_RECEIPT_PHASES = (
+    "source", "build", "scan", "upload", "registry", "token-destroy",
+    "digest", "deploy-health", "cleanup",
+)
+FRONTEND_RECEIPT_CONTRACT = {
+    "schema_version": 2,
+    "plan_sha256": PLAN_SHA256,
+    "policy_binding": "root-owned-runtime-policy-sha256",
+    "action_id": "ken-frontend-production-release",
+    "data_bytes_max": 16384,
+    "receipt_bytes_max": 16384,
+    "receipt_owner_uid": 0,
+    "receipt_owner_gid": 0,
+    "receipt_mode": "0600",
+    "chain": "sha256-canonical-json-with-external-root-authority",
+    "phase_authority": "root-owned-0600-canonical-json",
+    "chronology": "one-boot-strict-monotonic",
+    "runner_visible": False,
+    "phases": list(FRONTEND_RECEIPT_PHASES),
+}
+FRONTEND_RECEIPT_CONTRACT_SHA256 = hashlib.sha256(
+    json.dumps(FRONTEND_RECEIPT_CONTRACT, sort_keys=True, separators=(",", ":")).encode()
+).hexdigest()
+SHA1 = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+SAFE_REQUEST_ID = re.compile(r"^[0-9a-f]{64}$")
+SAFE_REASON = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+ALLOWED_REQUEST_KEYS = frozenset({"version", "action_id", "artifact_id", "oidc_jwt", "github_token"})
+ALLOWED_RESPONSE_FIELDS = ("version", "request_id", "status", "reason_code")
+ALLOWED_JOSE_HEADERS = frozenset({"typ", "alg", "kid"})
+ALLOWED_LOG_FIELDS = frozenset({
+    "timestamp", "class", "request_id", "status", "reason_code", "peer_uid",
+    "runner_name", "repository", "repository_id", "workflow", "workflow_sha",
+    "environment", "run_id", "run_attempt", "check_run_id", "action_id",
+    "artifact_id", "artifact_digest", "source_sha", "tree_sha", "manifest_sha256",
+    "destination_id", "duration_ms", "executor_exit_class", "policy_version",
+})
+FORBIDDEN_SOURCE_PHRASES = (
+    "dotnet build", "dotnet publish", "dotnet pack", "npm install", "npm run build",
+    "npm publish", "pnpm install", "pnpm build", "pnpm run build", "pnpm publish",
+    "yarn install", "yarn build", "docker build", "buildctl build", "make package",
+    "python -m build", "cargo publish", "mvn package", "gradle build", "mix hex.publish",
+)
+TEMPLATE_CONTENT = {
+    "ken-vexa-mcp-auth-production-deploy": (
+        "SERVER_HOST=op://Ken%20Deploy%20Production/vexa-mcp-auth-deploy-ssh-production/SERVER_HOST\n"
+        "SERVER_PORT=op://Ken%20Deploy%20Production/vexa-mcp-auth-deploy-ssh-production/SERVER_PORT\n"
+        "SERVER_SSH_KEY=op://Ken%20Deploy%20Production/vexa-mcp-auth-deploy-ssh-production/SERVER_SSH_KEY\n"
+    ),
+    "ken-website-beehiiv-production-sync.generate": (
+        "BEEHIIV_API_KEY=op://Ken%20Deploy%20Production/beehiiv-production/BEEHIIV_API_KEY\n"
+        "BEEHIIV_PUBLICATION_ID=op://Ken%20Deploy%20Production/beehiiv-production/BEEHIIV_PUBLICATION_ID\n"
+    ),
+    "ken-website-beehiiv-production-sync.push": (
+        "DEPLOY_SSH_KEY=op://Ken%20Deploy%20Production/blog-sync-deploy-production/DEPLOY_SSH_KEY\n"
+    ),
+    "ken-website-production-deploy": (
+        "WEBSITE_HOST=op://Ken%20Deploy%20Production/deploy-ssh-production/WEBSITE_HOST\n"
+        "WEBSITE_PORT=op://Ken%20Deploy%20Production/deploy-ssh-production/WEBSITE_PORT\n"
+        "WEBSITE_SSH_KEY=op://Ken%20Deploy%20Production/deploy-ssh-production/WEBSITE_SSH_KEY\n"
+    ),
+}
+DIRECT_WRAPPER_ACTIONS = frozenset({
+    "ken-vexa-mcp-auth-production-deploy",
+    "ken-website-beehiiv-production-sync",
+    "ken-website-production-deploy",
+})
+OPERATION_BINDINGS = {
+    "ken-vexa-mcp-auth-production-deploy": {
+        "input": "deploy.tar.gz", "user": "ken-vexa-mcp-auth-deploy",
+        "remote_root": "/home/ken-vexa-mcp-auth-deploy/incoming",
+        "remote_program": "/usr/local/sbin/ken-vexa-mcp-auth-deploy",
+        "health": [
+            "https://mcp.recordings.ken.so/.well-known/oauth-protected-resource/mcp",
+            "https://mcp.recordings.ken.so/mcp",
+        ],
+    },
+    "ken-website-production-deploy": {
+        "input": "deploy.tar.gz", "user": "ken-website-deploy",
+        "remote_root": "/home/ken-website-deploy/incoming",
+        "remote_program": "/usr/local/sbin/ken-website-deploy",
+        "health": ["https://ken.so", "https://ken.so/use-cases/founders", "https://ken.so/use-cases", "https://ken.so/pricing.md", "https://getken.ai"],
+    },
+}
+
+
+def _operation_binding_sha256(action_id: str) -> str | None:
+    if action_id == "ken-frontend-production-release":
+        return TASK7_BINDING_SHA256["frontend_operation_binding_sha256"]
+    binding = OPERATION_BINDINGS.get(action_id)
+    if binding is None:
+        return None
+    return hashlib.sha256(json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+class Reject(Exception):
+    def __init__(self, code: str):
+        if not SAFE_REASON.fullmatch(code):
+            code = "internal_rejection"
+        super().__init__(code)
+        self.code = code
+
+
+class DuplicateKey(Reject):
+    def __init__(self, key: object):
+        super().__init__("request_duplicate_key")
+        self.key = key
+
+
+def _pairs_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateKey(key)
+        result[key] = value
+    return result
+
+
+def strict_json(data: bytes | str, *, max_bytes: int = MAX_PACKET) -> Any:
+    raw = data.encode() if isinstance(data, str) else data
+    if not raw or len(raw) > max_bytes:
+        raise Reject("request_size_invalid")
+    try:
+        return json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs_no_duplicates)
+    except DuplicateKey:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise Reject("request_json_invalid") from exc
+
+
+def _strict_yaml(text: str, *, allow_anchors: bool = False) -> Any:
+    if yaml is None:
+        raise Reject("runtime_yaml_missing")
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    def mapping(loader: Loader, node: Any, deep: bool = False) -> dict[Any, Any]:
+        result: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in result:
+                raise Reject("policy_duplicate_key")
+            result[key] = loader.construct_object(value_node, deep=deep)
+        return result
+
+    Loader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+    try:
+        for event in yaml.parse(text):
+            # Policy is deliberately a small YAML subset.  Anchors, aliases and
+            # explicit tags can change identity or construction semantics and
+            # are never needed by the reviewed inventory.
+            if ((isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None) is not None) and not allow_anchors) or getattr(event, "tag", None) is not None:
+                raise Reject("policy_yaml_feature_forbidden")
+        return yaml.load(text, Loader=Loader)
+    except Reject:
+        raise
+    except yaml.YAMLError as exc:
+        raise Reject("policy_yaml_invalid") from exc
+
+
+def _ns(value: Any) -> Any:
+    if isinstance(value, dict):
+        return SimpleNamespace(**{key.replace("-", "_"): _ns(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return [_ns(item) for item in value]
+    return value
+
+
+@dataclasses.dataclass(frozen=True)
+class RunnerIdentity:
+    name: str
+    uid: int
+    gid: int
+    id: int
+    group_id: int
+    group_name: str
+    labels: tuple[str, ...]
+    cgroup: str
+    executable: str
+    listener_generation: int
+
+
+@dataclasses.dataclass(frozen=True)
+class Action:
+    action_id: str
+    enabled: bool
+    blocked_reason_code: str
+    trust_class: str
+    input_mode: str
+    result_contract: str
+    repository: Any
+    oidc: Any
+    job: Any
+    runner: RunnerIdentity
+    executor: Any
+    raw: Mapping[str, Any]
+
+
+@dataclasses.dataclass(frozen=True)
+class Policy:
+    policy_version: str
+    issuer: str
+    raw: Mapping[str, Any]
+    classes: Mapping[str, Any]
+    actions: Mapping[str, Action]
+
+
+def _require_exact_keys(value: Mapping[str, Any], required: set[str], optional: set[str], code: str) -> None:
+    if not isinstance(value, dict) or set(value) - required - optional or required - set(value):
+        raise Reject(code)
+
+
+def _require_exact_int_fields(value: Mapping[str, Any], fields: tuple[str, ...], code: str, *, minimum: int = 0) -> None:
+    if any(type(value.get(field)) is not int or value[field] < minimum for field in fields):
+        raise Reject(code)
+
+
+def _file_is_root_owned_readonly(path: Path) -> bool:
+    st = path.stat()
+    return stat.S_ISREG(st.st_mode) and st.st_uid == 0 and not (st.st_mode & 0o022)
+
+
+def _security_binding_missing(action: Mapping[str, Any]) -> list[str]:
+    deferred = set(action.get("deferred_bindings") or [])
+    missing: list[str] = []
+    runner = action["runner"]
+    for field in ("id", "group_id", "listener_generation"):
+        if type(runner.get(field)) is not int or runner[field] <= 0:
+            missing.append(f"runner.{field}")
+    if action["input_mode"] == "trusted_generation":
+        transport = (action.get("trusted_generation") or {}).get("transport") or {}
+        trusted_bindings = {
+            "dependency_acquisition_sha256": "trusted_generation_dependency_acquisition_sha256",
+            "generated_paths_manifest_sha256": "trusted_generation_generated_paths_manifest_sha256",
+            "commit_input_contract_sha256": "trusted_generation_commit_input_contract_sha256",
+            "cgroup_contract_sha256": "trusted_generation_cgroup_contract_sha256",
+            "phase_transport_sha256": "trusted_generation_phase_transport_sha256",
+        }
+        for field, authority in trusted_bindings.items():
+            binding = f"trusted_generation.transport.{field}"
+            value = transport.get(field)
+            if binding in deferred:
+                if value is not None:
+                    raise Reject("policy_deferred_binding_value_invalid")
+                missing.append(binding)
+            elif type(value) is not str or value != TASK7_BINDING_SHA256[authority]:
+                raise Reject("policy_bound_binding_value_invalid")
+        live_binding = "trusted_generation.transport.live_runtime_sha256"
+        live_value = transport.get("live_runtime_sha256")
+        if live_binding not in deferred or live_value is not None:
+            raise Reject("policy_live_runtime_unavailable")
+        missing.append(live_binding)
+    else:
+        for scope in ("template", "executor"):
+            item = action.get(scope)
+            if item and not SHA256.fullmatch(str(item.get("sha256") if scope == "template" else item.get("wrapper_sha256"))):
+                missing.append(f"{scope}.{'sha256' if scope == 'template' else 'wrapper_sha256'}")
+        if not SHA256.fullmatch(str(action["executor"].get("operation_binding_sha256") or "")):
+            missing.append("executor.operation_binding_sha256")
+        systemd_binding = action["executor"].get("systemd_transaction_transport_sha256")
+        if not SHA256.fullmatch(str(systemd_binding or "")):
+            missing.append("executor.systemd_transaction_transport_sha256")
+        elif systemd_binding != TASK7_BINDING_SHA256["ordinary_systemd_transaction_transport_sha256"]:
+            raise Reject("policy_bound_binding_value_invalid")
+        if "known_hosts_sha256" in action["executor"] and not SHA256.fullmatch(str(action["executor"].get("known_hosts_sha256") or "")):
+            missing.append("executor.known_hosts_sha256")
+    if action["input_mode"] == "production_build":
+        build = action.get("production_build") or {}
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(build.get("base_image_digest") or "")):
+            missing.append("production_build.base_image_digest")
+        if not SHA256.fullmatch(str(build.get("variables_manifest_sha256") or "")):
+            missing.append("production_build.variables_manifest_sha256")
+        phase_transport = build.get("phase_transport_sha256")
+        if not SHA256.fullmatch(str(phase_transport or "")):
+            missing.append("production_build.phase_transport_sha256")
+        elif phase_transport != TASK7_BINDING_SHA256["frontend_phase_transport_sha256"]:
+            raise Reject("policy_bound_binding_value_invalid")
+        deploy_contract = build.get("deploy_contract_sha256")
+        if not SHA256.fullmatch(str(deploy_contract or "")):
+            missing.append("production_build.deploy_contract_sha256")
+        elif deploy_contract != TASK7_BINDING_SHA256["frontend_deploy_contract_sha256"]:
+            raise Reject("policy_bound_binding_value_invalid")
+        for field in ("deploy_target_authority_sha256",):
+            binding = f"production_build.{field}"
+            value = build.get(field)
+            if binding in deferred:
+                if value is not None:
+                    raise Reject("policy_deferred_binding_value_invalid")
+                missing.append(binding)
+            elif type(value) is not str or not SHA256.fullmatch(value):
+                raise Reject("policy_bound_binding_value_invalid")
+        live_binding = "production_build.live_runtime_sha256"
+        if live_binding not in deferred or build.get("live_runtime_sha256") is not None:
+            raise Reject("policy_live_runtime_unavailable")
+        missing.append(live_binding)
+    if set(missing) != deferred:
+        raise Reject("policy_deferred_binding_mismatch")
+    return missing
+
+
+def _validate_template_shape(template: Mapping[str, Any], template_id: str, path: str, fields: list[str]) -> None:
+    _require_exact_keys(template, {"path", "sha256", "vault", "item", "fields"}, set(), "policy_template_schema_invalid")
+    content = TEMPLATE_CONTENT.get(template_id)
+    item = {
+        "ken-vexa-mcp-auth-production-deploy": "vexa-mcp-auth-deploy-ssh-production",
+        "ken-website-beehiiv-production-sync.generate": "beehiiv-production",
+        "ken-website-beehiiv-production-sync.push": "blog-sync-deploy-production",
+        "ken-website-production-deploy": "deploy-ssh-production",
+    }.get(template_id)
+    if (template != {
+            "path": path,
+            "sha256": hashlib.sha256((content or "").encode()).hexdigest(),
+            "vault": "Ken Deploy Production",
+            "item": item,
+            "fields": fields,
+        } or content is None or item is None):
+        raise Reject("policy_template_invalid")
+
+
+def _validate_trusted_generation(raw: Mapping[str, Any], record: Mapping[str, Any]) -> None:
+    generation = record.get("trusted_generation")
+    _require_exact_keys(generation, {
+        "authenticated_source", "dependency_acquisition", "phase_order", "phase_overlap",
+        "verified_commit_input", "transaction_slices", "transport", "phases",
+    }, set(), "policy_trusted_generation_schema_invalid")
+    if (generation["authenticated_source"] != "protected-main-before-credentials"
+            or generation["dependency_acquisition"] != "before-credentials"
+            or generation["phase_order"] != ["generate", "push"]
+            or generation["phase_overlap"] != "forbidden"
+            or generation["verified_commit_input"] != "root-coordinator-sealed-read-only"
+            or generation["transaction_slices"] != ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"]):
+        raise Reject("policy_trusted_generation_boundary_invalid")
+    transport = generation["transport"]
+    _require_exact_keys(transport, {
+        "wrapper", "wrapper_sha256", "dependency_acquisition_sha256", "generated_paths_manifest_sha256",
+        "commit_input_contract_sha256", "cgroup_contract_sha256", "phase_transport_sha256", "live_runtime_sha256",
+    }, set(), "policy_trusted_generation_transport_invalid")
+    if (transport["wrapper"] != "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync"
+            or not SHA256.fullmatch(str(transport["wrapper_sha256"]))):
+        raise Reject("policy_trusted_generation_transport_invalid")
+    phases = generation["phases"]
+    _require_exact_keys(phases, {"generate", "push"}, set(), "policy_trusted_generation_phase_invalid")
+    expected = {
+        "generate": {
+            "identity": {"name": "ken-beehiiv-generate", "uid": 22102, "gid": 22102},
+            "request_subdirectory": "generate",
+            "cgroup_template": "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-generate.scope",
+            "descriptor_set": ["authenticated-source-tree", "BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"],
+            "template_id": "ken-website-beehiiv-production-sync.generate",
+            "template_path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.generate.env.op",
+            "fields": ["BEEHIIV_API_KEY", "BEEHIIV_PUBLICATION_ID"],
+            "network_profile": "beehiiv-api-fixed-target",
+            "executes_repository_code": True,
+            "operation": "pinned-dependency-install-and-beehiiv-generation",
+        },
+        "push": {
+            "identity": {"name": "ken-beehiiv-push", "uid": 22104, "gid": 22104},
+            "request_subdirectory": "push",
+            "cgroup_template": "/ken-actions-deploy.slice/{transaction_slice}/ken-beehiiv-push.scope",
+            "descriptor_set": ["root-verified-commit-input", "DEPLOY_SSH_KEY"],
+            "template_id": "ken-website-beehiiv-production-sync.push",
+            "template_path": "/etc/ken-op-broker/templates/ken-website-beehiiv-production-sync.push.env.op",
+            "fields": ["DEPLOY_SSH_KEY"],
+            "network_profile": "github-ssh-ken-website-fixed-target",
+            "executes_repository_code": False,
+            "operation": "fixed-verified-commit-git-ssh-push",
+        },
+    }
+    for phase_name, phase_expected in expected.items():
+        phase = phases[phase_name]
+        _require_exact_keys(phase, {
+            "identity", "request_subdirectory", "cgroup_template", "descriptor_set", "template", "network_profile",
+            "executes_repository_code", "operation",
+        }, set(), "policy_trusted_generation_phase_invalid")
+        _require_exact_keys(phase["identity"], {"name", "uid", "gid"}, set(), "policy_trusted_generation_identity_invalid")
+        _require_exact_int_fields(phase["identity"], ("uid", "gid"), "policy_trusted_generation_identity_invalid", minimum=1)
+        if (phase["identity"] != phase_expected["identity"]
+                or phase["request_subdirectory"] != phase_expected["request_subdirectory"]
+                or phase["cgroup_template"] != phase_expected["cgroup_template"]
+                or phase["descriptor_set"] != phase_expected["descriptor_set"]
+                or phase["network_profile"] != phase_expected["network_profile"]
+                or phase["network_profile"] not in raw["firewall_phase_interface"]["profiles"]
+                or phase["executes_repository_code"] is not phase_expected["executes_repository_code"]
+                or phase["operation"] != phase_expected["operation"]):
+            raise Reject("policy_trusted_generation_phase_invalid")
+        _validate_template_shape(phase["template"], phase_expected["template_id"], phase_expected["template_path"], phase_expected["fields"])
+    generate, push = phases["generate"], phases["push"]
+    if (generate["identity"]["uid"] == push["identity"]["uid"]
+            or generate["identity"]["gid"] == push["identity"]["gid"]
+            or generate["request_subdirectory"] == push["request_subdirectory"]
+            or generate["cgroup_template"] == push["cgroup_template"]
+            or not set(generate["descriptor_set"]).isdisjoint(push["descriptor_set"])
+            or not set(generate["template"]["fields"]).isdisjoint(push["template"]["fields"])
+            or generate["network_profile"] == push["network_profile"]):
+        raise Reject("policy_trusted_generation_phase_overlap")
+
+
+def _validate_policy_shapes(raw: Mapping[str, Any], record: Mapping[str, Any]) -> None:
+    """Reject implicit policy authority at every security-sensitive depth."""
+    _require_exact_keys(raw["organization"], {"login", "id"}, set(), "policy_organization_schema_invalid")
+    _require_exact_keys(raw["protocol"], {"socket_type", "packet_bytes_max", "oidc_token_bytes_max", "github_token_bytes_max", "first_packet_timeout_seconds", "socket_backlog", "response_fields", "response_statuses"}, set(), "policy_protocol_schema_invalid")
+    _require_exact_keys(raw["jwks"], {"algorithms", "connect_timeout_seconds", "read_timeout_seconds", "response_bytes_max", "freshness_min_seconds", "freshness_max_seconds", "clock_skew_seconds", "token_lifetime_max_seconds"}, set(), "policy_jwks_schema_invalid")
+    _require_exact_keys(raw["github_api"], {"origin", "redirects", "response_bytes_max", "allowed_get_templates"}, set(), "policy_github_schema_invalid")
+    _require_exact_keys(raw["credentials"], {"command", "credential_name", "credential_source_mode", "delivery", "connect_environment", "operations", "output_owner"}, set(), "policy_credentials_schema_invalid")
+    if raw["credentials"]["command"] != ["/usr/local/bin/op", "inject"]:
+        raise Reject("policy_credentials_command_invalid")
+    _require_exact_keys(raw["deploy_leases"], {"ordinary_slots", "writer_preference", "production_build_holds_both", "recovery"}, set(), "policy_lease_schema_invalid")
+    _require_exact_int_fields(raw["protocol"], ("packet_bytes_max", "oidc_token_bytes_max", "github_token_bytes_max", "first_packet_timeout_seconds", "socket_backlog"), "policy_protocol_schema_invalid", minimum=1)
+    _require_exact_int_fields(raw["jwks"], ("connect_timeout_seconds", "read_timeout_seconds", "response_bytes_max", "freshness_min_seconds", "freshness_max_seconds", "clock_skew_seconds", "token_lifetime_max_seconds"), "policy_jwks_schema_invalid", minimum=0)
+    _require_exact_int_fields(raw["github_api"], ("response_bytes_max",), "policy_github_schema_invalid", minimum=1)
+    _require_exact_int_fields(raw["deploy_leases"], ("ordinary_slots",), "policy_lease_schema_invalid", minimum=1)
+    if type(raw["deploy_leases"]["production_build_holds_both"]) is not bool:
+        raise Reject("policy_lease_schema_invalid")
+    firewall = raw["firewall_phase_interface"]
+    _require_exact_keys(firewall, {"command", "arguments", "target_authority", "activation", "teardown", "profiles"}, set(), "policy_firewall_schema_invalid")
+    if (firewall["command"] != ["/usr/local/libexec/ken-actions-guest-firewall", "phase"]
+            or firewall["arguments"] != ["--request-id", "{request_id}", "--profile", "{network_profile}", "--phase", "{phase}", "--state", "{activate|deactivate}"]
+            or firewall["target_authority"] != "policy-only" or firewall["activation"] != "root-created-request-id"
+            or firewall["teardown"] != "mandatory-on-exit"):
+        raise Reject("policy_firewall_interface_invalid")
+    expected_profiles = {
+        "github-control-ci": ["oidc-discovery", "oidc-jwks", "github-api", "github-smart-https"],
+        "github-control-nonproduction": ["oidc-discovery", "oidc-jwks", "github-api", "github-smart-https"],
+        "github-control-production": ["oidc-discovery", "oidc-jwks", "github-api", "github-smart-https"],
+        "vexa-production-fixed-target": ["vexa-ssh", "vexa-public-health"],
+        "website-production-fixed-target": ["website-ssh", "ken-so-public-health", "getken-ai-separation"],
+        "beehiiv-api-fixed-target": ["beehiiv-api"],
+        "github-ssh-ken-website-fixed-target": ["github-ssh"],
+        "frontend-production-digest-deploy": ["node-base-read", "package-read", "build-offline", "posthog-upload", "ghcr-write", "frontend-deploy", "frontend-public-health"],
+    }
+    if firewall["profiles"] != expected_profiles:
+        raise Reject("policy_firewall_profiles_invalid")
+    for class_name, class_record in raw["classes"].items():
+        _require_exact_keys(class_record, {"audience", "broker_network_uid", "broker_network_gid", "vault", "active_connections_max"}, set(), "policy_class_schema_invalid")
+        _require_exact_int_fields(class_record, ("broker_network_uid", "broker_network_gid", "active_connections_max"), "policy_class_schema_invalid", minimum=1)
+        if class_record["audience"] != f"https://ken.so/actions/op-broker/{class_name}":
+            raise Reject("policy_class_audience_invalid")
+    _require_exact_keys(record["repository"], {"owner", "owner_id", "name", "id", "visibility", "default_branch", "ref", "protected", "source_commit_sha", "workflow_ref", "workflow_blob_sha"}, {"dockerfile_blob_sha", "lockfile_blob_sha"}, "policy_repository_schema_invalid")
+    _require_exact_keys(record["oidc"], {"audience", "subject", "event_names", "environment", "ref_type", "reusable_workflow"}, set(), "policy_oidc_schema_invalid")
+    _require_exact_keys(record["job"], {"id", "name", "permissions"}, set(), "policy_job_schema_invalid")
+    _require_exact_keys(record["runner"], {"name", "uid", "gid", "id", "group_id", "group_name", "labels", "cgroup", "executable", "listener_generation"}, set(), "policy_runner_schema_invalid")
+    _require_exact_int_fields(record["repository"], ("owner_id", "id"), "policy_repository_schema_invalid", minimum=1)
+    if type(record["repository"]["protected"]) is not bool or type(record["oidc"]["reusable_workflow"]) is not bool:
+        raise Reject("policy_repository_schema_invalid")
+    _require_exact_int_fields(record["runner"], ("uid", "gid"), "policy_runner_schema_invalid", minimum=1)
+    _require_exact_int_fields(record["runner"], ("id", "group_id", "listener_generation"), "policy_runner_schema_invalid", minimum=0)
+    if record["input_mode"] == "trusted_generation":
+        _validate_trusted_generation(raw, record)
+    else:
+        if record.get("template"):
+            _require_exact_keys(record["template"], {"path", "sha256", "vault", "item", "fields"}, set(), "policy_template_schema_invalid")
+        _require_exact_keys(record["executor"], {"name", "uid", "gid", "wrapper", "wrapper_sha256", "operation_binding_sha256", "systemd_transaction_transport_sha256", "timeout_seconds", "network_profile"}, {"target_profile", "known_hosts_path", "known_hosts_sha256"}, "policy_executor_schema_invalid")
+        _require_exact_int_fields(record["executor"], ("uid", "gid", "timeout_seconds"), "policy_executor_schema_invalid", minimum=1)
+        if record["executor"]["network_profile"] not in raw["firewall_phase_interface"]["profiles"]:
+            raise Reject("policy_executor_network_profile_invalid")
+        if ("known_hosts_path" in record["executor"]) != ("known_hosts_sha256" in record["executor"]):
+            raise Reject("policy_executor_known_hosts_invalid")
+    if record.get("limits"):
+        _require_exact_keys(record["limits"], {"fetch_seconds", "pack_bytes", "objects", "files", "blob_bytes", "materialized_bytes"}, set(), "policy_limits_schema_invalid")
+        _require_exact_int_fields(record["limits"], ("fetch_seconds", "pack_bytes", "objects", "files", "blob_bytes", "materialized_bytes"), "policy_limits_schema_invalid", minimum=1)
+    if record.get("artifact_input"):
+        _require_exact_keys(record["artifact_input"], {"name_prefix", "sha_suffix", "max_archive_bytes", "max_entries", "max_extracted_bytes", "manifest_path"}, set(), "policy_artifact_schema_invalid")
+        _require_exact_int_fields(record["artifact_input"], ("max_archive_bytes", "max_entries", "max_extracted_bytes"), "policy_artifact_schema_invalid", minimum=1)
+        if record["input_mode"] != "artifact" or record["artifact_input"]["sha_suffix"] is not True or record["artifact_input"]["manifest_path"] != "manifest.json":
+            raise Reject("policy_artifact_invalid")
+    if record.get("production_build"):
+        build = record["production_build"]
+        _require_exact_keys(build, {"builder_uid", "builder_gid", "uploader_uid", "uploader_gid", "deploy_uid", "deploy_gid", "buildkit_version", "buildctl_version", "node_version", "pnpm_version", "base_image", "base_image_digest", "platform", "registry", "derived_tag_prefix", "secret_mount", "secret_command", "secret_network", "executes_repository_code_with_secret", "transformed_embedding_residual_accepted", "source_map_endpoint", "variables_manifest_sha256", "phase_transport_sha256", "deploy_contract_sha256", "deploy_target_authority_sha256", "live_runtime_sha256", "builder", "uploader", "deploy", "github_read_paths", "github_denied_resources", "ghcr_hosts", "ghcr_methods", "ghcr_path_prefix", "leakage_encodings", "posthog_fields", "build_field", "firewall_phases", "receipt_contract"}, set(), "policy_build_schema_invalid")
+        _require_exact_keys(build["builder"], {"slice", "cpu_quota", "memory_max", "memory_swap_max", "tasks_max", "disk_max_bytes", "timeout_seconds"}, set(), "policy_build_limits_invalid")
+        _require_exact_keys(build["uploader"], {"slice", "cpu_quota", "memory_max", "memory_swap_max", "tasks_max"}, set(), "policy_build_limits_invalid")
+        _require_exact_keys(build["deploy"], {"slice", "cpu_quota", "memory_max", "memory_swap_max", "tasks_max"}, set(), "policy_build_limits_invalid")
+        _require_exact_int_fields(build, ("builder_uid", "builder_gid", "uploader_uid", "uploader_gid", "deploy_uid", "deploy_gid"), "policy_build_schema_invalid", minimum=1)
+        for field in ("executes_repository_code_with_secret", "transformed_embedding_residual_accepted"):
+            if type(build[field]) is not bool:
+                raise Reject("policy_build_schema_invalid")
+        _require_exact_int_fields(build["builder"], ("tasks_max", "disk_max_bytes", "timeout_seconds"), "policy_build_limits_invalid", minimum=1)
+        _require_exact_int_fields(build["uploader"], ("tasks_max",), "policy_build_limits_invalid", minimum=1)
+        _require_exact_int_fields(build["deploy"], ("tasks_max",), "policy_build_limits_invalid", minimum=1)
+        expected_frontend_phases = {
+            "node-base-read": {"uid": 22201, "targets": ["node-registry", "node-registry-auth"]},
+            "package-read": {"uid": 22201, "targets": ["package-read"]},
+            "build-offline": {"uid": 22201, "targets": []},
+            "posthog-upload": {"uid": 22202, "targets": ["posthog-upload"]},
+            "ghcr-write": {"uid": 22003, "targets": ["ghcr", "ghcr-storage"]},
+            "frontend-deploy": {"uid": 22203, "targets": ["frontend-deploy"]},
+            "frontend-public-health": {"uid": 22203, "targets": ["frontend-public-health"]},
+        }
+        if build["firewall_phases"] != expected_frontend_phases:
+            raise Reject("policy_build_firewall_invalid")
+        if raw["firewall_phase_interface"]["profiles"]["frontend-production-digest-deploy"] != list(expected_frontend_phases):
+            raise Reject("policy_build_firewall_invalid")
+        for phase in build["firewall_phases"].values():
+            _require_exact_keys(phase, {"uid", "targets"}, set(), "policy_build_firewall_invalid")
+            _require_exact_int_fields(phase, ("uid",), "policy_build_firewall_invalid", minimum=1)
+            if not isinstance(phase["targets"], list) or len(phase["targets"]) != len(set(phase["targets"])):
+                raise Reject("policy_build_firewall_invalid")
+        receipt_contract = build["receipt_contract"]
+        _require_exact_keys(receipt_contract, {"schema_version", "plan_sha256", "policy_binding", "contract_sha256", "action_id", "data_bytes_max", "receipt_bytes_max", "receipt_owner_uid", "receipt_owner_gid", "receipt_mode", "chain", "phase_authority", "chronology", "runner_visible", "phases"}, set(), "policy_build_receipt_invalid")
+        _require_exact_int_fields(receipt_contract, ("schema_version", "data_bytes_max", "receipt_bytes_max", "receipt_owner_uid", "receipt_owner_gid"), "policy_build_receipt_invalid", minimum=0)
+        if receipt_contract != {
+            **FRONTEND_RECEIPT_CONTRACT,
+            "contract_sha256": FRONTEND_RECEIPT_CONTRACT_SHA256,
+        }:
+            raise Reject("policy_build_receipt_invalid")
+    if record["oidc"]["audience"] != raw["classes"][record["trust_class"]]["audience"]:
+        raise Reject("policy_action_audience_invalid")
+
+
+def load_policy(path: str | Path, *, allow_nonroot: bool = False) -> Policy:
+    source = Path(path)
+    if source.is_symlink() or not source.is_file():
+        raise Reject("policy_path_invalid")
+    if not allow_nonroot and not _file_is_root_owned_readonly(source):
+        raise Reject("policy_ownership_invalid")
+    raw = _strict_yaml(source.read_text(encoding="utf-8"))
+    required_root = {
+        "schema_version", "policy_version", "issuer", "discovery_url", "jwks_uri", "organization",
+        "protocol", "jwks", "github_api", "artifact", "source_commit", "credentials",
+        "deploy_leases", "firewall_phase_interface", "classes", "actions",
+    }
+    _require_exact_keys(raw, required_root, set(), "policy_schema_invalid")
+    if type(raw["schema_version"]) is not int or raw["schema_version"] != 1 or raw["issuer"] != "https://token.actions.githubusercontent.com":
+        raise Reject("policy_schema_invalid")
+    if raw["organization"] != {"login": "Ken-Technology", "id": 270069411}:
+        raise Reject("policy_organization_invalid")
+    if set(raw["classes"]) != {"ci", "nonproduction", "production"}:
+        raise Reject("policy_classes_invalid")
+    expected_ids = {
+        "ken-frontend-production-release",
+        "ken-vexa-mcp-auth-production-deploy",
+        "ken-website-beehiiv-production-sync",
+        "ken-website-production-deploy",
+    }
+    action_map: dict[str, Action] = {}
+    for record in raw["actions"]:
+        common = {"action_id", "enabled", "blocked_reason_code", "deferred_bindings", "trust_class", "input_mode", "result_contract", "repository", "oidc", "job", "runner"}
+        trusted_generation = isinstance(record, dict) and record.get("input_mode") == "trusted_generation"
+        required = common | ({"trusted_generation"} if trusted_generation else {"executor"})
+        optional = {"source_is_deployable", "template", "limits", "artifact_input", "production_build"}
+        if not trusted_generation:
+            optional.add("executes_repository_code")
+        _require_exact_keys(record, required, optional, "policy_action_schema_invalid")
+        _validate_policy_shapes(raw, record)
+        action_id = record["action_id"]
+        if action_id in action_map or action_id not in expected_ids:
+            raise Reject("policy_action_id_invalid")
+        if record["trust_class"] not in raw["classes"] or record["result_contract"] != "stable-code-only":
+            raise Reject("policy_action_boundary_invalid")
+        if record["input_mode"] not in {"artifact", "source_commit", "registry", "production_build", "trusted_generation"}:
+            raise Reject("policy_input_mode_invalid")
+        if record["input_mode"] == "production_build" and action_id != "ken-frontend-production-release":
+            raise Reject("policy_production_build_invalid")
+        if record["input_mode"] == "trusted_generation" and action_id != "ken-website-beehiiv-production-sync":
+            raise Reject("policy_trusted_generation_invalid")
+        if record["input_mode"] == "source_commit" and record.get("source_is_deployable") is not True:
+            raise Reject("policy_source_not_deployable")
+        if record["input_mode"] != "source_commit" and "source_is_deployable" in record:
+            raise Reject("policy_source_marker_invalid")
+        if (record["input_mode"] == "artifact") != ("artifact_input" in record):
+            raise Reject("policy_artifact_invalid")
+        if type(record["enabled"]) is not bool or not isinstance(record["deferred_bindings"], list) or len(record["deferred_bindings"]) != len(set(record["deferred_bindings"])):
+            raise Reject("policy_binding_schema_invalid")
+        repo = record["repository"]
+        if repo.get("owner") != "Ken-Technology" or repo.get("owner_id") != 270069411 or repo.get("visibility") != "private":
+            raise Reject("policy_repository_invalid")
+        for field in ("source_commit_sha", "workflow_blob_sha"):
+            if not SHA1.fullmatch(str(repo.get(field) or "")):
+                raise Reject("policy_source_pin_invalid")
+        permissions = record["job"]["permissions"]
+        expected_permissions = {"actions": "read", "contents": "read", "id-token": "write"}
+        if action_id == "ken-frontend-production-release":
+            expected_permissions["packages"] = "write"
+        if permissions != expected_permissions:
+            raise Reject("policy_job_permissions_invalid")
+        template = record.get("template")
+        if template:
+            content = TEMPLATE_CONTENT.get(action_id)
+            if content is None or hashlib.sha256(content.encode()).hexdigest() != template["sha256"]:
+                raise Reject("policy_template_hash_invalid")
+            if template["path"] != f"/etc/ken-op-broker/templates/{action_id}.env.op":
+                raise Reject("policy_template_path_invalid")
+        if not trusted_generation:
+            operation_hash = record["executor"]["operation_binding_sha256"]
+            expected_operation_hash = _operation_binding_sha256(action_id)
+            if operation_hash is not None and operation_hash != expected_operation_hash:
+                raise Reject("policy_operation_binding_invalid")
+        runner_raw = record["runner"]
+        runner = RunnerIdentity(
+            name=runner_raw["name"], uid=runner_raw["uid"], gid=runner_raw["gid"],
+            id=runner_raw["id"], group_id=runner_raw["group_id"],
+            group_name=runner_raw["group_name"], labels=tuple(runner_raw["labels"]),
+            cgroup=runner_raw["cgroup"], executable=runner_raw["executable"],
+            listener_generation=runner_raw["listener_generation"],
+        )
+        missing = _security_binding_missing(record)
+        if missing:
+            expected_blockers = {
+                "ken-frontend-production-release": "frontend_live_runtime_variables_and_target_authority_required",
+                "ken-vexa-mcp-auth-production-deploy": "vexa_host_key_and_runtime_identity_required",
+                "ken-website-beehiiv-production-sync": "beehiiv_live_runtime_required",
+                "ken-website-production-deploy": "website_host_key_and_runtime_identity_required",
+            }
+            expected_blocker = expected_blockers[action_id]
+            if record["enabled"] is not False or record["blocked_reason_code"] != expected_blocker:
+                raise Reject("policy_unbound_action_enabled")
+        elif record["enabled"] is not True or record["blocked_reason_code"] != "none":
+            raise Reject("policy_bound_action_disabled")
+        action_map[action_id] = Action(
+            action_id=action_id, enabled=record["enabled"], blocked_reason_code=record["blocked_reason_code"],
+            trust_class=record["trust_class"], input_mode=record["input_mode"], result_contract=record["result_contract"],
+            repository=_ns(repo), oidc=_ns(record["oidc"]), job=_ns(record["job"]), runner=runner,
+            executor=None if trusted_generation else _ns(record["executor"]), raw=record,
+        )
+    if set(action_map) != expected_ids:
+        raise Reject("policy_action_set_invalid")
+    return Policy(raw["policy_version"], raw["issuer"], raw, {key: _ns(value) for key, value in raw["classes"].items()}, action_map)
+
+
+def verify_runtime_assets(policy: Policy) -> None:
+    for raw_path, expected_sha256 in TASK7_ARTIFACT_SHA256.items():
+        path = Path(raw_path)
+        if (path.is_symlink() or not _file_is_root_owned_readonly(path)
+                or hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256):
+            raise Reject("transport_runtime_hash_invalid")
+    for action in policy.actions.values():
+        record = action.raw
+        if action.input_mode == "trusted_generation":
+            generation = record["trusted_generation"]
+            templates = [phase["template"] for phase in generation["phases"].values()]
+            transport = generation["transport"]
+            wrapper = Path(transport["wrapper"])
+            if wrapper.is_symlink() or not _file_is_root_owned_readonly(wrapper) or hashlib.sha256(wrapper.read_bytes()).hexdigest() != transport["wrapper_sha256"]:
+                raise Reject("wrapper_runtime_hash_invalid")
+        else:
+            templates = [record["template"]] if record.get("template") else []
+            wrapper = Path(record["executor"]["wrapper"])
+            if wrapper.is_symlink() or not _file_is_root_owned_readonly(wrapper) or hashlib.sha256(wrapper.read_bytes()).hexdigest() != record["executor"]["wrapper_sha256"]:
+                raise Reject("wrapper_runtime_hash_invalid")
+            if record["executor"].get("known_hosts_sha256"):
+                known_hosts = Path(record["executor"]["known_hosts_path"])
+                if known_hosts.is_symlink() or not _file_is_root_owned_readonly(known_hosts) or hashlib.sha256(known_hosts.read_bytes()).hexdigest() != record["executor"]["known_hosts_sha256"]:
+                    raise Reject("known_hosts_runtime_hash_invalid")
+        for template in templates:
+            path = Path(template["path"])
+            if path.is_symlink() or not _file_is_root_owned_readonly(path) or hashlib.sha256(path.read_bytes()).hexdigest() != template["sha256"]:
+                raise Reject("template_runtime_hash_invalid")
+
+
+def open_credential_source(directory: Path) -> int:
+    if directory.is_symlink():
+        raise Reject("credential_directory_invalid")
+    directory_stat = directory.stat()
+    if not stat.S_ISDIR(directory_stat.st_mode) or directory_stat.st_uid != 0 or directory_stat.st_mode & 0o077:
+        raise Reject("credential_directory_invalid")
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(directory / "op-service-account-token", flags)
+    source = os.fstat(fd)
+    if not stat.S_ISREG(source.st_mode) or source.st_uid != 0 or source.st_nlink != 1 or source.st_mode & 0o077:
+        os.close(fd)
+        raise Reject("credential_source_invalid")
+    return fd
+
+
+def parse_request(packet: bytes) -> dict[str, Any]:
+    request = strict_json(packet)
+    if not isinstance(request, dict) or set(request) - ALLOWED_REQUEST_KEYS:
+        raise Reject("request_schema_invalid")
+    required = {"version", "action_id", "oidc_jwt", "github_token"}
+    if required - set(request) or type(request["version"]) is not int or request["version"] != 1:
+        raise Reject("request_schema_invalid")
+    if not isinstance(request["action_id"], str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,79}", request["action_id"]):
+        raise Reject("request_action_invalid")
+    for key, limit in (("oidc_jwt", MAX_OIDC), ("github_token", MAX_GITHUB_TOKEN)):
+        if not isinstance(request[key], str):
+            raise Reject("request_token_invalid")
+        try:
+            encoded = request[key].encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise Reject("request_token_invalid") from exc
+        if not 1 <= len(encoded) <= limit or any(byte < 0x21 or byte > 0x7e for byte in encoded):
+            raise Reject("request_token_invalid")
+    if "artifact_id" in request and (type(request["artifact_id"]) is not int or request["artifact_id"] <= 0):
+        raise Reject("request_artifact_id_invalid")
+    return request
+
+
+def validate_request_for_action(request: Mapping[str, Any], action: Action, fds: Sequence[int]) -> None:
+    artifact = action.input_mode == "artifact"
+    if artifact != ("artifact_id" in request) or len(fds) != (1 if artifact else 0):
+        raise Reject("request_input_mode_mismatch")
+    if artifact:
+        flags = fcntl.fcntl(fds[0], fcntl.F_GETFL)
+        st = os.fstat(fds[0])
+        if (flags & os.O_ACCMODE) != os.O_RDONLY or not stat.S_ISREG(st.st_mode):
+            raise Reject("artifact_descriptor_invalid")
+
+
+def validate_artifact_metadata(value: Mapping[str, Any], claims: Mapping[str, Any], action: Action) -> str:
+    if action.input_mode != "artifact":
+        raise Reject("artifact_action_mismatch")
+    contract = action.raw["artifact_input"]
+    expected_name = contract["name_prefix"] + claims["sha"]
+    if value.get("id") is None or value.get("name") != expected_name or value.get("expired") is not False:
+        raise Reject("artifact_metadata_mismatch")
+    if type(value.get("size_in_bytes")) is not int or not 0 < value["size_in_bytes"] <= contract["max_archive_bytes"]:
+        raise Reject("artifact_size_exceeded")
+    digest = value.get("digest")
+    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise Reject("artifact_api_digest_invalid")
+    run = value.get("workflow_run")
+    repo = action.raw["repository"]
+    expected = {"id": claims["run_id"], "head_sha": claims["sha"], "head_branch": repo["default_branch"], "repository_id": repo["id"]}
+    if not isinstance(run, dict) or any(run.get(key) != item for key, item in expected.items()):
+        raise Reject("artifact_run_mismatch")
+    return digest.removeprefix("sha256:")
+
+
+def verify_artifact_manifest(root: Path, source_sha: str) -> str:
+    manifest_path = root / "manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise Reject("artifact_manifest_missing")
+    value = strict_json(manifest_path.read_bytes(), max_bytes=1024 * 1024)
+    if not isinstance(value, dict) or set(value) != {"source_sha", "files"} or value["source_sha"] != source_sha or not isinstance(value["files"], dict):
+        raise Reject("artifact_manifest_invalid")
+    actual_paths = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file() and path != manifest_path}
+    if set(value["files"]) != actual_paths:
+        raise Reject("artifact_manifest_file_set_mismatch")
+    for relative, expected in value["files"].items():
+        if not SHA256.fullmatch(str(expected)) or hashlib.sha256((root / relative).read_bytes()).hexdigest() != expected:
+            raise Reject("artifact_manifest_digest_mismatch")
+    return hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+
+def validate_jose_header(header: Mapping[str, Any]) -> None:
+    if set(header) != ALLOWED_JOSE_HEADERS or header.get("typ") != "JWT" or header.get("alg") != "RS256" or not isinstance(header.get("kid"), str) or not header["kid"]:
+        raise Reject("jwt_header_invalid")
+
+
+def _jwt_segment_json(segment: str) -> dict[str, Any]:
+    try:
+        padding = "=" * (-len(segment) % 4)
+        decoded = base64.urlsafe_b64decode((segment + padding).encode())
+        value = strict_json(decoded, max_bytes=32768)
+    except Exception as exc:
+        raise Reject("jwt_format_invalid") from exc
+    if not isinstance(value, dict):
+        raise Reject("jwt_format_invalid")
+    return value
+
+
+def decode_and_verify_jwt(token: str, action: Action, jwks: Mapping[str, Any], *, now: int | None = None) -> dict[str, Any]:
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise Reject("jwt_format_invalid")
+    header = _jwt_segment_json(parts[0])
+    validate_jose_header(header)
+    keys = [key for key in jwks.get("keys", []) if key.get("kid") == header["kid"]]
+    if len(keys) != 1 or keys[0].get("kty") != "RSA" or keys[0].get("use") not in (None, "sig") or keys[0].get("alg") not in (None, "RS256"):
+        raise Reject("jwks_key_invalid")
+    try:
+        import jwt
+        claims = jwt.decode(
+            token, jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(keys[0])), algorithms=["RS256"],
+            issuer="https://token.actions.githubusercontent.com", audience=action.raw["oidc"]["audience"],
+            options={"require": ["iss", "aud", "exp", "iat", "nbf", "jti"]}, leeway=30,
+        )
+    except ImportError as exc:
+        raise Reject("runtime_jose_missing") from exc
+    except Exception as exc:
+        raise Reject("jwt_signature_invalid") from exc
+    validate_claims(claims, action, now=now)
+    return claims
+
+
+def synthetic_claims_for_action(action: Action, now: int) -> dict[str, Any]:
+    repo, oidc = action.raw["repository"], action.raw["oidc"]
+    return {
+        "iss": "https://token.actions.githubusercontent.com",
+        "aud": f"https://ken.so/actions/op-broker/{action.trust_class}",
+        "sub": oidc["subject"], "jti": "synthetic-jti", "iat": now - 1, "nbf": now - 1, "exp": now + 300,
+        "repository_owner": repo["owner"], "repository_owner_id": str(repo["owner_id"]),
+        "repository": f"{repo['owner']}/{repo['name']}", "repository_id": str(repo["id"]),
+        "repository_visibility": repo["visibility"], "ref": repo["ref"], "ref_type": oidc["ref_type"],
+        "ref_protected": "true", "sha": repo["source_commit_sha"], "event_name": oidc["event_names"][0],
+        "head_ref": "", "base_ref": "", "workflow_ref": repo["workflow_ref"],
+        "workflow_sha": repo["source_commit_sha"], "environment": oidc["environment"],
+        "run_id": 101, "run_number": 102, "run_attempt": 1, "check_run_id": 103,
+        "actor_id": "104", "runner_environment": "self-hosted",
+    }
+
+
+def validate_claims(claims: Mapping[str, Any], action: Action, *, now: int | None = None) -> None:
+    required = {
+        "iss", "aud", "sub", "jti", "iat", "nbf", "exp", "repository_owner", "repository_owner_id",
+        "repository", "repository_id", "repository_visibility", "ref", "ref_type", "ref_protected", "sha",
+        "event_name", "head_ref", "base_ref", "workflow_ref", "workflow_sha", "environment", "run_id",
+        "run_number", "run_attempt", "check_run_id", "actor_id", "runner_environment",
+    }
+    if set(claims) != required:
+        raise Reject("jwt_claim_schema_invalid")
+    now = int(time.time()) if now is None else now
+    for name in ("iat", "nbf", "exp", "run_id", "run_number", "run_attempt", "check_run_id"):
+        if type(claims[name]) is not int:
+            raise Reject("jwt_claim_type_invalid")
+    if claims["run_id"] <= 0 or claims["run_number"] <= 0 or claims["run_attempt"] <= 0 or claims["check_run_id"] <= 0:
+        raise Reject("jwt_run_identity_invalid")
+    if claims["iat"] > now + 30 or claims["nbf"] > now + 30 or claims["exp"] < now - 30 or claims["exp"] - claims["iat"] > 600 or now - claims["iat"] > 600:
+        raise Reject("jwt_time_invalid")
+    repo, oidc = action.raw["repository"], action.raw["oidc"]
+    expected = {
+        "iss": "https://token.actions.githubusercontent.com", "aud": f"https://ken.so/actions/op-broker/{action.trust_class}",
+        "sub": oidc["subject"], "repository_owner": repo["owner"], "repository_owner_id": str(repo["owner_id"]),
+        "repository": f"{repo['owner']}/{repo['name']}", "repository_id": str(repo["id"]),
+        "repository_visibility": "private", "ref": repo["ref"], "ref_type": "branch", "ref_protected": "true",
+        "sha": repo["source_commit_sha"], "head_ref": "", "base_ref": "", "workflow_ref": repo["workflow_ref"],
+        "workflow_sha": repo["source_commit_sha"], "environment": oidc["environment"], "runner_environment": "self-hosted",
+    }
+    for key, value in expected.items():
+        if claims.get(key) != value or isinstance(claims.get(key), (list, dict)):
+            raise Reject("jwt_claim_mismatch")
+    if claims["event_name"] not in oidc["event_names"] or not SHA1.fullmatch(claims["sha"]):
+        raise Reject("jwt_claim_mismatch")
+    if not isinstance(claims["jti"], str) or not claims["jti"] or not isinstance(claims["actor_id"], str) or not claims["actor_id"].isdigit():
+        raise Reject("jwt_claim_type_invalid")
+
+
+def synthetic_job_for_action(action: Action, claims: Mapping[str, Any]) -> dict[str, Any]:
+    runner_id = action.runner.id if action.runner.id > 0 else 501
+    group_id = action.runner.group_id if action.runner.group_id > 0 else 502
+    return {
+        "id": claims["check_run_id"], "run_id": claims["run_id"], "head_sha": claims["sha"],
+        "name": action.raw["job"]["name"], "status": "in_progress", "runner_name": action.runner.name,
+        "runner_id": runner_id, "runner_group_id": group_id, "runner_group_name": action.runner.group_name,
+        "labels": list(action.runner.labels),
+    }
+
+
+def validate_live_job(job: Mapping[str, Any], claims: Mapping[str, Any], action: Action) -> None:
+    expected_id = action.runner.id if action.runner.id > 0 else 501
+    expected_group = action.runner.group_id if action.runner.group_id > 0 else 502
+    expected = {
+        "id": claims["check_run_id"], "run_id": claims["run_id"], "head_sha": claims["sha"],
+        "name": action.raw["job"]["name"], "status": "in_progress", "runner_name": action.runner.name,
+        "runner_id": expected_id, "runner_group_id": expected_group, "runner_group_name": action.runner.group_name,
+    }
+    for key, value in expected.items():
+        if job.get(key) != value:
+            raise Reject("live_job_mismatch")
+    labels = job.get("labels")
+    if not isinstance(labels, list) or any(not isinstance(label, str) for label in labels) or len(labels) != len(set(labels)) or set(labels) != set(action.runner.labels):
+        raise Reject("live_job_labels_mismatch")
+
+
+@dataclasses.dataclass(frozen=True)
+class PeerIdentity:
+    uid: int
+    gid: int
+    pid: int
+    start_time: int
+    cgroup: str
+    executable: str
+    executable_identity: str = "fixture"
+
+
+def _peer_executable(pid: int) -> tuple[str, str]:
+    """Bind an interpreted launcher to its immutable script, not python3.
+
+    Linux exposes the interpreter in /proc/PID/exe for a shebang program.  The
+    absolute script is the second NUL-delimited argv entry; require it to be a
+    root-owned, non-writable regular file and bind device/inode/content hash.
+    """
+    kernel_executable = os.readlink(f"/proc/{pid}/exe")
+    executable = kernel_executable
+    if Path(kernel_executable).name.startswith("python"):
+        argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        if len(argv) < 2:
+            raise Reject("peer_executable_invalid")
+        try:
+            candidate = Path(argv[1].decode("utf-8"))
+        except UnicodeDecodeError as exc:
+            raise Reject("peer_executable_invalid") from exc
+        if not candidate.is_absolute() or candidate.is_symlink() or not _file_is_root_owned_readonly(candidate):
+            raise Reject("peer_executable_invalid")
+        executable = str(candidate)
+    path = Path(executable)
+    if path.is_symlink() or not _file_is_root_owned_readonly(path):
+        raise Reject("peer_executable_invalid")
+    status = path.stat()
+    identity = f"{status.st_dev}:{status.st_ino}:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    return executable, identity
+
+
+def validate_peer(peer: PeerIdentity, expected: RunnerIdentity, accepted: PeerIdentity | None = None) -> None:
+    accepted = peer if accepted is None else accepted
+    if peer.uid == 0 or peer.uid != expected.uid or peer.gid != expected.gid:
+        raise Reject("peer_uid_mismatch")
+    if peer.pid != accepted.pid or peer.start_time != accepted.start_time or peer.pid <= 1:
+        raise Reject("peer_pid_drift")
+    if accepted.uid != peer.uid or accepted.gid != peer.gid or accepted.cgroup != peer.cgroup or accepted.executable != peer.executable or accepted.executable_identity != peer.executable_identity:
+        raise Reject("peer_process_drift")
+    if peer.cgroup != expected.cgroup or peer.executable != expected.executable:
+        raise Reject("peer_process_mismatch")
+
+
+def peer_from_socket(conn: socket.socket) -> PeerIdentity:
+    pid, uid, gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+    stat_fields = Path(f"/proc/{pid}/stat").read_text().split()
+    if len(stat_fields) < 22:
+        raise Reject("peer_proc_invalid")
+    cgroup_lines = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
+    cgroup = next((line.split(":", 2)[2] for line in cgroup_lines if line.startswith("0::")), "")
+    executable, executable_identity = _peer_executable(pid)
+    return PeerIdentity(uid, gid, pid, int(stat_fields[21]), cgroup, executable, executable_identity)
+
+
+def revalidate_peer(peer: PeerIdentity) -> PeerIdentity:
+    try:
+        pidfd = os.pidfd_open(peer.pid, 0)
+    except (AttributeError, OSError) as exc:
+        raise Reject("peer_pidfd_invalid") from exc
+    try:
+        executable, executable_identity = _peer_executable(peer.pid)
+        current = PeerIdentity(peer.uid, peer.gid, peer.pid, int(Path(f"/proc/{peer.pid}/stat").read_text().split()[21]), next((line.split(":", 2)[2] for line in Path(f"/proc/{peer.pid}/cgroup").read_text().splitlines() if line.startswith("0::")), ""), executable, executable_identity)
+        if current.start_time != peer.start_time:
+            raise Reject("peer_pid_reused")
+        return current
+    finally:
+        os.close(pidfd)
+
+
+class ReplayStore:
+    def __init__(self, root: Path):
+        self.root = root
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.path = root / "replay.json"
+        self.lock_path = root / "replay.lock"
+        if not self.path.exists():
+            self._atomic({"requests": {}, "jtis": {}})
+
+    def _atomic(self, value: Mapping[str, Any]) -> None:
+        fd, name = tempfile.mkstemp(prefix=".replay-", dir=self.root)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w") as handle:
+                json.dump(value, handle, sort_keys=True, separators=(",", ":"))
+                handle.flush(); os.fsync(handle.fileno())
+            os.replace(name, self.path)
+            directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+            try: os.fsync(directory)
+            finally: os.close(directory)
+        finally:
+            try: os.unlink(name)
+            except FileNotFoundError: pass
+
+    def _locked(self):
+        fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return fd
+
+    def authorize(self, key: str, jti: str, expires: int, *, now: int | None = None) -> Mapping[str, Any] | None:
+        fd = self._locked()
+        try:
+            state = strict_json(self.path.read_bytes(), max_bytes=4 * 1024 * 1024)
+            now = int(time.time()) if now is None else now
+            state["jtis"] = {k: v for k, v in state["jtis"].items() if int(v) >= now}
+            old = state["requests"].get(key)
+            if old:
+                if old["state"] == "terminal":
+                    return old
+                if old["state"] == "executing":
+                    raise Reject("replay_uncertain_execution")
+                raise Reject("request_replay")
+            if jti in state["jtis"]:
+                raise Reject("jwt_replay")
+            state["jtis"][jti] = expires
+            state["requests"][key] = {"state": "authorized", "reason_code": "authorized"}
+            self._atomic(state)
+            return None
+        finally:
+            os.close(fd)
+
+    def transition(self, key: str, new_state: str, reason_code: str = "none") -> None:
+        if new_state not in {"executing", "terminal"}:
+            raise ValueError(new_state)
+        fd = self._locked()
+        try:
+            state = strict_json(self.path.read_bytes(), max_bytes=4 * 1024 * 1024)
+            if key not in state["requests"]:
+                raise Reject("replay_state_missing")
+            state["requests"][key] = {"state": new_state, "reason_code": reason_code}
+            self._atomic(state)
+        finally:
+            os.close(fd)
+
+
+def copy_artifact_fd(fd: int, request_dir: Path, max_bytes: int) -> tuple[Path, str]:
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    st = os.fstat(fd)
+    if (flags & os.O_ACCMODE) != os.O_RDONLY or not stat.S_ISREG(st.st_mode) or st.st_nlink < 1:
+        raise Reject("artifact_descriptor_invalid")
+    request_dir.mkdir(mode=0o700)
+    target = request_dir / "artifact.zip"
+    out = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    digest = hashlib.sha256(); total = 0
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        while True:
+            chunk = os.read(fd, min(1024 * 1024, max_bytes + 1 - total))
+            if not chunk: break
+            total += len(chunk)
+            if total > max_bytes: raise Reject("artifact_size_exceeded")
+            digest.update(chunk); os.write(out, chunk)
+        os.fsync(out)
+    finally:
+        os.close(out)
+    return target, digest.hexdigest()
+
+
+def _zip_name(name: str) -> tuple[str, ...]:
+    if not name or "\\" in name or name.startswith("/") or "\x00" in name:
+        raise Reject("archive_path_invalid")
+    path = PurePosixPath(name)
+    parts = path.parts
+    if not parts or any(part in ("", ".", "..") or any(ord(c) < 0x20 for c in part) for part in parts):
+        raise Reject("archive_path_invalid")
+    return parts
+
+
+def extract_authenticated_zip(archive: Path, destination: Path, *, max_entries: int, max_bytes: int) -> Path:
+    destination.mkdir(mode=0o700)
+    seen: set[str] = set(); folded: set[str] = set(); total = 0
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            infos = zf.infolist()
+            if len(infos) > max_entries: raise Reject("archive_entry_limit")
+            for info in infos:
+                parts = _zip_name(info.filename.rstrip("/"))
+                normalized = "/".join(parts)
+                if normalized in seen or normalized.casefold() in folded:
+                    raise Reject("archive_duplicate_path")
+                seen.add(normalized); folded.add(normalized.casefold())
+                kind = (info.external_attr >> 16) & 0o170000
+                if kind not in (0, stat.S_IFREG, stat.S_IFDIR) or info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    raise Reject("archive_entry_type_invalid")
+                total += info.file_size
+                if info.file_size > max_bytes or total > max_bytes or info.compress_size == 0 and info.file_size > 0:
+                    raise Reject("archive_expansion_limit")
+                target = destination.joinpath(*parts)
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o400)
+                try:
+                    with zf.open(info) as src:
+                        copied = 0
+                        while True:
+                            chunk = src.read(1024 * 1024)
+                            if not chunk: break
+                            copied += len(chunk)
+                            if copied > info.file_size or copied > max_bytes: raise Reject("archive_expansion_limit")
+                            os.write(fd, chunk)
+                    if copied != info.file_size: raise Reject("archive_short_read")
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+    except Reject:
+        shutil.rmtree(destination, ignore_errors=True); raise
+    except (zipfile.BadZipFile, OSError) as exc:
+        shutil.rmtree(destination, ignore_errors=True); raise Reject("archive_invalid") from exc
+    for directory in sorted((path for path in destination.rglob("*") if path.is_dir()), key=lambda path: len(path.parts), reverse=True):
+        directory.chmod(0o500)
+    destination.chmod(0o500)
+    return destination
+
+
+def validate_source_argv(argv: Sequence[str]) -> None:
+    if not argv or any(not isinstance(part, str) or "\x00" in part for part in argv):
+        raise Reject("source_argv_invalid")
+    joined = " ".join(argv).casefold()
+    if any(phrase in joined for phrase in FORBIDDEN_SOURCE_PHRASES) or argv[0] in {"sh", "bash", "zsh", "sudo", "systemctl"} or any(token in joined for token in ("$(", "`", ";", "&&", "||")):
+        raise Reject("source_build_forbidden")
+
+
+def materialize_git_entries(entries: Iterable[tuple[str, str, str, bytes]], destination: Path, *, max_files: int, max_blob_bytes: int, max_total_bytes: int) -> tuple[str, int]:
+    """Materialize authenticated Git blobs without checkout, filters, or hooks."""
+    destination.mkdir(mode=0o700)
+    seen: set[str] = set(); folded: set[str] = set(); total = 0; manifest: list[dict[str, Any]] = []
+    for mode, object_type, name, content in entries:
+        parts = _zip_name(name)
+        normalized = "/".join(parts)
+        if mode not in {"100644", "100755"} or object_type != "blob" or normalized in seen or normalized.casefold() in folded:
+            raise Reject("source_tree_entry_invalid")
+        if len(seen) >= max_files or len(content) > max_blob_bytes:
+            raise Reject("source_tree_limit")
+        seen.add(normalized); folded.add(normalized.casefold()); total += len(content)
+        if total > max_total_bytes:
+            raise Reject("source_tree_limit")
+        target = destination.joinpath(*parts); target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o500 if mode == "100755" else 0o400)
+        try:
+            os.write(fd, content); os.fsync(fd)
+        finally:
+            os.close(fd)
+        blob_id = hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest()
+        manifest.append({"path": normalized, "mode": mode, "blob": blob_id, "length": len(content), "sha256": hashlib.sha256(content).hexdigest()})
+    for directory in sorted((path for path in destination.rglob("*") if path.is_dir()), key=lambda path: len(path.parts), reverse=True):
+        directory.chmod(0o500)
+    destination.chmod(0o500)
+    canonical = json.dumps(sorted(manifest, key=lambda item: item["path"].encode()), sort_keys=True, separators=(",", ":")).encode()
+    manifest_sha = hashlib.sha256(canonical).hexdigest()
+    return manifest_sha, total
+
+
+def _run_git(argv: Sequence[str], *, cwd: Path | None = None, env: Mapping[str, str] | None = None, pass_fds: Sequence[int] = (), capture: bool = False, timeout: int = 120) -> bytes:
+    validate_source_argv(argv)
+    result = subprocess.run(list(argv), cwd=cwd, env=dict(env or {}), pass_fds=tuple(pass_fds), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE if capture else subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout, check=False)
+    if result.returncode != 0:
+        raise Reject("source_git_failed")
+    return result.stdout if capture else b""
+
+
+def materialize_source_commit_live(token: str, claims: Mapping[str, Any], action: Action, request_dir: Path, worker_identity: tuple[int, int]) -> tuple[Path, str, str]:
+    repo = action.raw["repository"]; limits = action.raw.get("limits") or {}
+    uid, gid = worker_identity
+    object_dir = request_dir / "objects.git"; object_dir.mkdir(mode=0o700)
+    os.chown(object_dir, uid, gid); os.chown(request_dir, 0, gid); os.chmod(request_dir, 0o710)
+    token_buffer = bytearray(token.encode())
+    token_fd = one_use_secret_pipe(token_buffer, max_bytes=MAX_GITHUB_TOKEN)
+    askpass_fd = os.memfd_create("ken-git-askpass", os.MFD_CLOEXEC | getattr(os, "MFD_ALLOW_SEALING", 0))
+    askpass = f"#!/usr/bin/python3\nimport os,sys\np=sys.argv[1].lower() if len(sys.argv)>1 else ''\nos.write(1,b'x-access-token\\n' if 'username' in p else os.read({token_fd},4097)+b'\\n')\n".encode()
+    os.write(askpass_fd, askpass); os.fchmod(askpass_fd, 0o500); os.lseek(askpass_fd, 0, os.SEEK_SET)
+    for fd in (token_fd, askpass_fd): os.set_inheritable(fd, True)
+    pid = os.fork()
+    if pid == 0:
+        try:
+            drop_privileges(uid, gid, (token_fd, askpass_fd))
+            env = {"HOME": str(object_dir), "LANG": "C.UTF-8", "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": f"/proc/self/fd/{askpass_fd}"}
+            _run_git(["/usr/bin/git", "init", "--bare", str(object_dir)], env=env, pass_fds=(token_fd, askpass_fd))
+            url = f"https://github.com/{repo['owner']}/{repo['name']}.git"
+            _run_git(["/usr/bin/git", "-C", str(object_dir), "-c", "credential.helper=", "-c", "http.followRedirects=false", "-c", "http.proxy=", "-c", "https.proxy=", "-c", "fetch.fsckObjects=true", "fetch", "--no-tags", "--depth=1", url, claims["sha"]], env=env, pass_fds=(token_fd, askpass_fd), timeout=int(limits.get("fetch_seconds", 120)))
+            os._exit(0)
+        except BaseException:
+            os._exit(2)
+    os.close(token_fd); os.close(askpass_fd)
+    _, status = os.waitpid(pid, 0)
+    os.chown(request_dir, 0, 0); os.chmod(request_dir, 0o700)
+    if status != 0:
+        raise Reject("source_fetch_failed")
+    for path in object_dir.rglob("*"):
+        try: os.chown(path, 0, 0)
+        except FileNotFoundError: pass
+    os.chown(object_dir, 0, 0)
+    safe_env = {"HOME": "/nonexistent", "LANG": "C.UTF-8", "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+    object_format = _run_git(["/usr/bin/git", "-C", str(object_dir), "rev-parse", "--show-object-format"], env=safe_env, capture=True).decode().strip()
+    commit = _run_git(["/usr/bin/git", "-C", str(object_dir), "rev-parse", "FETCH_HEAD^{commit}"], env=safe_env, capture=True).decode().strip()
+    tree = _run_git(["/usr/bin/git", "-C", str(object_dir), "rev-parse", "FETCH_HEAD^{tree}"], env=safe_env, capture=True).decode().strip()
+    if object_format != "sha1" or commit != claims["sha"] or not SHA1.fullmatch(tree):
+        raise Reject("source_identity_mismatch")
+    _run_git(["/usr/bin/git", "-C", str(object_dir), "fsck", "--strict", "--no-reflogs", "--full"], env=safe_env, timeout=int(limits.get("fetch_seconds", 120)))
+    count_output = _run_git(["/usr/bin/git", "-C", str(object_dir), "count-objects", "-v"], env=safe_env, capture=True).decode("ascii")
+    try:
+        counts = {key: int(value) for key, value in (line.split(": ", 1) for line in count_output.splitlines() if ": " in line)}
+    except ValueError as exc:
+        raise Reject("source_object_limit") from exc
+    if counts.get("count", 0) + counts.get("in-pack", 0) > int(limits.get("objects", 250000)) or (counts.get("size", 0) + counts.get("size-pack", 0)) * 1024 > int(limits.get("pack_bytes", 1073741824)):
+        raise Reject("source_object_limit")
+    listing = _run_git(["/usr/bin/git", "-C", str(object_dir), "ls-tree", "-rz", "-r", "--full-tree", "--format=%(objectmode)%x09%(objecttype)%x09%(objectname)%x09%(path)", commit], env=safe_env, capture=True)
+    # A malicious tree must not make the root coordinator buffer an unbounded
+    # listing before the per-entry limits are evaluated.
+    max_files = int(limits.get("files", 100000))
+    if len(listing) > max_files * 1024 or listing.count(b"\0") > max_files:
+        raise Reject("source_tree_limit")
+    entries: list[tuple[str, str, str, bytes]] = []; object_ids: dict[str, str] = {}
+    materialized_total = 0
+    for record in listing.split(b"\0"):
+        if not record: continue
+        try: mode_b, type_b, oid_b, path_b = record.split(b"\t", 3); name = path_b.decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc: raise Reject("source_tree_entry_invalid") from exc
+        mode, object_type, oid = mode_b.decode(), type_b.decode(), oid_b.decode()
+        if object_type != "blob" or not SHA1.fullmatch(oid):
+            raise Reject("source_tree_entry_invalid")
+        try:
+            blob_length = int(_run_git(["/usr/bin/git", "-C", str(object_dir), "cat-file", "-s", oid], env=safe_env, capture=True).decode().strip())
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise Reject("source_tree_entry_invalid") from exc
+        if blob_length < 0 or blob_length > int(limits.get("blob_bytes", 67108864)):
+            raise Reject("source_tree_limit")
+        materialized_total += blob_length
+        if materialized_total > int(limits.get("materialized_bytes", 1073741824)):
+            raise Reject("source_tree_limit")
+        content = _run_git(["/usr/bin/git", "-C", str(object_dir), "cat-file", "blob", oid], env=safe_env, capture=True)
+        if len(content) != blob_length:
+            raise Reject("source_tree_entry_invalid")
+        entries.append((mode, object_type, name, content)); object_ids[name] = oid
+    workflow_path = repo["workflow_ref"].split("@", 1)[0].split(f"{repo['owner']}/{repo['name']}/", 1)[-1]
+    if object_ids.get(workflow_path) != repo["workflow_blob_sha"]:
+        raise Reject("source_workflow_blob_mismatch")
+    if action.input_mode == "production_build":
+        if object_ids.get("Dockerfile") != repo["dockerfile_blob_sha"] or object_ids.get("pnpm-lock.yaml") != repo["lockfile_blob_sha"]:
+            raise Reject("source_build_blob_mismatch")
+    source = request_dir / "source"
+    manifest, _ = materialize_git_entries(entries, source, max_files=max_files, max_blob_bytes=int(limits.get("blob_bytes", 67108864)), max_total_bytes=int(limits.get("materialized_bytes", 1073741824)))
+    shutil.rmtree(object_dir)
+    return source, tree, manifest
+
+
+def write_source_phase_authority(request_dir: Path, request_id: str, action: Action,
+                                 source_sha: str, tree_sha: str,
+                                 tree_manifest_sha256: str) -> Path:
+    build = action.raw.get("production_build") or {}
+    repo = action.raw.get("repository") or {}
+    object_ids = (
+        source_sha, tree_sha, repo.get("workflow_blob_sha"),
+        repo.get("dockerfile_blob_sha"), repo.get("lockfile_blob_sha"),
+    )
+    variables_manifest = build.get("variables_manifest_sha256")
+    if (action.action_id != "ken-frontend-production-release"
+            or not SAFE_REQUEST_ID.fullmatch(request_id)
+            or not all(isinstance(value, str) and SHA1.fullmatch(value) for value in object_ids)
+            or len(set(object_ids)) != len(object_ids)
+            or not SHA256.fullmatch(str(tree_manifest_sha256))
+            or not SHA256.fullmatch(str(variables_manifest or ""))
+            or repo.get("id") != 1141163204):
+        raise Reject("source_authority_invalid")
+    evidence = {
+        "repository_id": 1141163204,
+        "commit_sha": source_sha,
+        "tree_sha": tree_sha,
+        "tree_manifest_sha256": tree_manifest_sha256,
+        "workflow_blob_sha": repo["workflow_blob_sha"],
+        "dockerfile_blob_sha": repo["dockerfile_blob_sha"],
+        "lockfile_blob_sha": repo["lockfile_blob_sha"],
+        "variables_manifest_sha256": variables_manifest,
+    }
+    payload = {
+        "schema_version": 1,
+        "plan_sha256": PLAN_SHA256,
+        "receipt_contract_sha256": FRONTEND_RECEIPT_CONTRACT_SHA256,
+        "request_id": request_id,
+        "action_id": action.action_id,
+        "source_sha": source_sha,
+        "phase": "source",
+        "authority_kind": "broker-authenticated-git-object-graph",
+        "observed_monotonic_ns": time.monotonic_ns(),
+        "evidence": evidence,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    if len(encoded) > 16384:
+        raise Reject("source_authority_invalid")
+    directory = os.open(
+        request_dir,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+    )
+    name = "source.phase-authority.json"
+    fd = None
+    try:
+        info = os.fstat(directory)
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                or info.st_mode & 0o077):
+            raise Reject("source_authority_directory_invalid")
+        fd = os.open(
+            name,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            0o600, dir_fd=directory,
+        )
+        written = 0
+        while written < len(encoded):
+            count = os.write(fd, encoded[written:])
+            if type(count) is not int or count <= 0:
+                raise Reject("source_authority_write_invalid")
+            written += count
+        current = os.fstat(fd)
+        if (current.st_uid != 0 or current.st_gid != 0 or current.st_nlink != 1
+                or stat.S_IMODE(current.st_mode) != 0o600 or current.st_size != len(encoded)):
+            raise Reject("source_authority_write_invalid")
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        os.fsync(directory)
+    except Exception:
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.unlink(name, dir_fd=directory)
+            os.fsync(directory)
+        except OSError:
+            pass
+        raise
+    finally:
+        os.close(directory)
+    return request_dir / name
+
+
+def _write_transport_file(path: Path, payload: bytes, mode: int) -> None:
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), mode)
+    try:
+        view = memoryview(payload)
+        written = 0
+        while written < len(view):
+            count = os.write(fd, view[written:])
+            if type(count) is not int or count <= 0:
+                raise Reject("transport_request_write_failed")
+            written += count
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _copy_transport_descriptor(source: Path, target: Path) -> None:
+    if source.is_symlink():
+        raise Reject("transport_descriptor_invalid")
+    source_fd = os.open(source, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+    target_fd: int | None = None
+    try:
+        source_status = os.fstat(source_fd)
+        source_flags = fcntl.fcntl(source_fd, fcntl.F_GETFL)
+        if (not stat.S_ISREG(source_status.st_mode) or source_status.st_uid != os.geteuid()
+                or source_status.st_nlink != 1 or source_status.st_mode & 0o022
+                or (source_flags & os.O_ACCMODE) != os.O_RDONLY):
+            raise Reject("transport_descriptor_invalid")
+        target_fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o400)
+        while True:
+            chunk = os.read(source_fd, 1024 * 1024)
+            if not chunk:
+                break
+            written = 0
+            while written < len(chunk):
+                count = os.write(target_fd, chunk[written:])
+                if type(count) is not int or count <= 0:
+                    raise Reject("transport_descriptor_copy_failed")
+                written += count
+        os.fsync(target_fd)
+        target_status = os.fstat(target_fd)
+        if (not stat.S_ISREG(target_status.st_mode) or target_status.st_uid != os.geteuid()
+                or target_status.st_nlink != 1 or stat.S_IMODE(target_status.st_mode) != 0o400):
+            raise Reject("transport_descriptor_copy_failed")
+    finally:
+        if target_fd is not None:
+            os.close(target_fd)
+        os.close(source_fd)
+
+
+def _transport_descriptor_contract(action: Action) -> tuple[str, ...]:
+    if action.input_mode == "artifact":
+        return ("artifact", "rendered")
+    if action.input_mode == "source_commit":
+        return ("source", "rendered")
+    if action.input_mode == "registry":
+        return ("registry-state", "rendered")
+    if action.input_mode in {"trusted_generation", "production_build"}:
+        return ()
+    raise Reject("transport_mode_invalid")
+
+
+def publish_transport_request(action: Action, source_sha: str, policy_path: Path, state_root: Path,
+                              descriptor_sources: Mapping[str, Path]) -> tuple[str, Path]:
+    descriptors = _transport_descriptor_contract(action)
+    if tuple(descriptor_sources) != descriptors or not SHA1.fullmatch(str(source_sha)):
+        raise Reject("transport_descriptor_contract_invalid")
+    if policy_path.is_symlink():
+        raise Reject("transport_policy_invalid")
+    policy_status = policy_path.stat()
+    if (not stat.S_ISREG(policy_status.st_mode) or policy_status.st_uid != os.geteuid()
+            or policy_status.st_mode & 0o022 or policy_status.st_size > 2 * 1024 * 1024):
+        raise Reject("transport_policy_invalid")
+    policy_bytes = policy_path.read_bytes()
+    request_id = new_request_id()
+    if not SAFE_REQUEST_ID.fullmatch(request_id):
+        raise Reject("transport_request_id_invalid")
+    state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    requests_root = state_root / "requests"
+    requests_root.mkdir(exist_ok=True, mode=0o700)
+    for root in (state_root, requests_root):
+        root_status = root.stat()
+        if (root.is_symlink() or not stat.S_ISDIR(root_status.st_mode)
+                or root_status.st_uid != os.geteuid() or stat.S_IMODE(root_status.st_mode) != 0o700):
+            raise Reject("transport_state_root_invalid")
+    final = requests_root / request_id
+    if final.exists() or final.is_symlink():
+        raise Reject("transport_request_exists")
+    temporary = Path(tempfile.mkdtemp(prefix=f".{request_id}.", dir=requests_root))
+    os.chmod(temporary, 0o700)
+    try:
+        descriptor_root = temporary / "descriptors"
+        descriptor_root.mkdir(mode=0o700)
+        for name in descriptors:
+            if not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", name):
+                raise Reject("transport_descriptor_contract_invalid")
+            _copy_transport_descriptor(Path(descriptor_sources[name]), descriptor_root / name)
+        _write_transport_file(temporary / ".ken-actions-request", request_id.encode(), 0o600)
+        request = {
+            "version": 1,
+            "request_id": request_id,
+            "action_id": action.action_id,
+            "policy_sha256": hashlib.sha256(policy_bytes).hexdigest(),
+            "source_sha": source_sha,
+            "descriptors": list(descriptors),
+        }
+        _write_transport_file(
+            temporary / "request.json",
+            json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(),
+            0o600,
+        )
+        directory_fd = os.open(temporary, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        os.replace(temporary, final)
+        parent_fd = os.open(requests_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+        return request_id, final
+    except Exception:
+        if temporary.exists() and not temporary.is_symlink():
+            shutil.rmtree(temporary)
+        raise
+
+
+def _render_action_credentials(action: Action, request_dir: Path, credential_fd: int,
+                               network_identity: tuple[int, int]) -> Path:
+    template = action.raw.get("template")
+    if template is None:
+        raise Reject("action_template_unavailable")
+    rendered = request_dir / "rendered.env"
+    out_fd = os.open(rendered, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    os.close(out_fd)
+    network_uid, network_gid = network_identity
+    os.chown(rendered, network_uid, network_gid); os.chown(request_dir, 0, network_gid); os.chmod(request_dir, 0o710)
+    pid = os.fork()
+    if pid == 0:
+        try:
+            drop_privileges(network_uid, network_gid, (credential_fd,))
+            token = os.read(credential_fd, 4097)
+            if not token or len(token) > 4096: os._exit(2)
+            env = {"HOME": "/nonexistent", "LANG": "C.UTF-8", "PATH": "/usr/bin:/bin", "OP_SERVICE_ACCOUNT_TOKEN": token.decode()}
+            result = subprocess.run(["/usr/local/bin/op", "inject", "-f", "-i", template["path"], "-o", str(rendered)], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=False)
+            os._exit(0 if result.returncode == 0 else 2)
+        except BaseException:
+            os._exit(2)
+    _, status = os.waitpid(pid, 0)
+    os.chown(request_dir, 0, 0); os.chmod(request_dir, 0o700)
+    if status != 0: raise Reject("credential_injection_failed")
+    os.chown(rendered, 0, 0); os.chmod(rendered, 0o400)
+    return rendered
+
+
+def dispatch_reviewed_transport(action: Action, request_dir: Path, input_path: Path, claims: Mapping[str, Any],
+                                credential_fd: int, network_identity: tuple[int, int], *,
+                                policy_path: Path = TRANSPORT_POLICY_PATH,
+                                state_root: Path = TRANSPORT_STATE_ROOT,
+                                transport_path: Path = TRANSPORT_PATH) -> str:
+    descriptor_sources: dict[str, Path] = {}
+    rendered: Path | None = None
+    try:
+        if action.input_mode in {"artifact", "source_commit", "registry"}:
+            rendered = _render_action_credentials(action, request_dir, credential_fd, network_identity)
+            os.close(credential_fd)
+            credential_fd = -1
+            operation = OPERATION_BINDINGS.get(action.action_id)
+            if action.input_mode == "artifact":
+                if operation is None:
+                    raise Reject("operation_binding_missing")
+                descriptor_sources = {"artifact": input_path / operation["input"], "rendered": rendered}
+            elif action.input_mode == "source_commit":
+                descriptor_sources = {"source": input_path, "rendered": rendered}
+            else:
+                descriptor_sources = {"registry-state": input_path, "rendered": rendered}
+        else:
+            os.close(credential_fd)
+            credential_fd = -1
+        transport_request_id, _ = publish_transport_request(
+            action, str(claims.get("sha") or ""), policy_path, state_root, descriptor_sources,
+        )
+        argv = [
+            str(transport_path), "dispatch", "--request-id", transport_request_id,
+            "--state-root", str(state_root), "--policy", str(policy_path),
+        ]
+        result = subprocess.run(
+            argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env={"HOME": "/nonexistent", "LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+            check=False,
+        )
+        status_path = state_root / "transport-status" / f"{transport_request_id}.json"
+        try:
+            if status_path.is_symlink():
+                raise Reject("transport_status_invalid")
+            status_info = status_path.stat()
+            if (not stat.S_ISREG(status_info.st_mode) or status_info.st_uid != os.geteuid()
+                    or status_info.st_nlink != 1 or stat.S_IMODE(status_info.st_mode) != 0o600
+                    or status_info.st_size > 4096):
+                raise Reject("transport_status_invalid")
+            status = strict_json(status_path.read_bytes(), max_bytes=4096)
+            _require_exact_keys(status, {"version", "status", "reason_code"}, set(), "transport_status_invalid")
+            if (type(status["version"]) is not int or status["version"] != 1
+                    or result.returncode != 0 or status["status"] != "succeeded"
+                    or status["reason_code"] != "transport_succeeded"):
+                raise Reject("executor_failed")
+        except FileNotFoundError as exc:
+            raise Reject("transport_status_missing") from exc
+        finally:
+            try:
+                status_path.unlink()
+            except FileNotFoundError:
+                pass
+        return "succeeded"
+    finally:
+        if credential_fd >= 0:
+            os.close(credential_fd)
+        if rendered is not None:
+            try:
+                rendered.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def execute_fixed_action_live(action: Action, request_dir: Path, input_path: Path, claims: Mapping[str, Any], credential_fd: int, network_identity: tuple[int, int]) -> str:
+    return dispatch_reviewed_transport(action, request_dir, input_path, claims, credential_fd, network_identity)
+
+
+def recover_reviewed_transport(*, state_root: Path = TRANSPORT_STATE_ROOT,
+                               transport_path: Path = TRANSPORT_PATH) -> None:
+    result = subprocess.run(
+        [str(transport_path), "recover", "--state-root", str(state_root)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={"HOME": "/nonexistent", "LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+        timeout=TRANSPORT_STARTUP_RECOVERY_TIMEOUT_SECONDS, check=False,
+    )
+    if result.returncode != 0:
+        raise Reject("transport_recovery_failed")
+
+
+def executor_environment(values: Mapping[str, str]) -> dict[str, str]:
+    allowed = {"SOURCE_SHA", "TREE_SHA", "MANIFEST_SHA256", "IMAGE_DIGEST", "REQUEST_ID"}
+    if set(values) - allowed or any(not isinstance(v, str) or "\x00" in v for v in values.values()):
+        raise Reject("executor_environment_invalid")
+    return {"HOME": "/nonexistent", "LANG": "C.UTF-8", "PATH": "/usr/bin:/bin", **values}
+
+
+def _read_executor_fd(fd: int, maximum: int) -> bytes:
+    status = os.fstat(fd)
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1 or (flags & os.O_ACCMODE) != os.O_RDONLY:
+        raise Reject("wrapper_descriptor_invalid")
+    os.lseek(fd, 0, os.SEEK_SET)
+    value = os.read(fd, maximum + 1)
+    if not value or len(value) > maximum:
+        raise Reject("wrapper_descriptor_invalid")
+    return value
+
+
+def _parse_rendered_fields(data: bytes, expected: Sequence[str]) -> dict[str, bytes]:
+    """Parse the fixed ordered inject template while preserving multiline keys."""
+    result: dict[str, bytes] = {}
+    cursor = 0
+    for index, field in enumerate(expected):
+        prefix = (field + "=").encode()
+        if data[cursor:cursor + len(prefix)] != prefix:
+            raise Reject("wrapper_rendered_schema_invalid")
+        start = cursor + len(prefix)
+        if index + 1 < len(expected):
+            marker = ("\n" + expected[index + 1] + "=").encode()
+            end = data.find(marker, start)
+            if end < 0:
+                raise Reject("wrapper_rendered_schema_invalid")
+            cursor = end + 1
+        else:
+            end = len(data) - 1 if data.endswith(b"\n") else len(data)
+            cursor = len(data)
+        value = data[start:end]
+        if not value or b"\x00" in value or (b"\n" + field.encode() + b"=") in value:
+            raise Reject("wrapper_rendered_value_invalid")
+        result[field] = value
+    if cursor != len(data) or set(result) != set(expected):
+        raise Reject("wrapper_rendered_schema_invalid")
+    return result
+
+
+def _run_output_free(argv: Sequence[str], *, pass_fds: Sequence[int] = (), timeout: int = 120) -> None:
+    result = subprocess.run(list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            env={"HOME": "/nonexistent", "LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+                            pass_fds=tuple(pass_fds), timeout=timeout, check=False)
+    if result.returncode != 0:
+        raise Reject("wrapper_operation_failed")
+
+
+def _fixed_health_request(url: str, *, method: str = "GET", body: bytes | None = None) -> tuple[int, Mapping[str, str], bytes]:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ssl.create_default_context()), NoRedirect)
+    headers = {"User-Agent": "ken-fixed-deploy-health/1"}
+    if body is not None: headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, headers=headers, data=body, method=method)
+    try:
+        with opener.open(request, timeout=15) as response:
+            body = response.read(262145)
+            if len(body) > 262144:
+                raise Reject("wrapper_health_failed")
+            return response.status, dict(response.headers.items()), body
+    except urllib.error.HTTPError as exc:
+        return exc.code, dict(exc.headers.items()), exc.read(262145)
+    except Exception as exc:
+        raise Reject("wrapper_health_failed") from exc
+
+
+def fixed_wrapper_main(action_id: str, argv: Sequence[str]) -> int:
+    """Root-owned multicall wrapper for the two fully specified SSH actions.
+
+    Task 7 selects one fixed operation for each firewall phase. Beehiiv keeps
+    its separate trusted-generation entry point and never enters this wrapper.
+    """
+    try:
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument("--broker-action", required=True)
+        parser.add_argument("--operation", required=True)
+        parser.add_argument("--input-fd", type=int, required=True)
+        parser.add_argument("--rendered-fd", type=int, required=True)
+        args = parser.parse_args(argv)
+        if args.broker_action != action_id or action_id not in OPERATION_BINDINGS:
+            raise Reject("wrapper_action_unbound")
+        allowed_operations = {
+            "ken-vexa-mcp-auth-production-deploy": {"deploy", "health"},
+            "ken-website-production-deploy": {"deploy", "health", "separation"},
+        }
+        if args.operation not in allowed_operations[action_id]:
+            raise Reject("wrapper_operation_unbound")
+        binding = OPERATION_BINDINGS[action_id]
+        fields_by_action = {
+            "ken-vexa-mcp-auth-production-deploy": ("SERVER_HOST", "SERVER_PORT", "SERVER_SSH_KEY"),
+            "ken-website-production-deploy": ("WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"),
+        }
+        if args.operation == "deploy":
+            fields = _parse_rendered_fields(_read_executor_fd(args.rendered_fd, 65536), fields_by_action[action_id])
+            host_field, port_field, key_field = {
+                "ken-vexa-mcp-auth-production-deploy": ("SERVER_HOST", "SERVER_PORT", "SERVER_SSH_KEY"),
+                "ken-website-production-deploy": ("WEBSITE_HOST", "WEBSITE_PORT", "WEBSITE_SSH_KEY"),
+            }[action_id]
+            host = fields[host_field].decode("ascii"); port = fields[port_field].decode("ascii")
+            if not re.fullmatch(r"(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:]+\])", host):
+                raise Reject("wrapper_host_invalid")
+            if not port.isdigit() or not 1 <= int(port) <= 65535:
+                raise Reject("wrapper_port_invalid")
+            input_status = os.fstat(args.input_fd)
+            input_flags = fcntl.fcntl(args.input_fd, fcntl.F_GETFL)
+            if not stat.S_ISREG(input_status.st_mode) or input_status.st_nlink != 1 or (input_flags & os.O_ACCMODE) != os.O_RDONLY:
+                raise Reject("wrapper_input_invalid")
+            payload = f"/proc/self/fd/{args.input_fd}"
+            source_sha = os.environ.get("SOURCE_SHA", "")
+            if not SHA1.fullmatch(source_sha):
+                raise Reject("wrapper_source_sha_invalid")
+            key_fd = os.memfd_create("ken-deploy-key", os.MFD_CLOEXEC | getattr(os, "MFD_ALLOW_SEALING", 0))
+            try:
+                key = bytearray(fields[key_field])
+                os.write(key_fd, key); os.fchmod(key_fd, 0o400); os.lseek(key_fd, 0, os.SEEK_SET); os.set_inheritable(key_fd, True)
+                for index in range(len(key)): key[index] = 0
+                known_hosts = f"/etc/ken-op-broker/known_hosts/{action_id}"
+                common = ["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={known_hosts}", "-o", "ConnectTimeout=15", "-o", "ConnectionAttempts=1", "-o", "ClearAllForwardings=yes", "-i", f"/proc/self/fd/{key_fd}"]
+                target = f"{binding['user']}@{host}"; remote_dir = f"{binding['remote_root']}/{source_sha}"
+                _run_output_free(["/usr/bin/ssh", *common, "-p", port, target, f"mkdir -p -- '{remote_dir}'"], pass_fds=(key_fd,), timeout=60)
+                _run_output_free(["/usr/bin/scp", *common, "-P", port, payload, f"{target}:{remote_dir}/deploy.tar.gz"], pass_fds=(key_fd, args.input_fd), timeout=300)
+                remote_archive = f"{remote_dir}/deploy.tar.gz"
+                remote = f"status=0; sudo -- {binding['remote_program']} '{remote_archive}' || status=$?; rm -rf -- '{remote_dir}'; exit \"$status\""
+                _run_output_free(["/usr/bin/ssh", *common, "-p", port, target, remote], pass_fds=(key_fd,), timeout=600)
+            finally:
+                os.close(key_fd)
+        elif action_id == "ken-vexa-mcp-auth-production-deploy":
+            status, _, body = _fixed_health_request(binding["health"][0])
+            if status != 200 or b'"resource":"https://mcp.recordings.ken.so/mcp"' not in body:
+                raise Reject("wrapper_health_failed")
+            # The fixed public MCP endpoint must remain authentication gated.
+            status, headers, _ = _fixed_health_request(binding["health"][1], method="POST", body=b"{}")
+            challenge = next((value for key, value in headers.items() if key.casefold() == "www-authenticate"), "")
+            if status != 401 or "resource_metadata=" not in challenge:
+                raise Reject("wrapper_health_failed")
+        elif args.operation == "health":
+            checks = [_fixed_health_request(url) for url in binding["health"][:4]]
+            if any(status != 200 for status, _, _ in checks):
+                raise Reject("wrapper_health_failed")
+            pricing_type = next((value for key, value in checks[3][1].items() if key.casefold() == "content-type"), "")
+            if "text/markdown" not in pricing_type.casefold():
+                raise Reject("wrapper_health_failed")
+        else:
+            mirror = _fixed_health_request(binding["health"][4])
+            primary = _fixed_health_request(binding["health"][0])
+            if mirror[0] != 200 or primary[0] != 200:
+                raise Reject("wrapper_health_failed")
+            mirror_noindex = next((value for key, value in mirror[1].items() if key.casefold() == "x-robots-tag"), "")
+            primary_noindex = next((value for key, value in primary[1].items() if key.casefold() == "x-robots-tag"), "")
+            mirror_robots = _fixed_health_request("https://getken.ai/robots.txt")
+            sitemap_status, _, _ = _fixed_health_request("https://getken.ai/sitemap.xml")
+            primary_robots = _fixed_health_request("https://ken.so/robots.txt")
+            if ("noindex" not in mirror_noindex.casefold() or "noindex" in primary_noindex.casefold()
+                    or b"Disallow: /" not in mirror_robots[2] or b"Sitemap:" in mirror_robots[2] or sitemap_status != 404
+                    or b"Sitemap: https://ken.so/sitemap.xml" not in primary_robots[2]):
+                raise Reject("wrapper_health_failed")
+        return 0
+    except (Reject, OSError, UnicodeError, subprocess.SubprocessError, SystemExit):
+        return 1
+
+
+def one_use_secret_pipe(secret: bytearray, *, max_bytes: int = 4096) -> int:
+    if not secret or len(secret) > max_bytes or b"\x00" in secret or b"\n" in secret:
+        raise Reject("credential_token_invalid")
+    if hasattr(os, "pipe2"):
+        read_fd, write_fd = os.pipe2(os.O_CLOEXEC)
+    else:
+        read_fd, write_fd = os.pipe()
+        for fd in (read_fd, write_fd):
+            fcntl.fcntl(fd, fcntl.F_SETFD, fcntl.fcntl(fd, fcntl.F_GETFD) | fcntl.FD_CLOEXEC)
+    try:
+        view = memoryview(secret)
+        written = 0
+        while written < len(view):
+            written += os.write(write_fd, view[written:])
+    finally:
+        os.close(write_fd)
+        for index in range(len(secret)):
+            secret[index] = 0
+    return read_fd
+
+
+def drop_privileges(uid: int, gid: int, keep_fds: Iterable[int] = ()) -> None:
+    os.setgroups([])
+    os.setresgid(gid, gid, gid); os.setresuid(uid, uid, uid)
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(38, 1, 0, 0, 0) != 0:  # PR_SET_NO_NEW_PRIVS
+        raise OSError(ctypes.get_errno(), "prctl")
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    keep = {0, 1, 2, *keep_fds}
+    for fd in range(3, min(resource.getrlimit(resource.RLIMIT_NOFILE)[0], 65536)):
+        if fd not in keep:
+            try: os.close(fd)
+            except OSError: pass
+    try:
+        os.setuid(0)
+    except OSError:
+        return
+    raise Reject("privilege_regain_possible")
+
+
+@dataclasses.dataclass
+class Lease:
+    fds: list[int]
+    marker: Path | None = None
+    def release(self) -> None:
+        for fd in self.fds:
+            try: fcntl.flock(fd, fcntl.LOCK_UN); os.close(fd)
+            except OSError: pass
+        self.fds.clear()
+        if self.marker:
+            try: self.marker.unlink()
+            except FileNotFoundError: pass
+
+
+class DeployLeaseGate:
+    def __init__(self, root: Path):
+        self.root = root; root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.slots = [root / "slot-1.lock", root / "slot-2.lock"]
+        self.writer = root / "production-waiting"
+
+    def acquire(self, kind: str, request_id: str, *, block: bool) -> Lease:
+        if not SAFE_REQUEST_ID.fullmatch(request_id): raise Reject("lease_request_invalid")
+        operation = fcntl.LOCK_EX | (0 if block else fcntl.LOCK_NB)
+        if kind == "ordinary":
+            if self.writer.exists(): raise Reject("lease_exclusive_waiting")
+            for path in self.slots:
+                fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+                try:
+                    fcntl.flock(fd, operation); return Lease([fd])
+                except BlockingIOError: os.close(fd)
+            raise Reject("lease_capacity")
+        if kind != "production_build": raise Reject("lease_kind_invalid")
+        fd_marker = os.open(self.writer, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC, 0o600)
+        os.write(fd_marker, request_id.encode()); os.fsync(fd_marker); os.close(fd_marker)
+        fds: list[int] = []
+        try:
+            for path in self.slots:
+                fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+                try: fcntl.flock(fd, operation)
+                except BlockingIOError: os.close(fd); raise Reject("lease_capacity")
+                fds.append(fd)
+            return Lease(fds, self.writer)
+        except Exception:
+            Lease(fds, self.writer).release(); raise
+
+    def recover(self) -> None:
+        try: self.writer.unlink()
+        except FileNotFoundError: pass
+
+
+def new_request_id() -> str:
+    request_id = secrets.token_hex(32)
+    if not SAFE_REQUEST_ID.fullmatch(request_id):
+        raise Reject("request_id_generation_invalid")
+    return request_id
+
+
+def safe_response(request_id: str, status: str, reason_code: str) -> dict[str, Any]:
+    if not SAFE_REQUEST_ID.fullmatch(request_id):
+        raise ValueError("unsafe request ID")
+    if status not in {"accepted", "succeeded", "rejected", "failed"} or not SAFE_REASON.fullmatch(reason_code):
+        raise ValueError("unsafe response")
+    return {"version": 1, "request_id": request_id, "status": status, "reason_code": reason_code}
+
+
+def safe_log(fields: Mapping[str, Any]) -> str:
+    record = {key: value for key, value in fields.items() if key in ALLOWED_LOG_FIELDS and isinstance(value, (str, int, float, bool))}
+    record.setdefault("timestamp", dt.datetime.now(dt.timezone.utc).isoformat())
+    return json.dumps(record, sort_keys=True, separators=(",", ":"))
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise Reject("http_redirect_forbidden")
+
+
+class FixedGitHubClient:
+    def __init__(self, token: str, *, timeout: float = 5.0):
+        self.token = token; self.timeout = timeout
+        self.opener = urllib.request.build_opener(NoRedirect)
+
+    def get(self, path: str) -> Any:
+        if not path.startswith("/") or ".." in path or "?" in path or "#" in path:
+            raise Reject("github_path_invalid")
+        request = urllib.request.Request("https://api.github.com" + path, headers={"Authorization": "Bearer " + self.token, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}, method="GET")
+        try:
+            with self.opener.open(request, timeout=self.timeout) as response:
+                data = response.read(1048577)
+                if response.status != 200 or len(data) > 1048576: raise Reject("github_response_invalid")
+                return strict_json(data, max_bytes=1048576)
+        except Reject: raise
+        except Exception as exc: raise Reject("github_request_failed") from exc
+
+
+class BrokerDependencies:
+    def verify_token(self, token: str, action: Action) -> Mapping[str, Any]:
+        raise NotImplementedError
+
+    def github_get(self, token: str, path: str, action: Action) -> Mapping[str, Any]:
+        raise NotImplementedError
+
+    def materialize_source(self, token: str, claims: Mapping[str, Any], action: Action, request_dir: Path) -> tuple[Path, str, str]:
+        raise NotImplementedError
+
+    def execute(self, action: Action, request_dir: Path, input_path: Path, claims: Mapping[str, Any], credential_fd: int) -> str:
+        raise NotImplementedError
+
+
+def _worker_json(url: str, headers: Mapping[str, str], uid: int, gid: int, *, max_bytes: int = 1048576) -> Mapping[str, Any]:
+    if not url.startswith("https://"):
+        raise Reject("network_url_invalid")
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(read_fd)
+            drop_privileges(uid, gid, (write_fd,))
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ssl.create_default_context()), NoRedirect)
+            request = urllib.request.Request(url, headers=dict(headers), method="GET")
+            with opener.open(request, timeout=5) as response:
+                body = response.read(max_bytes + 1)
+                if response.status != 200 or len(body) > max_bytes:
+                    os._exit(2)
+            os.write(write_fd, body)
+            os._exit(0)
+        except BaseException:
+            os._exit(2)
+    os.close(write_fd)
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(read_fd, 65536)
+        if not chunk: break
+        chunks.append(chunk)
+        if sum(map(len, chunks)) > max_bytes: break
+    os.close(read_fd)
+    _, status = os.waitpid(pid, 0)
+    if status != 0:
+        raise Reject("network_worker_failed")
+    value = strict_json(b"".join(chunks), max_bytes=max_bytes)
+    if not isinstance(value, dict):
+        raise Reject("network_response_invalid")
+    return value
+
+
+class LiveDependencies(BrokerDependencies):
+    def __init__(self, policy: Policy, state_dir: Path):
+        self.policy = policy
+        self.cache = JwksCache(state_dir / "jwks.json")
+
+    def _identity(self, action: Action) -> tuple[int, int]:
+        boundary = self.policy.classes[action.trust_class]
+        return int(boundary.broker_network_uid), int(boundary.broker_network_gid)
+
+    def _fetch(self, action: Action, url: str, token: str = "") -> Mapping[str, Any]:
+        uid, gid = self._identity(action)
+        headers = {"Accept": "application/json", "User-Agent": "ken-op-broker/1"}
+        if token:
+            headers.update({"Authorization": "Bearer " + token, "X-GitHub-Api-Version": "2022-11-28"})
+        return _worker_json(url, headers, uid, gid)
+
+    def verify_token(self, token: str, action: Action) -> Mapping[str, Any]:
+        header = _jwt_segment_json(token.split(".")[0]) if token.count(".") == 2 else {}
+        validate_jose_header(header)
+        try:
+            jwks = self.cache.get(header["kid"])
+        except Reject as exc:
+            if exc.code != "jwks_refresh_required": raise
+            discovery = self._fetch(action, self.policy.raw["discovery_url"])
+            jwks_doc = self._fetch(action, self.policy.raw["jwks_uri"])
+            self.cache.update(discovery, jwks_doc, max_age=self.policy.raw["jwks"]["freshness_min_seconds"])
+            jwks = self.cache.get(header["kid"])
+        return decode_and_verify_jwt(token, action, jwks)
+
+    def github_get(self, token: str, path: str, action: Action) -> Mapping[str, Any]:
+        if not path.startswith("/") or ".." in path or "?" in path or "#" in path:
+            raise Reject("github_path_invalid")
+        return self._fetch(action, self.policy.raw["github_api"]["origin"] + path, token)
+
+    def materialize_source(self, token: str, claims: Mapping[str, Any], action: Action, request_dir: Path) -> tuple[Path, str, str]:
+        return materialize_source_commit_live(token, claims, action, request_dir, self._identity(action))
+
+    def execute(self, action: Action, request_dir: Path, input_path: Path, claims: Mapping[str, Any], credential_fd: int) -> str:
+        return execute_fixed_action_live(action, request_dir, input_path, claims, credential_fd, self._identity(action))
+
+
+def validate_repository_record(value: Mapping[str, Any], action: Action) -> None:
+    repo = action.raw["repository"]
+    expected = {
+        "id": repo["id"], "name": repo["name"], "full_name": f"{repo['owner']}/{repo['name']}",
+        "private": True, "visibility": "private", "default_branch": repo["default_branch"],
+    }
+    if any(value.get(key) != item for key, item in expected.items()):
+        raise Reject("live_repository_mismatch")
+    owner = value.get("owner")
+    if not isinstance(owner, dict) or owner.get("login") != repo["owner"] or owner.get("id") != repo["owner_id"]:
+        raise Reject("live_repository_mismatch")
+
+
+def validate_run_attempt(value: Mapping[str, Any], claims: Mapping[str, Any], action: Action) -> None:
+    repo = action.raw["repository"]
+    workflow_path = repo["workflow_ref"].split("@", 1)[0].split(f"{repo['owner']}/{repo['name']}/", 1)[-1]
+    expected = {
+        "id": claims["run_id"], "run_attempt": claims["run_attempt"], "head_sha": claims["sha"],
+        "event": claims["event_name"], "status": "in_progress", "head_branch": repo["default_branch"],
+        "path": workflow_path,
+    }
+    if any(value.get(key) != item for key, item in expected.items()):
+        raise Reject("live_run_mismatch")
+    for key in ("repository", "head_repository"):
+        bound = value.get(key)
+        if not isinstance(bound, dict) or bound.get("id") != repo["id"] or bound.get("full_name") != f"{repo['owner']}/{repo['name']}":
+            raise Reject("live_run_mismatch")
+
+
+def _canonical_jwk(key: Mapping[str, Any]) -> str:
+    allowed = {"kty", "use", "alg", "kid", "n", "e", "x5c", "x5t", "x5t#S256"}
+    if set(key) - allowed or key.get("kty") != "RSA" or key.get("use") not in (None, "sig") or key.get("alg") not in (None, "RS256"):
+        raise Reject("jwks_key_invalid")
+    if not all(isinstance(key.get(field), str) and key[field] for field in ("kid", "n", "e")):
+        raise Reject("jwks_key_invalid")
+    return json.dumps(key, sort_keys=True, separators=(",", ":"))
+
+
+class JwksCache:
+    """Durable same-kid-substitution-resistant OIDC key cache."""
+    def __init__(self, path: Path, *, freshness_min: int = 300, freshness_max: int = 21600):
+        self.path = path
+        self.freshness_min = freshness_min
+        self.freshness_max = freshness_max
+
+    def _read(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return {"keys": {}}
+        if self.path.is_symlink() or not stat.S_ISREG(self.path.stat().st_mode):
+            raise Reject("jwks_cache_invalid")
+        value = strict_json(self.path.read_bytes(), max_bytes=2 * 1024 * 1024)
+        if not isinstance(value, dict) or set(value) != {"keys"} or not isinstance(value["keys"], dict):
+            raise Reject("jwks_cache_invalid")
+        for entry in value["keys"].values():
+            if not isinstance(entry, dict) or set(entry) != {"jwk", "expires_at"} or not isinstance(entry["jwk"], str) or type(entry["expires_at"]) is not int:
+                raise Reject("jwks_cache_invalid")
+        return value
+
+    def update(self, discovery: Mapping[str, Any], jwks: Mapping[str, Any], *, max_age: int, now: int | None = None) -> Mapping[str, Any]:
+        if discovery.get("issuer") != "https://token.actions.githubusercontent.com" or discovery.get("jwks_uri") != "https://token.actions.githubusercontent.com/.well-known/jwks" or "RS256" not in discovery.get("id_token_signing_alg_values_supported", []):
+            raise Reject("oidc_discovery_invalid")
+        if not isinstance(jwks, dict) or set(jwks) != {"keys"} or not isinstance(jwks["keys"], list) or not jwks["keys"]:
+            raise Reject("jwks_document_invalid")
+        keys: dict[str, str] = {}
+        material: dict[str, Any] = {}
+        for key in jwks["keys"]:
+            canonical = _canonical_jwk(key)
+            kid = key["kid"]
+            if kid in keys:
+                raise Reject("jwks_duplicate_kid")
+            keys[kid] = canonical
+            material[kid] = key
+        old = self._read(); now = int(time.time()) if now is None else now
+        for kid, canonical in keys.items():
+            previous = old["keys"].get(kid)
+            if previous is not None and previous["jwk"] != canonical and previous["expires_at"] >= now:
+                raise Reject("jwks_same_kid_substitution")
+        ttl = min(self.freshness_max, max(self.freshness_min, int(max_age)))
+        merged = {kid: entry for kid, entry in old["keys"].items() if entry["expires_at"] >= now and kid not in keys}
+        merged.update({kid: {"jwk": canonical, "expires_at": now + ttl} for kid, canonical in keys.items()})
+        value = {"keys": merged}
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd, temporary = tempfile.mkstemp(prefix=".jwks-", dir=self.path.parent)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w") as handle:
+                json.dump(value, handle, sort_keys=True, separators=(",", ":")); handle.flush(); os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+            directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try: os.fsync(directory)
+            finally: os.close(directory)
+        finally:
+            try: os.unlink(temporary)
+            except FileNotFoundError: pass
+        return {"keys": list(material.values())}
+
+    def get(self, kid: str, *, now: int | None = None) -> Mapping[str, Any]:
+        state = self._read(); now = int(time.time()) if now is None else now
+        entry = state["keys"].get(kid)
+        if entry is None or entry["expires_at"] < now:
+            raise Reject("jwks_refresh_required")
+        return {"keys": [json.loads(entry["jwk"])]}
+
+
+def verify_runtime_lock(path: Path) -> None:
+    raw = _strict_yaml(path.read_text())
+    if (set(raw) != {"schema_version", "lock_version", "plan_sha256", "target", "compatibility", "runtime_contract", "components", "provenance_payloads", "installed_files", "verification"}
+            or type(raw["schema_version"]) is not int or raw["schema_version"] != 1):
+        raise Reject("runtime_lock_schema_invalid")
+    if raw["plan_sha256"] != "75715a5a3973f3ed9813e66c809d76ec1281d537afae0c08d66b02684583a658":
+        raise Reject("runtime_lock_plan_invalid")
+    _require_exact_keys(raw["target"], {"os", "architecture"}, set(), "runtime_lock_target_invalid")
+    if raw["target"] != {"os": "ubuntu-24.04", "architecture": "amd64"} or not isinstance(raw["lock_version"], str):
+        raise Reject("runtime_lock_target_invalid")
+    _require_exact_keys(raw["compatibility"], {"artifact_class", "payload_manifest_sha256", "payload_count", "corrupt_payloads_allowed", "installation_readiness", "blocking_conditions", "live_verification", "task4_consumer_contract"}, set(), "runtime_lock_compatibility_invalid")
+    compatibility = raw["compatibility"]
+    task4 = compatibility["task4_consumer_contract"]
+    _require_exact_keys(task4, {"required_guests", "bind_exact_lock_sha256", "install_network_disabled", "dependency_closure_from_signed_indexes", "guest_image_manifest_required", "offline_hash_import_abi_checks_required"}, set(), "runtime_lock_compatibility_invalid")
+    if task4 != {"required_guests":["ken-ci","ken-deploy"],"bind_exact_lock_sha256":True,"install_network_disabled":True,"dependency_closure_from_signed_indexes":True,"guest_image_manifest_required":True,"offline_hash_import_abi_checks_required":True}:
+        raise Reject("runtime_lock_compatibility_invalid")
+    for field in ("bind_exact_lock_sha256", "install_network_disabled", "dependency_closure_from_signed_indexes", "guest_image_manifest_required", "offline_hash_import_abi_checks_required"):
+        if type(task4[field]) is not bool:
+            raise Reject("runtime_lock_compatibility_invalid")
+    immutable_install_contract = (
+        compatibility["artifact_class"] == "immutable-guest-install-contract"
+        and compatibility["installation_readiness"] == "verification-required-by-task4"
+        and compatibility["blocking_conditions"] == []
+        and compatibility["live_verification"] == "task4-owned-runtime-verify-receipt"
+    )
+    if (not SHA256.fullmatch(str(compatibility["payload_manifest_sha256"]))
+            or type(compatibility["payload_count"]) is not int or compatibility["payload_count"] != 31
+            or compatibility["corrupt_payloads_allowed"] is not False or not immutable_install_contract):
+        raise Reject("runtime_lock_compatibility_invalid")
+    contract = raw["runtime_contract"]
+    _require_exact_keys(contract, {"op_path", "guest_payload_count", "remote_build_inputs", "principals", "subordinate_ids", "firewall_phase_interface", "startup_gates", "execution_transport"}, set(), "runtime_lock_contract_invalid")
+    if (contract["op_path"] != "/usr/local/bin/op" or type(contract["guest_payload_count"]) is not int or contract["guest_payload_count"] != 30
+            or contract["remote_build_inputs"] != ["node-build-base"]
+            or contract["startup_gates"] != ["ken-actions-guest-firewall.service", "ken-actions-guest-runtime-verify.service"]):
+        raise Reject("runtime_lock_contract_invalid")
+    expected_principals = {
+        ("ken-ci", "ken-op-net-ci", 22001, 22001, "system.slice", "github-control-ci"),
+        ("ken-deploy", "ken-op-net-nonprod", 22002, 22002, "ken-actions-deploy-brokers.slice", "github-control-nonproduction"),
+        ("ken-deploy", "ken-op-net-prod", 22003, 22003, "ken-actions-deploy-brokers.slice", "github-control-production"),
+        ("ken-deploy", "ken-vexa-deploy", 22101, 22101, None, "vexa-production-fixed-target"),
+        ("ken-deploy", "ken-beehiiv-generate", 22102, 22102, None, "beehiiv-api-fixed-target"),
+        ("ken-deploy", "ken-website-deploy", 22103, 22103, None, "website-production-fixed-target"),
+        ("ken-deploy", "ken-beehiiv-push", 22104, 22104, None, "github-ssh-ken-website-fixed-target"),
+        ("ken-deploy", "ken-fe-builder", 22201, 22201, None, "frontend-production-digest-deploy"),
+        ("ken-deploy", "ken-fe-uploader", 22202, 22202, None, "frontend-production-digest-deploy"),
+        ("ken-deploy", "ken-fe-deploy", 22203, 22203, None, "frontend-production-digest-deploy"),
+    }
+    principals = set()
+    for principal in contract["principals"]:
+        _require_exact_keys(principal, {"guest", "name", "uid", "gid", "slice", "network_profile"}, set(), "runtime_lock_principal_invalid")
+        _require_exact_int_fields(principal, ("uid", "gid"), "runtime_lock_principal_invalid", minimum=1)
+        principals.add((principal["guest"], principal["name"], principal["uid"], principal["gid"], principal["slice"], principal["network_profile"]))
+    if principals != expected_principals or len(contract["principals"]) != len(expected_principals):
+        raise Reject("runtime_lock_principal_invalid")
+    subordinate = contract["subordinate_ids"]
+    expected_subordinate = {"guest":"ken-deploy", "name":"ken-fe-builder", "uid":22201, "subuid_start":300000, "subuid_count":65536, "subgid_start":300000, "subgid_count":65536}
+    if subordinate != [expected_subordinate]:
+        raise Reject("runtime_lock_subordinate_id_invalid")
+    _require_exact_int_fields(subordinate[0], ("uid", "subuid_start", "subuid_count", "subgid_start", "subgid_count"), "runtime_lock_subordinate_id_invalid", minimum=1)
+    used_ids = {item[2] for item in principals} | {item[3] for item in principals} | set(range(21001, 21015))
+    for start_key, count_key in (("subuid_start", "subuid_count"), ("subgid_start", "subgid_count")):
+        start, count = expected_subordinate[start_key], expected_subordinate[count_key]
+        if count != 65536 or any(start <= value < start + count for value in used_ids):
+            raise Reject("runtime_lock_subordinate_id_invalid")
+    firewall = contract["firewall_phase_interface"]
+    _require_exact_keys(firewall, {"command", "arguments", "profile_authority", "caller_supplied_targets", "frontend_phase_ownership"}, set(), "runtime_lock_firewall_invalid")
+    expected_phase_ownership = {
+        "node-base-read": {"uid": 22201, "targets": ["node-registry", "node-registry-auth"]},
+        "package-read": {"uid": 22201, "targets": ["package-read"]},
+        "build-offline": {"uid": 22201, "targets": []},
+        "posthog-upload": {"uid": 22202, "targets": ["posthog-upload"]},
+        "ghcr-write": {"uid": 22003, "targets": ["ghcr", "ghcr-storage"]},
+        "frontend-deploy": {"uid": 22203, "targets": ["frontend-deploy"]},
+        "frontend-public-health": {"uid": 22203, "targets": ["frontend-public-health"]},
+    }
+    if firewall != {"command":["/usr/local/libexec/ken-actions-guest-firewall","phase"], "arguments":["--request-id","{request_id}","--profile","{network_profile}","--phase","{phase}","--state","{activate|deactivate}"], "profile_authority":"inventory/op-broker-policy.yaml", "caller_supplied_targets":"forbidden", "frontend_phase_ownership": expected_phase_ownership}:
+        raise Reject("runtime_lock_firewall_invalid")
+    execution_transport = contract["execution_transport"]
+    _require_exact_keys(execution_transport, {"status", "reviewed_commit_sha", "coordinator", "coordinator_sha256", "transaction_slices", "units", "bindings", "live_execution_authorized", "external_readiness"}, set(), "runtime_lock_transport_invalid")
+    if execution_transport != {
+        "status": "bound-reviewed-task7",
+        "reviewed_commit_sha": TASK7_REVIEWED_COMMIT_SHA,
+        "coordinator": str(TRANSPORT_PATH),
+        "coordinator_sha256": TASK7_ARTIFACT_SHA256[str(TRANSPORT_PATH)],
+        "transaction_slices": ["ken-actions-deploy-transaction-1.slice", "ken-actions-deploy-transaction-2.slice"],
+        "units": {
+            "ordinary_slot_1": TASK7_ARTIFACT_SHA256["/etc/systemd/system/ken-actions-deploy-transaction-1.service"],
+            "ordinary_slot_2": TASK7_ARTIFACT_SHA256["/etc/systemd/system/ken-actions-deploy-transaction-2.service"],
+            "frontend_builder": TASK7_ARTIFACT_SHA256["/etc/systemd/system/ken-frontend-production-builder@.service"],
+            "frontend_uploader": TASK7_ARTIFACT_SHA256["/etc/systemd/system/ken-frontend-source-map-uploader@.service"],
+            "frontend_deploy": TASK7_ARTIFACT_SHA256["/etc/systemd/system/ken-frontend-deploy-executor@.service"],
+        },
+        "bindings": TASK7_BINDING_SHA256,
+        "live_execution_authorized": False,
+        "external_readiness": "policy-deferred-bindings",
+    }:
+        raise Reject("runtime_lock_transport_invalid")
+    if not isinstance(raw["components"], list) or not isinstance(raw["installed_files"], list):
+        raise Reject("runtime_lock_schema_invalid")
+    ids = set()
+    component_keys = {"id", "version", "source_url", "payload_filename", "payload_sha256", "hosts"}
+    component_optional = {"payloads", "installed_files", "installed_tree", "compatibility", "verification", "deterministic_post_install_verification", "delivery_class"}
+    collected_payloads: dict[str, str] = {}
+    for component in raw["components"]:
+        _require_exact_keys(component, component_keys, component_optional, "runtime_lock_component_invalid")
+        if (component["id"] in ids or not isinstance(component["version"], str) or not component["version"]
+                or not isinstance(component["source_url"], str) or not component["source_url"].startswith("https://")
+                or not SHA256.fullmatch(str(component["payload_sha256"]))
+                or component["hosts"] not in (["ken-ci", "ken-deploy"], ["ken-deploy"])):
+            raise Reject("runtime_lock_component_invalid")
+        for payload in component.get("payloads", []):
+            _require_exact_keys(payload, {"filename", "source_url", "sha256"}, set(), "runtime_lock_payload_invalid")
+            if not payload["source_url"].startswith("https://") or not SHA256.fullmatch(str(payload["sha256"])):
+                raise Reject("runtime_lock_payload_invalid")
+        if component["id"] == "node-build-base":
+            if component.get("delivery_class") != "remote-pinned-build-input":
+                raise Reject("runtime_lock_payload_invalid")
+        else:
+            if "delivery_class" in component:
+                raise Reject("runtime_lock_payload_invalid")
+            payloads = component.get("payloads") or [{"filename":component["payload_filename"], "sha256":component["payload_sha256"]}]
+            for payload in payloads:
+                filename, digest = payload["filename"], payload["sha256"]
+                if filename in collected_payloads and collected_payloads[filename] != digest:
+                    raise Reject("runtime_lock_payload_invalid")
+                collected_payloads[filename] = digest
+        ids.add(component["id"])
+    required = {"1password-cli", "python", "pyyaml", "pyjwt", "cryptography", "ca-certificates", "git", "systemd", "zip-safety", "buildkit", "rootlesskit", "buildkit-rootless-prerequisites", "node", "corepack", "pnpm", "oci-image-tools", "node-build-base"}
+    if ids != required:
+        raise Reject("runtime_lock_component_set_invalid")
+    provenance = raw["provenance_payloads"]
+    if provenance != [{"id":"ubuntu-archive-keyring","version":"2023.11.28.1","filename":"ubuntu-keyring_2023.11.28.1_all.deb","source_url":"https://archive.ubuntu.com/ubuntu/pool/main/u/ubuntu-keyring/ubuntu-keyring_2023.11.28.1_all.deb","sha256":"36de43b15853ccae0028e9a767613770c704833f82586f28eb262f0311adb8a8","install_on_guest":False,"purpose":"verify-signed-ubuntu-package-indexes-only"}]:
+        raise Reject("runtime_lock_provenance_invalid")
+    if type(provenance[0]["install_on_guest"]) is not bool:
+        raise Reject("runtime_lock_provenance_invalid")
+    for payload in provenance:
+        if payload["filename"] in collected_payloads:
+            raise Reject("runtime_lock_payload_invalid")
+        collected_payloads[payload["filename"]] = payload["sha256"]
+    canonical_manifest = "".join(f"{collected_payloads[name]}  {name}\n" for name in sorted(collected_payloads)).encode()
+    if len(collected_payloads) != compatibility["payload_count"] or hashlib.sha256(canonical_manifest).hexdigest() != compatibility["payload_manifest_sha256"]:
+        raise Reject("runtime_lock_payload_manifest_invalid")
+    paths: set[str] = set()
+    for item in raw["installed_files"]:
+        _require_exact_keys(item, {"path", "sha256", "hosts", "source"}, set(), "runtime_lock_file_invalid")
+        if (item["path"] in paths or not item["path"].startswith("/") or not SHA256.fullmatch(str(item["sha256"]))
+                or item["hosts"] not in (["ken-ci", "ken-deploy"], ["ken-deploy"]) or not isinstance(item["source"], str) or not item["source"]):
+            raise Reject("runtime_lock_file_invalid")
+        paths.add(item["path"])
+    required_paths = {"/usr/local/bin/ken-op-exec", "/usr/local/bin/ken-op-broker", "/usr/local/bin/ken-actions-artifact-download", "/usr/local/bin/ken-frontend-production-release", "/usr/local/bin/ken-frontend-source-map-upload", "/usr/local/libexec/ken-actions/ken-vexa-mcp-auth-production-deploy", "/usr/local/libexec/ken-actions/ken-website-beehiiv-production-sync", "/usr/local/libexec/ken-actions/ken-website-production-deploy", "/usr/local/libexec/ken-actions/ken-frontend-production-release-build", "/usr/local/libexec/ken-actions/runtime-known-answer.py", *TASK7_ARTIFACT_SHA256}
+    if not required_paths <= paths:
+        raise Reject("runtime_lock_file_set_invalid")
+    unsupported_units = {"/etc/systemd/system/ken-op-executor@.service"}
+    if paths & unsupported_units:
+        raise Reject("runtime_lock_file_set_invalid")
+    locked_files = {item["path"]: item["sha256"] for item in raw["installed_files"]}
+    if any(locked_files.get(path) != digest for path, digest in TASK7_ARTIFACT_SHA256.items()):
+        raise Reject("runtime_lock_transport_file_invalid")
+    _require_exact_keys(raw["verification"], {"payload_manifest_command", "network_disabled_install", "signed_index_fingerprint", "known_answer_status", "quarantined_payloads_included"}, set(), "runtime_lock_verification_invalid")
+    if (raw["verification"]["network_disabled_install"] is not True
+            or raw["verification"]["known_answer_status"] != "required-by-task4-runtime-verify"
+            or raw["verification"]["quarantined_payloads_included"] is not False):
+        raise Reject("runtime_lock_verification_invalid")
+
+
+def self_test(policy_path: Path, runtime_lock: Path) -> None:
+    policy = load_policy(policy_path, allow_nonroot=True)
+    verify_runtime_lock(runtime_lock)
+    if "ken-website-beehiiv-production-sync" not in policy.actions:
+        raise Reject("reviewed_action_id_drift")
+    secrets_path = policy_path.parent / "secrets.yaml"
+    handoff_path = policy_path.parent / "secret-handoff.yaml"
+    # The already-reviewed immutable Task 2 artifact intentionally contains a
+    # serialization anchor; permit only that archival input while retaining
+    # duplicate-key and unsafe-tag rejection. Runtime policy/lock never do.
+    secrets_data = _strict_yaml(secrets_path.read_text(), allow_anchors=True)
+    handoff_data = _strict_yaml(handoff_path.read_text())
+    source_ids = {item["action_id"] for item in secrets_data["broker_actions"]}
+    handoff_ids = {item["action_id"] for item in handoff_data["broker_actions"]}
+    if set(policy.actions) != source_ids or source_ids != handoff_ids:
+        raise Reject("reviewed_action_id_drift")
+    if len(secrets_data["entries"]) != 343 or len(secrets_data["direct_onepassword_entries"]) != 11 or len(handoff_data["rows"]) != 308:
+        raise Reject("inventory_count_drift")
+    now = 2_000_000_000
+    for action in policy.actions.values():
+        claims = synthetic_claims_for_action(action, now); validate_claims(claims, action, now=now)
+        validate_live_job(synthetic_job_for_action(action, claims), claims, action)
+        request = {"version": 1, "action_id": action.action_id, "oidc_jwt": "a.b.c", "github_token": "token"}
+        if action.input_mode == "artifact":
+            request["artifact_id"] = 1
+            with tempfile.TemporaryDirectory() as directory:
+                artifact_path = Path(directory) / "artifact.zip"; artifact_path.write_bytes(b"fixture")
+                artifact_fd = os.open(artifact_path, os.O_RDONLY | os.O_CLOEXEC)
+                try: validate_request_for_action(request, action, [artifact_fd])
+                finally: os.close(artifact_fd)
+        else:
+            validate_request_for_action(request, action, [])
+
+
+def _request_replay_key(claims: Mapping[str, Any], action: Action, artifact_id: int | None = None) -> str:
+    values: list[Any] = [claims["repository_id"], claims["run_id"], claims["run_attempt"], claims["check_run_id"], action.action_id]
+    if action.input_mode == "artifact":
+        if type(artifact_id) is not int or artifact_id <= 0:
+            raise Reject("artifact_id_invalid")
+        values.append(artifact_id)
+    return "/".join(str(value) for value in values)
+
+
+def _request_directory(state_dir: Path, request_id: str) -> Path:
+    root = state_dir / "requests"; root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = Path(tempfile.mkdtemp(prefix=request_id + "-", dir=root)); os.chmod(path, 0o700)
+    marker = path / ".ken-broker-request"
+    fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    os.write(fd, request_id.encode()); os.fsync(fd); os.close(fd)
+    return path
+
+
+def _cleanup_request(path: Path, state_dir: Path) -> None:
+    root = (state_dir / "requests").resolve(strict=True)
+    if path.is_symlink() or not path.exists(): return
+    resolved = path.resolve(strict=True)
+    marker = resolved / ".ken-broker-request"
+    if resolved.parent != root or not marker.is_file() or marker.is_symlink():
+        raise Reject("request_cleanup_refused")
+    for directory, names, _ in os.walk(resolved):
+        os.chmod(directory, 0o700)
+    shutil.rmtree(resolved)
+
+
+def process_connection(conn: socket.socket, policy: Policy, trust_class: str, state_dir: Path, credential_fd: int, dependencies: BrokerDependencies, *, peer: PeerIdentity | None = None, revalidate: Any = revalidate_peer) -> Mapping[str, Any]:
+    request_id = new_request_id(); fds: list[int] = []; replay_key: str | None = None; replay: ReplayStore | None = None; request_dir: Path | None = None; lease: Lease | None = None; execution_credential: int | None = None; github_token: bytearray | None = None
+    try:
+        accepted_peer = peer if peer is not None else peer_from_socket(conn)
+        packet, ancillary, flags, _ = conn.recvmsg(MAX_PACKET + 1, socket.CMSG_SPACE(4 * 8))
+        if flags & (getattr(socket, "MSG_TRUNC", 0) | getattr(socket, "MSG_CTRUNC", 0)):
+            raise Reject("request_truncated")
+        for level, ctype, data in ancillary:
+            if level == socket.SOL_SOCKET and ctype == socket.SCM_RIGHTS:
+                if len(data) % struct.calcsize("i"): raise Reject("descriptor_message_invalid")
+                fds.extend(struct.unpack(f"{len(data) // 4}i", data))
+            else:
+                raise Reject("ancillary_message_invalid")
+        request = parse_request(packet)
+        github_token = bytearray(request.pop("github_token"), "ascii")
+        action = policy.actions.get(request["action_id"])
+        if action is None or action.trust_class != trust_class: raise Reject("action_not_allowed")
+        current_peer = revalidate(accepted_peer)
+        validate_peer(accepted_peer, action.runner, current_peer)
+        validate_request_for_action(request, action, fds)
+        if not action.enabled: raise Reject(action.blocked_reason_code)
+        claims = dependencies.verify_token(request.pop("oidc_jwt"), action)
+        repo = action.raw["repository"]; owner, name = repo["owner"], repo["name"]
+        repository_record = dependencies.github_get(github_token.decode("ascii"), f"/repositories/{repo['id']}", action)
+        validate_repository_record(repository_record, action)
+        run_record = dependencies.github_get(github_token.decode("ascii"), f"/repos/{owner}/{name}/actions/runs/{claims['run_id']}/attempts/{claims['run_attempt']}", action)
+        validate_run_attempt(run_record, claims, action)
+        job_record = dependencies.github_get(github_token.decode("ascii"), f"/repos/{owner}/{name}/actions/jobs/{claims['check_run_id']}", action)
+        validate_live_job(job_record, claims, action)
+        if action.input_mode in {"source_commit", "production_build", "trusted_generation"}:
+            commit_record = dependencies.github_get(github_token.decode("ascii"), f"/repos/{owner}/{name}/git/commits/{claims['sha']}", action)
+            if commit_record.get("sha") != claims["sha"] or not isinstance(commit_record.get("tree"), dict) or not SHA1.fullmatch(str(commit_record["tree"].get("sha") or "")):
+                raise Reject("source_api_commit_mismatch")
+        replay = ReplayStore(state_dir / "replay")
+        replay_key = _request_replay_key(claims, action, request.get("artifact_id"))
+        previous = replay.authorize(replay_key, claims["jti"], claims["exp"])
+        if previous is not None:
+            return safe_response(request_id, "succeeded" if previous["reason_code"] == "succeeded" else "failed", previous["reason_code"])
+        request_dir = _request_directory(state_dir, request_id)
+        if action.input_mode == "artifact":
+            metadata = dependencies.github_get(github_token.decode("ascii"), f"/repos/{owner}/{name}/actions/artifacts/{request['artifact_id']}", action)
+            api_digest = validate_artifact_metadata(metadata, claims, action)
+            archive, computed = copy_artifact_fd(fds[0], request_dir / "artifact-input", int(action.raw["artifact_input"]["max_archive_bytes"]))
+            if computed != api_digest: raise Reject("artifact_digest_mismatch")
+            input_path = extract_authenticated_zip(archive, request_dir / "input", max_entries=int(action.raw["artifact_input"]["max_entries"]), max_bytes=int(action.raw["artifact_input"]["max_extracted_bytes"]))
+            verify_artifact_manifest(input_path, claims["sha"])
+        else:
+            input_path, local_tree, local_manifest = dependencies.materialize_source(github_token.decode("ascii"), claims, action, request_dir)
+            if local_tree != commit_record["tree"]["sha"]: raise Reject("source_tree_mismatch")
+            if action.input_mode == "production_build":
+                write_source_phase_authority(
+                    request_dir, request_id, action, claims["sha"], local_tree, local_manifest,
+                )
+        replay.transition(replay_key, "executing")
+        for index in range(len(github_token)): github_token[index] = 0
+        github_token = None
+        execution_credential = os.dup(credential_fd); os.lseek(execution_credential, 0, os.SEEK_SET)
+        reason = dependencies.execute(action, request_dir, input_path, claims, execution_credential)
+        execution_credential = None  # dependency owns and closes the descriptor
+        if reason != "succeeded": raise Reject("executor_result_invalid")
+        replay.transition(replay_key, "terminal", "succeeded")
+        return safe_response(request_id, "succeeded", "succeeded")
+    except Reject as exc:
+        if replay is not None and replay_key is not None:
+            try: replay.transition(replay_key, "terminal", exc.code)
+            except Reject: pass
+        return safe_response(request_id, "rejected", exc.code)
+    finally:
+        if github_token is not None:
+            for index in range(len(github_token)): github_token[index] = 0
+        if execution_credential is not None:
+            try: os.close(execution_credential)
+            except OSError: pass
+        if lease is not None: lease.release()
+        if request_dir is not None:
+            try: _cleanup_request(request_dir, state_dir)
+            except Reject: pass
+        for fd in fds:
+            try: os.close(fd)
+            except OSError: pass
+
+
+def handle_connection(conn: socket.socket, policy: Policy, trust_class: str, state_dir: Path, credential_fd: int, dependencies: BrokerDependencies, *, peer: PeerIdentity | None = None, revalidate: Any = revalidate_peer) -> None:
+    response = process_connection(conn, policy, trust_class, state_dir, credential_fd, dependencies, peer=peer, revalidate=revalidate)
+    conn.send(json.dumps(response, separators=(",", ":")).encode())
+
+
+def serve(policy_path: Path, runtime_lock: Path, socket_path: Path, state_dir: Path, credential_dir: Path) -> int:
+    policy = load_policy(policy_path)
+    verify_runtime_lock(runtime_lock)
+    verify_runtime_assets(policy)
+    credential_fd = open_credential_source(credential_dir)
+    dependencies = LiveDependencies(policy, state_dir)
+    recover_reviewed_transport()
+    trust_class = socket_path.stem
+    if trust_class not in policy.classes: raise Reject("socket_class_invalid")
+    if os.environ.get("LISTEN_PID") == str(os.getpid()) and os.environ.get("LISTEN_FDS") == "1":
+        server = socket.fromfd(3, socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        os.close(3)
+        if server.getsockname() != str(socket_path):
+            raise Reject("socket_activation_mismatch")
+    else:
+        if socket_path.exists():
+            raise Reject("socket_path_exists")
+        socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        server.bind(str(socket_path)); os.chmod(socket_path, 0o660); server.listen(16)
+    while True:
+        conn, _ = server.accept(); conn.settimeout(5)
+        try:
+            handle_connection(conn, policy, trust_class, state_dir, credential_fd, dependencies)
+        finally:
+            try: conn.close()
+            except OSError: pass
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    executable_name = Path(sys.argv[0]).name
+    if executable_name in DIRECT_WRAPPER_ACTIONS:
+        return fixed_wrapper_main(executable_name, list(sys.argv[1:] if argv is None else argv))
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    check = sub.add_parser("self-test")
+    check.add_argument("--policy", type=Path, required=True); check.add_argument("--runtime-lock", type=Path, required=True)
+    daemon = sub.add_parser("serve")
+    daemon.add_argument("--policy", type=Path, required=True); daemon.add_argument("--runtime-lock", type=Path, required=True); daemon.add_argument("--socket", type=Path, required=True)
+    daemon.add_argument("--state-dir", type=Path, required=True); daemon.add_argument("--credential-dir", type=Path, required=True)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "self-test": self_test(args.policy, args.runtime_lock); print("BROKER_SELF_TEST_OK"); return 0
+        return serve(args.policy, args.runtime_lock, args.socket, args.state_dir, args.credential_dir)
+    except Reject as exc:
+        print(exc.code, file=sys.stderr); return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

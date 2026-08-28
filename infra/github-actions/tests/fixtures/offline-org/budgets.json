@@ -1,0 +1,7 @@
+{
+  "actions_overage_budget_usd": 0,
+  "prevent_further_usage": true,
+  "blacksmith_previous_month_usd": 130,
+  "blacksmith_previous_month_status": "unverified-planning-baseline",
+  "blacksmith_current_unbilled": "unavailable"
+}

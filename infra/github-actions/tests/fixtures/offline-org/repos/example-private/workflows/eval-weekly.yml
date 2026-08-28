@@ -1,0 +1,13 @@
+name: eval-weekly
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+jobs:
+  scoreboard:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - run: echo "${{ secrets.LANGFUSE_PUBLIC_KEY }}" >/dev/null
+        env:
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}

@@ -1,0 +1,295 @@
+schema_version: 1
+collected_at: '2026-08-19T20:13:15Z'
+input_hash: cf99f52bf11298b9228a513bede17cfb19392b6e25bf06b8c35dbb26e9e3f88b
+covered_inputs:
+- org
+- repos_index
+- repository_default_and_workflow_shas
+- environments_and_branch_policies
+- org_and_repo_secret_and_variable_names
+- runners_and_groups
+- budgets_and_plan
+- billing_evidence
+- host_evidence
+- grok_runners
+- worldstream_runners
+- onepassword_vaults
+- task6_authority_evidence
+- task6_op_env_key_metadata
+- task6_op_field_metadata
+- task6_worldstream_key_metadata
+- task6_connection_structure
+- collection_meta
+repositories:
+- name: ken-backend
+  default_branch: main
+  default_sha: f055bec4a3421de00a9de35875762d8c00e830de
+  workflows:
+  - path: .github/workflows/ci-guardrails.yml
+    sha: 729f58102507aa9c281692ba59d56888c8530923
+  - path: .github/workflows/contract-export-check.yml
+    sha: 1708390f05df610e3352b835f4319bc5258a5bd1
+  - path: .github/workflows/deploy-cloudflare-redirector.yml
+    sha: 246f47b794c7a2ca645a3773b74937825e9a377c
+  - path: .github/workflows/deploy-redirector.yml
+    sha: 53af548b272b9e0689a10179a359684911f861db
+  - path: .github/workflows/deploy-staging.yml
+    sha: 8c47c60fe5696336b37dadddc0e4e74d11432a2f
+  - path: .github/workflows/deploy.yml
+    sha: c9ea0cc50d74d95acef3412d4c3cfa4db12fc4df
+  - path: .github/workflows/grok-pr-review.yml
+    sha: e883b2207f5395fe26101b71bf5b14fe1e657709
+  - path: .github/workflows/pin-guarded-wave-tooling.yml
+    sha: d0bf9202d3694f17295d36a38be880a18628d059
+  - path: .github/workflows/production-database-ops.yml
+    sha: aa9872dd4351885d2ece4bddf993dae5784f72c5
+  - path: .github/workflows/publish-auth-api-keys.yml
+    sha: 18cd0f3384ff923e041ea060be95cc05bb009d6e
+  - path: .github/workflows/sql-migration-lint.yml
+    sha: 8f7b06c5138545d60d89cb0036a47109e9e7def8
+  - path: .github/workflows/test-cloudflare-redirector.yml
+    sha: a4bbbcb4a7a4284f44cf6c7ff7a9c6b71823d603
+  - path: .github/workflows/test-redirector-python.yml
+    sha: f7908a7b297919c26deb5305a32b0dcbd0bb8270
+- name: ken-frontend
+  default_branch: main
+  default_sha: 0952ac075f658acd1bc15a3253032507581e1f0d
+  workflows:
+  - path: .github/workflows/ci.yml
+    sha: d850b0f970650f1c1b687a627e3eefb7983503d4
+  - path: .github/workflows/deploy.yml
+    sha: 21b01bbfeb3db512a42080ea21dff5276f3fa28b
+  - path: .github/workflows/grok-pr-review.yml
+    sha: 6773376456685c10a634a670fb6e7a3d87a44c98
+  - path: .github/workflows/publish-campaign-build-prompts.yml
+    sha: 553e74034938d5256bc757935066ff526344eb2c
+- name: ken-search
+  default_branch: main
+  default_sha: bc63ca44e8f86557f76524198b34f1b0f1f740ba
+  workflows:
+  - path: .github/workflows/database-files-check.yml
+    sha: 6f58cf55c3d739c4ed0cc88561dc3e810c648369
+  - path: .github/workflows/deploy.yml
+    sha: b5727e83097648ce93ac2c3fc681c5fe9e2b46f3
+  - path: .github/workflows/grok-pr-review.yml
+    sha: 9fbfd60c6b67180c797c7b8cdf786d67c7611901
+  - path: .github/workflows/projection-mysql-tests.yml
+    sha: ab5c099b51087224eaf2ff687011ae3d1de600c4
+  - path: .github/workflows/residual-mysql-tests.yml
+    sha: fd3cf6d26ffbd878c6e01fd20988612f51d50bbf
+  - path: .github/workflows/technology-full-schedule-mysql-tests.yml
+    sha: 4cdf905501311045806781956c062c1b4325acdc
+  - path: .github/workflows/technology-refresh-mysql-tests.yml
+    sha: b2376784177e1b10add6771cda7ed8194bb6515e
+- name: ken-ai-mcp
+  default_branch: main
+  default_sha: 8334f228da6f4a89fb5d85a53ed06d0e7f4d4eab
+  workflows:
+  - path: .github/workflows/contracts-drift.yml
+    sha: d1918f9a2cd002cc6239ffb8596b86a89ece2f6a
+  - path: .github/workflows/deploy.yml
+    sha: 1bd577f40396e688aa7679c33b75ac4eb7a8d335
+  - path: .github/workflows/grok-pr-review.yml
+    sha: 9fbfd60c6b67180c797c7b8cdf786d67c7611901
+  - path: .github/workflows/tests.yml
+    sha: e07a547f6e7f7beeeba964a6c3dd606447230193
+- name: ken-agents
+  default_branch: main
+  default_sha: cd9421a175a99d88fe957f659e344326b71f940b
+  workflows:
+  - path: .github/workflows/ci.yml
+    sha: e50acb571474478a968e6b044486c94c0dedc408
+  - path: .github/workflows/deploy.yml
+    sha: 22c51d8db42968eab204f916bb6d8deccfc19868
+  - path: .github/workflows/eval-weekly.yml
+    sha: cd64a61197028e9ffe7231871b477dd25de66923
+  - path: .github/workflows/grok-pr-review.yml
+    sha: 9fbfd60c6b67180c797c7b8cdf786d67c7611901
+  - path: .github/workflows/prompt-parity.yml
+    sha: 2b304ba69c911d62f48f95ead89576490215ca30
+- name: ken-scraping
+  default_branch: main
+  default_sha: 8f991a8604a734fa7f479e86ac7fc559349efc34
+  workflows:
+  - path: .github/workflows/deploy-camoufox.yml
+    sha: 61a8ad2524f87c08717273ca86a94f37fdfc7a9f
+  - path: .github/workflows/deploy-go-service.yaml
+    sha: 835d9918f00a036ced7abbacc7a794801f5768af
+  - path: .github/workflows/deploy-image-staging.yml
+    sha: 9256b1fd4a5d8d245cf0fd55541b91581de13a03
+  - path: .github/workflows/deploy-image.yml
+    sha: e5755abaf410a1d26bd97f6a1b2dde780048ba63
+  - path: .github/workflows/deploy-nuq-postgres.yml
+    sha: 52330ce56962886ee3093326cb7c9f33132a8913
+  - path: .github/workflows/deploy-ovh.yml
+    sha: be38a89fe60211b884333803291fb54547a4e711
+  - path: .github/workflows/deploy-playwright.yml
+    sha: f977abcce82565e676a5cef860a727615c739357
+  - path: .github/workflows/deploy-redis.yml
+    sha: 731a1d7ddd8ead43340b8ff7135641b5a87f00a6
+  - path: .github/workflows/eval-prod.yml
+    sha: 365f9dc7a5dd261004fb0721851e8a419a75e2e8
+  - path: .github/workflows/ghcr-clean.yml
+    sha: 05ca0ab57d5b0c2dd27e589ccf64cd948b9add57
+  - path: .github/workflows/grok-pr-review.yml
+    sha: 7249b9b0fab8aed24f0cff0517171d90746b2793
+  - path: .github/workflows/lint-workflows.yml
+    sha: c94f2c015eaa4cad7acf6eef09dcc289b4d0f68a
+  - path: .github/workflows/npm-audit.yml
+    sha: 30ddfb8c810f00939e203eb2f4883d549925e71c
+  - path: .github/workflows/publish-dotnet-sdk.yml
+    sha: 0e54011ed8fca53cabb23bee215da629caae9380
+  - path: .github/workflows/publish-elixir-sdk.yml
+    sha: d099619f75554cb2658519fb8e9645d4bec884b2
+  - path: .github/workflows/publish-go-sdk.yml
+    sha: 6de933edde1171d02e4e45789d36bb0365a9f86d
+  - path: .github/workflows/publish-java-sdk.yml
+    sha: af9819a81b34d22ec5ddae97c439a54d22970359
+  - path: .github/workflows/publish-js-sdk.yml
+    sha: 3838674b2d44450298c65131cc518ff725c9e774
+  - path: .github/workflows/publish-php-sdk.yml
+    sha: 31fe77c6adc3f8a1d42442eec7910d9081b6879a
+  - path: .github/workflows/publish-python-sdk.yml
+    sha: 1e2e589ab3dbd1b28373ef0f2234ac31743900a2
+  - path: .github/workflows/publish-ruby-sdk.yml
+    sha: 43248d5cfb4b6420344d7792d393f7f98ea06c82
+  - path: .github/workflows/publish-rust-sdk.yml
+    sha: b2f586a4c86e676588a11766a1442eb3f50fa382
+  - path: .github/workflows/scrape-evals.yml
+    sha: c043b88023df60f0525b767aa4a2837a1cbd740d
+  - path: .github/workflows/test-dotnet-sdk.yml
+    sha: 646bff0e380d5fc5e4f8fd3e5c18c07e135740e6
+  - path: .github/workflows/test-go-sdk.yml
+    sha: bbeafa166cf5a4e83dc384331ddad7bafd830596
+  - path: .github/workflows/test-java-sdk.yml
+    sha: 0de8783927d315e191257556e93721e54d039c43
+  - path: .github/workflows/test-js-sdk.yml
+    sha: 7b73a869d4eb61d9072c26227865b4bdcb353b61
+  - path: .github/workflows/test-php-sdk.yml
+    sha: 687adbd82fcd7fe7a765818e34da430990e5ddc2
+  - path: .github/workflows/test-ruby-sdk.yml
+    sha: 7a26621e31975821c549e84fa56e1096c7bdf18f
+  - path: .github/workflows/test-rust-sdk.yml
+    sha: c1a3194167e9f204c85801c21bd545588a59d609
+  - path: .github/workflows/test-server.yml
+    sha: 2002b926bd5cbb1c0f1822e8c20d741d6f71dce3
+  - path: .github/workflows/validate-lockfiles.yml
+    sha: 2637821c84ad5d7a8737094c8e817ccfa902d966
+- name: ken-plugins
+  default_branch: main
+  default_sha: 26b9d9f521c711ad168febf61f08832155ace355
+  workflows: []
+- name: ken-brain
+  default_branch: main
+  default_sha: f1aebc6c88957df6ae61dddc6799d84dd42cb241
+  workflows:
+  - path: .github/workflows/ci.yml
+    sha: 77528ac602540cc2ba0fa87711d5fc9fcb87ca41
+- name: ken-website
+  default_branch: main
+  default_sha: e554db05eafbb8f0aaea67714c43255bca610dd8
+  workflows:
+  - path: .github/workflows/beehiiv-sync.yml
+    sha: c7f6d5eeaab5079c953d4be317e550c7728246dc
+  - path: .github/workflows/deploy.yml
+    sha: 0445aa8004483c644ce3e4143e46758322b00a05
+- name: client-system
+  default_branch: main
+  default_sha: fbc58247f00254876a908352d5f2ac1eb4fef62f
+  workflows: []
+- name: ken-hermes-clickup
+  default_branch: main
+  default_sha: 751028fa9eb65920c5588996234cab99482a71e0
+  workflows:
+  - path: .github/workflows/ci.yml
+    sha: 53e6e8e16c1d8f74be0bdf3cb51cc6a1d80e741a
+  - path: .github/workflows/deploy.yml
+    sha: 7618ad04a811a7bf637de7258db22548c2eec42f
+- name: ken-help
+  default_branch: main
+  default_sha: cc1586f7f8e52762502750dbde68a445596a0898
+  workflows:
+  - path: .github/workflows/ci.yml
+    sha: 8f72405c5f07982fd5d38bf9da24c54e8f4325ff
+- name: ken-daily
+  default_branch: main
+  default_sha: f27ab878ca53c9acd6a83c7a4c3aa0117037596b
+  workflows:
+  - path: .github/workflows/ci.yml
+    sha: 5c94d942d43d610954cd3c27cfd6b7de5dca5b1f
+  - path: .github/workflows/deploy.yml
+    sha: 6c070082a17015fe59ca6d4d22dea29ebb26bce0
+- name: ken-automations
+  default_branch: main
+  default_sha: 81d4f5fd279fa314c70fdf22c4b9c23afa6f3ce4
+  workflows: []
+- name: ken-analytics
+  default_branch: main
+  default_sha: c88b85e101bd6b0b74e3330019b43093911834d8
+  workflows:
+  - path: .github/workflows/ci.yml
+    sha: 235d91d02e82bbfa894a7dd63997356905d3cbdb
+  - path: .github/workflows/deploy-production.yml
+    sha: d0d9d0c015b677fb6a1973f481747d4d4b72cae2
+- name: gtm
+  default_branch: main
+  default_sha: 272e1788f8ffd721f07b6aff0ede09fe26bf8fbb
+  workflows: []
+- name: ken-ai-public-mcp
+  default_branch: main
+  default_sha: df0dd6120d1b3bc32aad69ad11e8d414cf203c86
+  workflows:
+  - path: .github/workflows/deploy.yml
+    sha: 7116a151650a9ba7635563a80fed8eee90916eb1
+- name: ken-email-deliverability-dashboard
+  default_branch: main
+  default_sha: 97678badbd37fb4a0d9119da218717b93fba06ce
+  workflows: []
+- name: ken-ai-plugin
+  default_branch: main
+  default_sha: 62ab880db28eaffcc05931c21f81fb137deb2781
+  workflows:
+  - path: .github/workflows/check-mcp-urls.yml
+    sha: 41786c4089f0befa1622f3f323405883cf106341
+  - path: .github/workflows/publish-cold-email-skills.yml
+    sha: a91bcb783f19adb836e0316f25eda91a662bd71c
+- name: Ken-SRE
+  default_branch: main
+  default_sha: 61622aa518666c30db703acb939cd4ab7f58d128
+  workflows:
+  - path: .github/workflows/build-web.yml
+    sha: 5e7ab2477eaaf8f578df786e1f7e061d02195967
+  - path: .github/workflows/close-issue.yml
+    sha: 128f63ae246759b9f9da3cac3754e94d9e3be752
+  - path: .github/workflows/homebrew.yml
+    sha: 9e54d37edc3eab6aa49735171f9812da4a7599ab
+  - path: .github/workflows/pr-labeler.yml
+    sha: 66f919a1a977c338a5ad1074414b17859203a459
+  - path: .github/workflows/python-publish.yml
+    sha: 35b1d87a88d2ac9d73b4cc01f0af43b99b8863c9
+  - path: .github/workflows/release-drafter.yml
+    sha: 019a91b71b8938b3ef31702d229d883bad466d38
+- name: ken-vexa-mcp-auth
+  default_branch: main
+  default_sha: 10abbdfc68349ee01a6050412888cabc9a025f74
+  workflows:
+  - path: .github/workflows/deploy.yml
+    sha: c438d1d4c4a08fc2fb7f2544038f0bdcaaf8d79e
+- name: ken-cms
+  default_branch: main
+  default_sha: 3aee469137a5f7675c4d9b6dda2b07a87e12d54e
+  workflows:
+  - path: .github/workflows/deploy.yml
+    sha: 5e793af332b981a4777edd867305b3ac2f6055d0
+- name: dev-workstation
+  default_branch: main
+  default_sha: 3a726954e04e38a4aec18f6807dabc4b74eb3747
+  workflows: []
+- name: cold-email-skills
+  default_branch: main
+  default_sha: 162983c13042324b1919848ff0c3952eb19e01cc
+  workflows: []
+- name: ken-ai-optimizer
+  default_branch: main
+  default_sha: 034b947e8ef09a8c5f44324dbe1d36d61eb69eb1
+  workflows: []

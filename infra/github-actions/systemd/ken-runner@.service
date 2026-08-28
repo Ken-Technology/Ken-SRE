@@ -1,0 +1,45 @@
+[Unit]
+Description=Ken GitHub Actions runner %i
+Requires=ken-actions-guest-firewall.service
+Requires=ken-actions-guest-runtime-verify.service
+After=network-online.target
+After=ken-actions-guest-firewall.service
+After=ken-actions-guest-runtime-verify.service
+Wants=network-online.target
+ConditionPathExists=/etc/ken-runners/%i.ready
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+WorkingDirectory=/var/lib/ken-runners/%i/runner
+Environment=HOME=/var/lib/ken-runners/%i/home
+Environment=RUNNER_TOOL_CACHE=/var/lib/ken-runners/%i/runner/_tool
+Environment=RUNNER_UID=invalid
+ExecStartPre=+/usr/local/libexec/ken-runner-cleanup recover %i ${RUNNER_UID}
+ExecStartPre=+/usr/local/libexec/ken-runner-cleanup assert-clean %i ${RUNNER_UID}
+ExecStartPre=+/usr/local/libexec/ken-runner-cleanup mark-dirty %i ${RUNNER_UID}
+ExecStart=/var/lib/ken-runners/%i/runner/run.sh --once
+ExecStopPost=+/usr/local/libexec/ken-runner-cleanup cleanup %i ${RUNNER_UID}
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=90
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/ken-runners/%i/home
+ReadWritePaths=/var/lib/ken-runners/%i/runner/_diag
+ReadWritePaths=/var/lib/ken-runners/%i/runner/_tool
+ReadWritePaths=/var/lib/ken-runners/%i/work
+ReadWritePaths=/var/lib/ken-runner-state
+
+[Install]
+WantedBy=multi-user.target

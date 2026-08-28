@@ -1,0 +1,45 @@
+[Unit]
+Description=Ken Actions deploy-only artifact CONNECT proxy
+Requires=ken-actions-vm-firewall.service
+After=network-online.target ken-actions-vm-firewall.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ken-actions-proxy
+Group=ken-actions-proxy
+ExecStartPre=+/usr/local/sbin/ken-actions-vm-authority-verify --verify-host-authority proxy
+ExecStartPre=/usr/sbin/squid -z -f /etc/ken-actions/ken-actions-artifact-proxy-deploy.conf
+ExecStart=/usr/sbin/squid -N -f /etc/ken-actions/ken-actions-artifact-proxy-deploy.conf
+ExecReload=/usr/sbin/squid -k reconfigure -f /etc/ken-actions/ken-actions-artifact-proxy-deploy.conf
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=ken-actions-artifact-proxy
+RuntimeDirectoryMode=0700
+StateDirectory=ken-actions-artifact-proxy
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+MemoryMax=256M
+MemorySwapMax=0
+TasksMax=128
+ReadWritePaths=/run/ken-actions-artifact-proxy /var/lib/ken-actions-artifact-proxy
+
+[Install]
+WantedBy=multi-user.target

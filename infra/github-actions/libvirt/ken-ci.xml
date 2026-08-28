@@ -1,0 +1,55 @@
+<domain type='kvm'>
+  <name>ken-ci</name>
+  <memory unit='KiB'>117440512</memory>
+  <currentMemory unit='KiB'>117440512</currentMemory>
+  <vcpu placement='static'>32</vcpu>
+  <cpu mode='host-passthrough' check='none' migratable='off'/>
+  <resource>
+    <partition>/machine/ken-actions</partition>
+  </resource>
+  <metadata>
+    <ken:vm-contract xmlns:ken='urn:ken-actions:v1' disk-capacity-gib='750' image-customization-network='disabled'/>
+  </metadata>
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <boot dev='hd'/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+  <clock offset='utc'/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2' cache='none' discard='unmap'/>
+      <source file='/mnt/data/libvirt/images/ken-ci.qcow2'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='/mnt/data/libvirt/seed/ken-ci-seed.img'/>
+      <target dev='sda' bus='sata'/>
+      <readonly/>
+    </disk>
+    <interface type='network'>
+      <source network='ken-ci-net'/>
+      <model type='virtio'/>
+    </interface>
+    <serial type='pty'/>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+    </channel>
+    <input type='tablet' bus='usb'/>
+    <graphics type='none'/>
+    <memballoon model='virtio'/>
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
+  </devices>
+</domain>

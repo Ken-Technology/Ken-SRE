@@ -1,0 +1,11 @@
+[Unit]
+Description=Exclusive boundary for the Ken frontend production builder
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+TasksAccounting=true
+CPUQuota=300%
+MemoryMax=8G
+MemorySwapMax=0
+TasksMax=1024

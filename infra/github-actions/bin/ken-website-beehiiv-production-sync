@@ -1,0 +1,9 @@
+#!/usr/bin/python3
+"""Fail-closed Beehiiv executor pending a reviewed generation contract."""
+import os
+import sys
+
+BLOCKER = "beehiiv_sync_generation_and_transaction_transport_required"
+if os.path.basename(sys.argv[0]) != "ken-website-beehiiv-production-sync":
+    raise SystemExit(78)
+raise SystemExit(78)

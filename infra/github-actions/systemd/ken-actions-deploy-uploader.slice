@@ -1,0 +1,11 @@
+[Unit]
+Description=Boundary for the post-build source-map uploader
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+TasksAccounting=true
+CPUQuota=50%
+MemoryMax=512M
+MemorySwapMax=0
+TasksMax=128

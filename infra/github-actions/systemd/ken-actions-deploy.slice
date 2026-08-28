@@ -1,0 +1,11 @@
+[Unit]
+Description=Aggregate boundary for every Ken deployment Actions workload
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+TasksAccounting=true
+CPUQuota=350%
+MemoryMax=10G
+MemorySwapMax=0
+TasksMax=2048

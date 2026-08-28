@@ -1,0 +1,15 @@
+{
+  "mongo_connection_present": true,
+  "mongo_database_component_present": true,
+  "mysql_components": [
+    "database",
+    "password",
+    "server",
+    "user"
+  ],
+  "schema_version": 1,
+  "host": "185.183.35.189",
+  "scoped_user": "qa",
+  "file": "/var/www/scraper.api/appsettings.Production.json",
+  "collection_policy": "Connection component names and presence booleans only; no values, hashes, lengths, or prefixes."
+}

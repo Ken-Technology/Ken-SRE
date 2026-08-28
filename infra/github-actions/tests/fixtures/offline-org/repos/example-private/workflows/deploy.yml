@@ -1,0 +1,16 @@
+name: deploy
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    environment: Preprod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+      - run: dotnet publish src/App.csproj -c Release
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,28 @@
+name: deploy-production
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          if [ -f docker-compose.yml ]; then echo has_stack=true; fi
+          echo Validate repository config
+  deploy:
+    needs: validate
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+  no_stack_yet:
+    needs: validate
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - run: echo skip until stack exists

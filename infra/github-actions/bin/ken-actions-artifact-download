@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Download one GitHub artifact to a caller-owned open descriptor.
+
+The API origin, repository, deploy proxy, redirect grammar, method, and limits
+are compiled in. The helper never emits the redirect URL or response body.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import ssl
+import stat
+import sys
+from typing import Mapping, Sequence
+import urllib.error
+import urllib.parse
+import urllib.request
+
+BLOB_HOST = re.compile(r"^[a-z0-9]{3,24}\.blob\.core\.windows\.net$")
+PROXY = "http://192.168.211.1:3128"
+REPOSITORIES = {
+    "ken-vexa-mcp-auth-production-deploy": "Ken-Technology/ken-vexa-mcp-auth",
+    "ken-website-production-deploy": "Ken-Technology/ken-website",
+}
+MAX_BYTES = 2 * 1024 * 1024 * 1024
+TIMEOUT_SECONDS = 120
+
+
+class DownloadError(Exception):
+    pass
+
+
+def valid_blob_host(host: str | None) -> bool:
+    return bool(host and BLOB_HOST.fullmatch(host) and host == host.lower())
+
+
+def cross_host_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    return {key: value for key, value in headers.items() if key.casefold() not in {"authorization", "cookie", "proxy-authorization"}}
+
+
+class CaptureRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if code not in (301, 302, 303, 307, 308):
+            raise DownloadError("redirect_code_invalid")
+        raise DownloadError("redirect:" + newurl)
+
+
+def _read_to_fd(response, output_fd: int, max_bytes: int) -> int:
+    total = 0
+    while True:
+        chunk = response.read(min(1024 * 1024, max_bytes + 1 - total))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise DownloadError("artifact_size_exceeded")
+        os.write(output_fd, chunk)
+    os.fsync(output_fd)
+    os.lseek(output_fd, 0, os.SEEK_SET)
+    return total
+
+
+def download(action_id: str, artifact_id: int, token: str, output_fd: int, *, max_bytes: int = MAX_BYTES) -> int:
+    repository = REPOSITORIES.get(action_id)
+    if repository is None or artifact_id <= 0 or not token or len(token) > 4096:
+        raise DownloadError("request_invalid")
+    flags = __import__("fcntl").fcntl(output_fd, __import__("fcntl").F_GETFL)
+    output_stat = os.fstat(output_fd)
+    if flags & os.O_ACCMODE == os.O_RDONLY or not stat.S_ISREG(output_stat.st_mode) or output_stat.st_nlink != 1 or os.lseek(output_fd, 0, os.SEEK_CUR) != 0:
+        raise DownloadError("output_descriptor_not_writable")
+    api_url = f"https://api.github.com/repos/{repository}/actions/artifacts/{artifact_id}/zip"
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "ken-actions-artifact-download/1"}
+    direct = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ssl.create_default_context()), CaptureRedirect)
+    try:
+        direct.open(urllib.request.Request(api_url, headers=headers, method="GET"), timeout=10)
+        raise DownloadError("api_redirect_missing")
+    except DownloadError as exc:
+        if not str(exc).startswith("redirect:"):
+            raise
+        location = str(exc)[len("redirect:"):]
+    except Exception as exc:
+        raise DownloadError("api_request_failed") from exc
+    parsed = urllib.parse.urlsplit(location)
+    if parsed.scheme != "https" or parsed.port not in (None, 443) or not valid_blob_host(parsed.hostname) or parsed.username or parsed.password or parsed.fragment:
+        raise DownloadError("blob_redirect_invalid")
+    if any(ord(char) < 0x20 for char in location) or len(location) > 8192:
+        raise DownloadError("blob_redirect_invalid")
+    proxy = urllib.request.build_opener(urllib.request.ProxyHandler({"https": PROXY}), urllib.request.HTTPSHandler(context=ssl.create_default_context()), CaptureRedirect)
+    request = urllib.request.Request(location, headers=cross_host_headers(headers), method="GET")
+    try:
+        with proxy.open(request, timeout=TIMEOUT_SECONDS) as response:
+            if response.status != 200:
+                raise DownloadError("blob_response_invalid")
+            return _read_to_fd(response, output_fd, max_bytes)
+    except DownloadError:
+        raise
+    except Exception as exc:
+        raise DownloadError("blob_request_failed") from exc
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--action-id", required=True, choices=sorted(REPOSITORIES))
+    parser.add_argument("--artifact-id", required=True, type=int)
+    parser.add_argument("--token-fd", required=True, type=int)
+    parser.add_argument("--output-fd", required=True, type=int)
+    parser.add_argument("--max-bytes", type=int, default=MAX_BYTES)
+    args = parser.parse_args(argv)
+    try:
+        token = os.read(args.token_fd, 4097).decode()
+        if len(token) > 4096:
+            raise DownloadError("token_too_large")
+        download(args.action_id, args.artifact_id, token, args.output_fd, max_bytes=args.max_bytes)
+        return 0
+    except (DownloadError, UnicodeDecodeError):
+        return 1
+    finally:
+        try: os.close(args.token_fd)
+        except OSError: pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

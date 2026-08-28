@@ -1,0 +1,11 @@
+[Unit]
+Description=Aggregate boundary for Ken deployment brokers and coordinators
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+TasksAccounting=true
+CPUQuota=25%
+MemoryMax=768M
+MemorySwapMax=0
+TasksMax=128

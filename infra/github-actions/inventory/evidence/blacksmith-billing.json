@@ -1,0 +1,14 @@
+{
+  "previous_month": {
+    "amount_usd": 130,
+    "source": "task-2-brief planning baseline; Blacksmith UI invoice was not captured in this collection",
+    "captured_at": "2026-08-19T16:05:06Z",
+    "status": "unverified-planning-baseline"
+  },
+  "current_unbilled": {
+    "amount_usd": null,
+    "source": null,
+    "captured_at": "2026-08-19T16:27:01Z",
+    "status": "unavailable"
+  }
+}

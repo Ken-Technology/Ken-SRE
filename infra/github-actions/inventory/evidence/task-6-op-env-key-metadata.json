@@ -1,0 +1,1015 @@
+{
+  "schema_version": 1,
+  "collection_policy": "1Password item JSON streamed through value-blind parser; only environment left-hand names, declared type, and presence are retained.",
+  "items": [
+    {
+      "item": "client-system-env",
+      "keys": [
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_API_TOKEN",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_CLIENT_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_CLIENT_SECRET",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_REDIRECT_URI",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CSM_EMAIL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DATABASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "EMAILBISON_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "EMAILBISON_API_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "EMAILBISON_MASTER_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "EMAILBISON_MASTER_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "FIRECRAWL_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "FIREFLIES_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "GMAIL_CREDENTIALS_PATH",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "GRANOLA_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_AI_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_API_BASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_DATABASE",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_HOST",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_PASSWORD",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_PORT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_USER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "LOG_LEVEL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "SYNC_SERVER_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_BASE_URL",
+          "value_present": true
+        }
+      ],
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "item": "gtm-env",
+      "keys": [
+        {
+          "declared_type": "environment-string",
+          "name": "BEEHIIV_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "BEEHIIV_PUBLICATION_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "BREVO_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CAL_COM_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "FINDYMAIL_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "FIRECRAWL_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "FIREFLIES_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "GOOGLE_CREDENTIALS_PATH",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "GOOGLE_TOKEN_PATH",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "LEADMAGIC_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "METRICOOL_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "PLAYWRIGHT_BROWSER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "PROSPEO_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "RAPID_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_BASE_URL",
+          "value_present": true
+        }
+      ],
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "item": "ken-agents-env",
+      "keys": [
+        {
+          "declared_type": "environment-string",
+          "name": "DATABASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DEEPSEEK_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_AI_ADMIN_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_AI_MCP_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "LANGFUSE_BASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "LANGFUSE_PUBLIC_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "LANGFUSE_SECRET_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "MOONSHOT_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "ZAI_API_KEY",
+          "value_present": true
+        }
+      ],
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "item": "ken-automations-env",
+      "keys": [
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_ALERT_CHANNEL_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_API_TOKEN",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_CS_CHAT_CHANNEL_ID",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_MEETING_TASK_LIST_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_TASK_CONFIDENCE_THRESHOLD",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_TASK_LIST_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_TASK_MODEL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLICKUP_WORKSPACE_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DEEPSEEK_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_CLICKUP_CHANNEL_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_ENABLED",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_LIVE_CREATE_ENABLED",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_MONITOR_POLL_SECONDS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_PURGE_AT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_RAMP_LEAD_HOURS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_RAMP_POLL_SECONDS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_RDAP_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_REDEMPTION_EXPIRES_AT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_STRIKE_AFTER_HOURS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_STRIKE_POLL_SECONDS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_STRIKE_START_MINUTES",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_TARGET_DOMAIN",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DOMAIN_WATCH_YEARS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "EMAIL_TAGGING_BACKFILL_DAYS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "EMAIL_TAGGING_BATCH_SIZE",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "EMAIL_TAGGING_MODEL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "FIREWORKS_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "FIREWORKS_BASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "FIREWORKS_MODEL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "GMAIL_IMPERSONATE_USER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "GOOGLE_SERVICE_ACCOUNT_JSON",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "INTERNAL_EMAIL_DOMAINS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_AI_SYNC_BATCH_SIZE",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_API_BASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_BACKEND_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_BACKEND_BASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MONGO_CONNECTION_STRING",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MONGO_DATABASE",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_DATABASE",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_HOST",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_PASSWORD",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_PORT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_SSH_HOST",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_SSH_PORT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_SSH_PRIVATE_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_SSH_USER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_MYSQL_USER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "MEETING_CLICKUP_BACKFILL_DAYS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "MEETING_CLICKUP_BATCH_LIMIT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "MEETING_SUMMARY_MODEL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "MEETING_SYNC_INITIAL_BACKFILL_DAYS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_API_KEY",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_API_USER",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CLIENT_IP",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_ADDRESS1",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_ADDRESS2",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_CITY",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_COUNTRY",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_EMAIL_ADDRESS",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_FIRST_NAME",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_JOB_TITLE",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_LAST_NAME",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_ORGANIZATION_NAME",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_PHONE",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_POSTAL_CODE",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_CONTACT_STATE_PROVINCE",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_SANDBOX",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NAMECHEAP_USERNAME",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEON_AUTOMATIONS_RW_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEON_DATABASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEON_OWNER_DATABASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEON_READONLY_DATABASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TRIGGER_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TRIGGER_PROJECT_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TRIGGER_SECRET_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_API_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_KEN_COMPANY_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_PG_DATABASE",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_PG_HOST",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_PG_PASSWORD",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_PG_PORT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_PG_USER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_SSH_HOST",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_SSH_PORT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_SSH_PRIVATE_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_SSH_USER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_SYNC_BATCH_SIZE",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_WEBHOOK_SECRET",
+          "value_present": false
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "TWENTY_WORKSPACE_SCHEMA",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_PG_DATABASE",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_PG_HOST",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_PG_PASSWORD",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_PG_PORT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_PG_USER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_SSH_HOST",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_SSH_PORT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_SSH_PRIVATE_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_SSH_USER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "VEXA_SYNC_LOOKBACK_DAYS",
+          "value_present": true
+        }
+      ],
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "item": "ken-cms-env",
+      "keys": [
+        {
+          "declared_type": "environment-string",
+          "name": "CMS_REVALIDATE_SECRET",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DATABASE_URI",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_WEBSITE_DIR",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "PAYLOAD_PUBLIC_SERVER_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "PAYLOAD_SECRET",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "WEBSITE_REVALIDATE_URL",
+          "value_present": false
+        }
+      ],
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "item": "ken-frontend-env",
+      "keys": [
+        {
+          "declared_type": "environment-string",
+          "name": "APP_ORIGINS",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "BACKEND_API_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "CLERK_SECRET_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "DEEPSEEK_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_AI_ADMIN_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_AI_MCP_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "KEN_SEARCH_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "LANGFUSE_BASE_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "LANGFUSE_PUBLIC_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "LANGFUSE_SECRET_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "MOONSHOT_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEXT_PUBLIC_CLERK_SIGN_IN_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEXT_PUBLIC_CLERK_SIGN_UP_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEXT_PUBLIC_SENTRY_DISABLED",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEXT_PUBLIC_SENTRY_DSN",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEXT_PUBLIC_SENTRY_ORG",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "NEXT_PUBLIC_SENTRY_PROJECT",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "ONBOARDING_PREFILL_INTERNAL_TOKEN",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "SENTRY_AUTH_TOKEN",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "ZAI_API_KEY",
+          "value_present": true
+        }
+      ],
+      "schema_version": 1,
+      "vault": "Development"
+    },
+    {
+      "item": "ken-search-env",
+      "keys": [
+        {
+          "declared_type": "environment-string",
+          "name": "AWS_ACCESS_KEY_ID",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "AWS_REGION",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "ES_API_KEY",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "ES_URL",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "INGESTION_S3_BUCKET",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "MYSQL_DATABASE",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "MYSQL_USER",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "PROD_SSH_HOST",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "PROD_SSH_PASSWORD",
+          "value_present": true
+        },
+        {
+          "declared_type": "environment-string",
+          "name": "PROD_SSH_USER",
+          "value_present": true
+        }
+      ],
+      "schema_version": 1,
+      "vault": "Development"
+    }
+  ]
+}

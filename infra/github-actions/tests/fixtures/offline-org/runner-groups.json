@@ -1,0 +1,7 @@
+{
+  "total_count": 2,
+  "runner_groups": [
+    { "id": 1, "name": "Default", "visibility": "all", "default": true, "runners_count": 0 },
+    { "id": 3, "name": "Blacksmith runners fixture", "visibility": "all", "default": false, "runners_count": 2 }
+  ]
+}

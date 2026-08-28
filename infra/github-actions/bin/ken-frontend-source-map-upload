@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Descriptor-only PostHog source-map uploader for the frontend release."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import ssl
+import sys
+from typing import Sequence
+import urllib.parse
+import urllib.request
+
+
+def validate_endpoint(value: str) -> None:
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme != "https" or parsed.hostname != "us.posthog.com" or parsed.port not in (None, 443) or parsed.username or parsed.password or parsed.fragment or not parsed.path.startswith("/api/projects/"):
+        raise ValueError("endpoint_invalid")
+
+
+def upload(endpoint: str, archive_fd: int, key_fd: int, project_fd: int, max_bytes: int) -> None:
+    validate_endpoint(endpoint)
+    key = os.read(key_fd, 4097).decode()
+    project = os.read(project_fd, 257).decode()
+    if not key or len(key) > 4096 or not project or len(project) > 256 or not project.isdigit():
+        raise ValueError("credential_invalid")
+    body = bytearray()
+    while True:
+        chunk = os.read(archive_fd, min(1024 * 1024, max_bytes + 1 - len(body)))
+        if not chunk: break
+        body.extend(chunk)
+        if len(body) > max_bytes: raise ValueError("archive_too_large")
+    request = urllib.request.Request(endpoint, data=bytes(body), headers={"Authorization": "Bearer " + key, "Content-Type": "application/zip", "X-PostHog-Project-Id": project}, method="POST")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+    with opener.open(request, timeout=60) as response:
+        if response.status not in (200, 201, 204): raise ValueError("upload_failed")
+        response.read(4097)
+    for index in range(len(body)): body[index] = 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--endpoint", required=True)
+    parser.add_argument("--archive-fd", type=int, required=True)
+    parser.add_argument("--key-fd", type=int, required=True)
+    parser.add_argument("--project-fd", type=int, required=True)
+    parser.add_argument("--max-bytes", type=int, default=536870912)
+    args = parser.parse_args(argv)
+    try:
+        upload(args.endpoint, args.archive_fd, args.key_fd, args.project_fd, args.max_bytes)
+        return 0
+    except Exception:
+        return 1
+    finally:
+        for fd in (args.archive_fd, args.key_fd, args.project_fd):
+            try: os.close(fd)
+            except OSError: pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

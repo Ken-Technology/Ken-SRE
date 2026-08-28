@@ -1,0 +1,12 @@
+name: contracts-drift
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+jobs:
+  drift-check:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - env:
+          KEN_BACKEND_READ_TOKEN: ${{ secrets.KEN_BACKEND_READ_TOKEN }}
+        run: echo compare live backend contracts

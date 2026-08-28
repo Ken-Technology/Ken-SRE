@@ -1,0 +1,24 @@
+{
+  "count": 6,
+  "class": "existing-grok-review",
+  "labels": ["self-hosted", "grok-review"],
+  "unchanged": true,
+  "host": "devws",
+  "snapshot_time": "2026-08-19T15:58:16Z",
+  "names": [
+    "hetzner-grok-review-ken-agents",
+    "hetzner-grok-review-ken-ai-mcp",
+    "hetzner-grok-review-ken-backend",
+    "hetzner-grok-review-ken-frontend",
+    "hetzner-grok-review-ken-scraping",
+    "hetzner-grok-review-ken-search"
+  ],
+  "units": [
+    "actions.runner.Ken-Technology-ken-agents.hetzner-grok-review-ken-agents.service",
+    "actions.runner.Ken-Technology-ken-ai-mcp.hetzner-grok-review-ken-ai-mcp.service",
+    "actions.runner.Ken-Technology-ken-backend.hetzner-grok-review-ken-backend.service",
+    "actions.runner.Ken-Technology-ken-frontend.hetzner-grok-review-ken-frontend.service",
+    "actions.runner.Ken-Technology-ken-scraping.hetzner-grok-review-ken-scraping.service",
+    "actions.runner.Ken-Technology-ken-search.hetzner-grok-review-ken-search.service"
+  ]
+}

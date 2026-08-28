@@ -1,0 +1,7 @@
+#!/usr/bin/python3
+"""Action-specific fixed Vexa deployment executor."""
+import importlib.machinery
+import sys
+
+broker = importlib.machinery.SourceFileLoader("ken_fixed_broker", "/usr/local/bin/ken-op-broker").load_module()
+raise SystemExit(broker.fixed_wrapper_main("ken-vexa-mcp-auth-production-deploy", sys.argv[1:]))
