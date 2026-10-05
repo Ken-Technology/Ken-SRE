@@ -4175,14 +4175,14 @@ def generate_from_inputs(
         grok = {
             "count": 6,
             "class": "existing-grok-review",
-            "labels": ["self-hosted", "grok-review"],
+            "labels": ["self-hosted", "grok-review-lsw"],
             "names": [
-                "hetzner-grok-review-ken-agents",
-                "hetzner-grok-review-ken-ai-mcp",
-                "hetzner-grok-review-ken-backend",
-                "hetzner-grok-review-ken-frontend",
-                "hetzner-grok-review-ken-scraping",
-                "hetzner-grok-review-ken-search",
+                "lsw-grok-review-ken-agents",
+                "lsw-grok-review-ken-ai-mcp",
+                "lsw-grok-review-ken-backend",
+                "lsw-grok-review-ken-frontend",
+                "lsw-grok-review-ken-scraping",
+                "lsw-grok-review-ken-search",
             ],
             "unchanged": True,
         }

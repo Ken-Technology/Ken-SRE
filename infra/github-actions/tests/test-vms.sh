@@ -378,6 +378,8 @@ expect_failure 'wrong live target is rejected locally' 'target must be root@167.
   env PATH="${fake_bin}:/usr/bin:/bin" bash "${PROVISION}" --dry-run root@192.0.2.10
 expect_failure 'live apply is blocked before SSH' 'missing-single-stop-production-target-readback' \
   env PATH="${fake_bin}:/usr/bin:/bin" bash "${PROVISION}" root@167.235.8.250
+expect_failure 'retired host refuses the real SSH apply transport' 'live VM apply is retired' \
+  env -u PROVISION_VMS_SSH_BIN PATH="${fake_bin}:/usr/bin:/bin" bash "${PROVISION}" --apply-ready /nonexistent /nonexistent /nonexistent /nonexistent /nonexistent root@167.235.8.250
 
 echo '== authority mutation rejection =='
 copy_ga_for_mutation() {

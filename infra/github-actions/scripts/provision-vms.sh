@@ -3467,6 +3467,9 @@ apply_ready() {
   local manifest="$1" lock="$2" policy="$3" build_root="$4" approval="$5" target="$6"
   local ssh_bin="${PROVISION_VMS_SSH_BIN:-ssh}" response stage_id stage_dir transport_root
   [[ "${target}" == "${APPROVED_TARGET}" ]] || die "target must be ${APPROVED_TARGET}"
+  # The approved target (Hetzner devws) was canceled in 2026-10 and no
+  # replacement host is approved. Only the hermetic fake transport runs.
+  [[ -n "${PROVISION_VMS_SSH_BIN:-}" ]] || die "live VM apply is retired: ${APPROVED_TARGET} (Hetzner devws) was canceled and no replacement host is approved"
   validate_apply_ready "${manifest}" "${lock}" "${policy}" "${build_root}" "${approval}"
   validate_runtime_authority "${manifest}" "${lock}" "${policy}" >/dev/null
   stage_id="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "${manifest}")"
