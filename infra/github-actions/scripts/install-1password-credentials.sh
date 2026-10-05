@@ -20,6 +20,9 @@ usage() {
   usage >&2
   exit 2
 }
+# The approved host (Hetzner devws) was canceled in 2026-10 and no replacement
+# host is approved for broker credentials. Refuse before reading any token.
+die "${APPROVED_HOST} (Hetzner devws) was canceled and no replacement host is approved"
 [[ -r /dev/tty && -w /dev/tty ]] || die '/dev/tty is unavailable'
 
 old_tty=''

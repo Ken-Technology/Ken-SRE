@@ -1997,6 +1997,8 @@ text = Path(sys.argv[1]).read_text()
 required = ["/dev/tty", "stty -echo", "systemd-creds encrypt", "--interactive-all", "root@167.235.8.250", "/usr/local/bin/op", "ken-op-ci.token", "ken-op-nonproduction.token", "ken-op-production.token"]
 assert all(x in text for x in required)
 assert not re.search(r"--token|OP_SERVICE_ACCOUNT_TOKEN=\$|echo .*token|set -x|source ", text, re.I)
+retired = text.index("was canceled and no replacement host is approved")
+assert retired < text.index("[[ -r /dev/tty") and retired < text.index("stty -echo")
 PY
 
 run_check 'supported systemd units encode credentials, sockets, gates, limits, and hardening' \

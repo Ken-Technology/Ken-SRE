@@ -790,6 +790,18 @@ SH
   expect_failure no-kvm "/dev/kvm is not ready"
   expect_failure grok-unhealthy "all 6 Grok runners"
 
+  echo "== retired host transport =="
+  set +e
+  output="$(env -u PROVISION_HOST_SSH_BIN PATH="${fake_bin}:/usr/bin:/bin" bash "${HOST_PROVISION}" --dry-run root@167.235.8.250 2>&1)"
+  status=$?
+  set -e
+  if (( status != 0 )) && grep -Fq "live host provisioning is retired" <<<"${output}" && ! grep -Fq "Read-only preflight" <<<"${output}"; then
+    pass "retired host refuses the real SSH transport"
+  else
+    fail "retired host did not refuse the real SSH transport"
+    printf '%s\n' "${output}"
+  fi
+
   echo "== host storage and network safety =="
   reset_fixture
   ln -s "${escape_root}" "${data_root}/libvirt"

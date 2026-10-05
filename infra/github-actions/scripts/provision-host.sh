@@ -989,6 +989,9 @@ fi
 }
 target="$1"
 [[ "${target}" == "${APPROVED_TARGET}" ]] || die "target must be ${APPROVED_TARGET}"
+# The approved target (Hetzner devws) was canceled in 2026-10 and no replacement
+# host is approved for this libvirt plan. Only the hermetic fake transport runs.
+[[ -n "${PROVISION_HOST_SSH_BIN:-}" ]] || die "live host provisioning is retired: ${APPROVED_TARGET} (Hetzner devws) was canceled and no replacement host is approved"
 
 if [[ -n "${rollback_state}" ]]; then
   rollback_report="$(run_remote "${target}" rollback "${rollback_state}")"

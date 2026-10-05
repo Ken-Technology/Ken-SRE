@@ -2,15 +2,32 @@
 
 This directory holds the inventory, host setup, runner configuration, and cutover records for Ken's self-hosted GitHub Actions platform.
 
-## Live host gate
+## Retired host: Hetzner devws
+
+The Hetzner server `167.235.8.250` (SSH alias and Tailscale name `devws`) was canceled in October 2026 and is offline. Tasks 4 to 6 below (host provisioning, the libvirt VM platform, the offline runner platform, and broker credential installation) were designed for that host and pinned to it. None of them was applied live. There is no equivalent on the Leaseweb boxes, so they now refuse every live run:
+
+- `provision-host.sh` and `provision-vms.sh --apply-ready` refuse the real SSH transport. Only the hermetic fake transport used by the tests runs.
+- `install-1password-credentials.sh` refuses before it reads any token.
+- `register-runners.sh` and `verify-platform.sh` were already offline-only.
+- `systemd/ken-actions-vms.service` was never installed. It still names the Hetzner-only dependencies (Elasticsearch, `mnt-devws.mount`, the `hetzner-grok-review-*` units).
+
+The `167.235.8.250` pin stays in these files because the offline tests exercise it. The sections below are kept as the design record. Do not run their live commands.
+
+Current hosts: the Leaseweb dev/CI box (SSH alias `dev`) runs the org runners `lsw-dev-ci-*` (labels `ken-ci-lsw`, `ken-ci-lsw-heavy`, `ken-ci-lsw-light`), the containerized `lsw-ci-iso-*` runners (`ken-ci-lsw-isolated`), and the six repo-level `lsw-grok-review-*` runners (`grok-review-lsw`). Search moved to a separate Leaseweb box.
+
+Read live runner state with `gh api orgs/Ken-Technology/actions/runners --paginate` and `ssh dev 'systemctl list-units "actions.runner*" --no-pager'`.
+
+The generated inventory (`repositories.yaml`, `runners.yaml`, `secrets.yaml`, `secret-handoff.yaml`, `canonical-credentials.yaml`, `input-manifest.yaml`) is the 2026-08-19 audit snapshot, and its tests pin it by hash. It still records `devws` and the Hetzner Grok runners as they were then. It is refreshed by a new live run of `scripts/audit-workflows.sh`, not by hand edits.
+
+## Live host gate (retired host)
 
 The fresh root-filesystem readback found about 165 GiB free after the Grok process owner cleaned its transient worktrees. Treat that number as dated evidence. Always run the live preflight immediately before apply. `provision-host.sh` requires at least 25 GiB free on `/` before it opens the SSH apply phase, so a later drop in free space stops the run before `apt-get update` or package installation.
 
 The script reports root consumers and an `apt-get -s autoremove` simulation during preflight. It does not delete logs, caches, containers, volumes, application data, runner data, or user files. If the live gate fails again, root-disk remediation needs a separate readback and approval.
 
-## Host provisioning
+## Host provisioning (retired host)
 
-The only accepted target is `root@167.235.8.250`.
+The only accepted target was `root@167.235.8.250`, which is now canceled. The script refuses the real SSH transport. The commands below are the original design record.
 
 Run the focused tests first:
 
